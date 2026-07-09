@@ -261,8 +261,19 @@ function _prepararIdsE2B_(idCaso, caso) {
 function _formatarDataE2B_(valor) {
   if (!valor) return '';
   let d;
+  // Campos gravados como TIMESTAMP no Firestore voltam como Date (ver
+  // fsDeValorFs_). Um valor "só-data" persistido assim fica à meia-noite UTC
+  // (ex.: new Date('2000-01-01') = 2000-01-01T00:00:00Z); formatá-lo no fuso
+  // local (UTC-3) o jogava para o dia ANTERIOR (20000101 → 19991231),
+  // corrompendo D.2.1/E.i.4/G.k.4.r.4/D.9.1 em um dia. Detecta a meia-noite
+  // UTC exata e formata em UTC nesse caso; timestamps reais (hora ≠ 00:00:00Z,
+  // ex.: dataNotificacao) seguem no fuso local, onde o dia-calendário local
+  // é o correto.
+  let dateOnlyUTC = false;
   if (valor instanceof Date) {
     d = valor;
+    dateOnlyUTC = (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 &&
+                   d.getUTCSeconds() === 0 && d.getUTCMilliseconds() === 0);
   } else {
     const s = String(valor).trim();
     const m1 = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
@@ -272,13 +283,46 @@ function _formatarDataE2B_(valor) {
     else         d = new Date(s);
   }
   if (isNaN(d)) return '';
-  const tz = Session.getScriptTimeZone();
+  const tz = dateOnlyUTC ? 'GMT' : Session.getScriptTimeZone();
   return Utilities.formatDate(d, tz, 'yyyyMMdd');
 }
 
 /** 'YYYYMMDDHHMMSS' para o momento atual — usado em creationTime/effectiveTime. */
 function _agoraE2B_() {
   return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMddHHmmss');
+}
+
+/**
+ * Normaliza a dose para um número decimal com ponto (formato PQ/UCUM do E2B),
+ * interpretando as convenções numéricas BR de forma determinística:
+ *   "2,5"      → "2.5"    (vírgula = decimal)
+ *   "5.000"    → "5000"   (ponto agrupando 3 dígitos = separador de milhar)
+ *   "1.000.000"→ "1000000"
+ *   "1.000,5"  → "1000.5" (ponto = milhar, vírgula = decimal)
+ *   "2.5"      → "2.5"    (ponto isolado sem grupo de milhar = decimal)
+ * Evita o value="5.000" (≈5, 1000× menor) e o "1.000.5" (dois pontos → inválido)
+ * que o strip simples anterior produzia. Só o campo de dose usa este helper.
+ */
+function _normalizarDoseE2B_(bruto) {
+  let s = String(bruto == null ? '' : bruto).trim();
+  if (!s) return '';
+
+  const temVirgula = s.indexOf(',') !== -1;
+  const temPonto   = s.indexOf('.') !== -1;
+
+  if (temVirgula && temPonto) {
+    // Convenção BR: ponto = milhar, vírgula = decimal.
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (temVirgula) {
+    // Só vírgula → decimal.
+    s = s.replace(',', '.');
+  } else if (temPonto && /^\d{1,3}(\.\d{3})+$/.test(s)) {
+    // Só ponto(s), agrupando exatamente 3 dígitos → separador de milhar.
+    s = s.replace(/\./g, '');
+  }
+  // Demais casos (ex.: "2.5") mantêm o ponto como decimal.
+
+  return s.replace(/[^0-9.]/g, '');
 }
 
 /**
@@ -474,6 +518,14 @@ function _montarXmlE2B_(caso, usuario, config) {
   const agora = _agoraE2B_();
   const nomeSender = _dividirNome_(usuario.nome);
 
+  // safetyReportId entra em atributos @extension de <id>. É derivado do idCaso
+  // ('BR-HRN-' + idCaso), que — ao contrário dos nós de texto livre — não
+  // passava por escape; um idCaso com caractere XML-especial (& < ") tornaria
+  // o documento inteiro mal-formado e rejeitado. idReacaoE2B/idMedicamentoE2B
+  // são UUIDs (sempre seguros), não precisam de escape. O nome do arquivo
+  // (gerarXmlE2B) segue usando o valor cru, não a versão escapada.
+  const safetyIdXml = escaparHtml_(String(caso.safetyReportIdE2B || ''));
+
   const gravidadeCriterios = SCHEMA.E2B.GRAVIDADE_MAP[String(caso.gravidade).toUpperCase()];
 
   // C.2.r.4 Qualificação — sistema é uso exclusivo da Farmácia: sempre Farmacêutico(a).
@@ -526,11 +578,15 @@ function _montarXmlE2B_(caso, usuario, config) {
   // D.5 Sexo — mapeia valor livre vindo do ETL; sem match cai em nullFlavor="UNK" (ver abaixo).
   const codigoSexo = SCHEMA.E2B.SEXO_MAP[String(caso.sexo || '').toUpperCase()] || null;
 
-  // E.i.7 Desfecho — codelist oficial ICH CL11 (…2.1.1.11): 1 Recovered,
-  // 2 Recovering, 3 Not recovered, 4 Recovered w/ sequelae, 5 Fatal,
-  // 0 Unknown. Fallback '0' (o comentário antigo do Schema.gs dizia '6' —
-  // NÃO existe '6' na CL11, confirmado no IG_Complete_Package).
-  const codigoDesfecho = SCHEMA.E2B.DESFECHO_MAP[String(caso.desfecho || '').toUpperCase()] || '0';
+  // E.i.7 Desfecho — codelist oficial ICH CL11 (…2.1.1.11): 1 Recovered/resolved,
+  // 2 Recovering/resolving, 3 Not recovered/not resolved, 4 Recovered w/ sequelae,
+  // 5 Fatal, 6 Unknown. NÃO existe '0' nessa codelist — usá-lo torna o E.i.7
+  // (obrigatório 1..1) inválido e o VigiMed rejeita o relatório. Fallback correto
+  // é '6' (Unknown), coerente com Schema.gs (DESFECHO_MAP) e com o aviso ao
+  // farmacêutico em _validarCasoParaE2B_. Desfechos do dropdown ainda não
+  // mapeados (ex.: "ALTA", "PROLONGADO INTERNAÇÃO") caem aqui como Desconhecido —
+  // se quiser semântica específica, adicione-os em SCHEMA.E2B.DESFECHO_MAP.
+  const codigoDesfecho = SCHEMA.E2B.DESFECHO_MAP[String(caso.desfecho || '').toUpperCase()] || '6';
 
   // F0-01 — G.k.9.i.4 Reexposição. 0..1: sem match (campo vazio ou "Sim"/"Não"
   // fora do vocabulário do dropdown), o bloco correspondente é omitido no XML.
@@ -570,11 +626,11 @@ function _montarXmlE2B_(caso, usuario, config) {
   const viaOuForma    = escaparHtml_(String(caso.viaAdministracao || 'NAO INFORMADO').toUpperCase());
   // CORREÇÃO: dose com vírgula decimal BR ("2,5") era mutilada pelo strip
   // antigo (/[^0-9.]/) → "25" — dose 10× maior num relatório REGULATÓRIO.
-  // Normaliza vírgula→ponto antes de limpar. (Não usar separador de milhar
-  // no campo de dose — "1.000,5" continua ambíguo em qualquer convenção.)
-  const dose          = String(caso.doseMedicamento || '')
-                          .replace(/,/g, '.')
-                          .replace(/[^0-9.]/g, '');
+  // O strip anterior também mantinha o PONTO usado como separador de MILHAR:
+  // "5.000" (5000 UI, convenção BR) virava value="5.000" ≈ 5 (1000× menor) e
+  // "1.000,5" virava "1.000.5" (dois pontos → PQ inválido). _normalizarDoseE2B_
+  // resolve as convenções BR de forma determinística (ver helper).
+  const dose          = _normalizarDoseE2B_(caso.doseMedicamento);
   const doseUnidade   = escaparHtml_(String(caso.doseUnidade || '').toLowerCase()) || 'mg';
   const lote          = escaparHtml_(String(caso.lote || '').toUpperCase());
   // F0-09 — G.k.3.3 Nome do detentor/fabricante.
@@ -926,13 +982,13 @@ function _montarXmlE2B_(caso, usuario, config) {
   return (
 '<?xml version="1.0" encoding="UTF-8"?>\n' +
 '<MCCI_IN200100UV01 ITSVersion="XML_1.0" xsi:schemaLocation="urn:hl7-org:v3 MCCI_IN200100UV01.xsd" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n' +
-'  <id extension="' + caso.safetyReportIdE2B + '-BATCH" root="2.16.840.1.113883.3.989.2.1.3.22"/>\n' +
+'  <id extension="' + safetyIdXml + '-BATCH" root="2.16.840.1.113883.3.989.2.1.3.22"/>\n' +
 '  <creationTime value="' + agora + '"/>\n' +
 '  <responseModeCode code="D"/>\n' +
 '  <interactionId extension="MCCI_IN200100UV01" root="2.16.840.1.113883.1.6"/>\n' +
 '  <name code="1" codeSystem="' + SCHEMA.E2B.CODESYS.TIPO_RELATO + '"/>\n' +
 '  <PORR_IN049016UV>\n' +
-'    <id extension="' + caso.safetyReportIdE2B + '" root="2.16.840.1.113883.3.989.2.1.3.1"/>\n' +
+'    <id extension="' + safetyIdXml + '" root="2.16.840.1.113883.3.989.2.1.3.1"/>\n' +
 '    <creationTime value="' + agora + '"/>\n' +
 '    <interactionId extension="PORR_IN049016UV" root="2.16.840.1.113883.1.6"/>\n' +
 '    <processingCode code="P"/>\n' +
@@ -953,8 +1009,8 @@ function _montarXmlE2B_(caso, usuario, config) {
 '      <effectiveTime value="' + agora + '"/>\n' +
 '      <subject typeCode="SUBJ">\n' +
 '        <investigationEvent classCode="INVSTG" moodCode="EVN">\n' +
-'          <id extension="' + caso.safetyReportIdE2B + '" root="2.16.840.1.113883.3.989.2.1.3.1"/>\n' +
-'          <id extension="' + caso.safetyReportIdE2B + '" root="2.16.840.1.113883.3.989.2.1.3.2"/>\n' +
+'          <id extension="' + safetyIdXml + '" root="2.16.840.1.113883.3.989.2.1.3.1"/>\n' +
+'          <id extension="' + safetyIdXml + '" root="2.16.840.1.113883.3.989.2.1.3.2"/>\n' +
 '          <code code="PAT_ADV_EVNT" codeSystem="2.16.840.1.113883.5.4"/>\n' +
 '          <text>' + narrativa + '</text>\n' +
 '          <statusCode code="active"/>\n' +
