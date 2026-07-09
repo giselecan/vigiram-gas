@@ -6,12 +6,13 @@
  * handleUploadRaw NÃO MUDA — grava arquivo bruto no Drive, nunca tocou
  * Sheets/Firestore.
  *
- * handleGetTriggers NÃO MUDA — continua lendo DB_Antidotos do Sheets.
- * Essa aba (lista de medicamentos-gatilho) NÃO faz parte do escopo de
- * dados sensíveis/operacionais migrados (não tem PII de paciente, é
- * baixíssimo volume e baixa frequência de leitura pelo robô). Migrar
- * essa aba específica é opcional e de baixo risco — pode ser feito depois
- * se desejado, sem pressa.
+ * handleGetTriggers (Fase 9 — Firestore como Single Source of Truth):
+ * agora lê EXCLUSIVAMENTE da coleção Firestore SCHEMA.FS.GATILHOS — não
+ * toca mais em DB_Antidotos (Sheets). Essa é a única rota GET pública
+ * consumida pelo robô PowerShell a cada execução do pipeline, então uma
+ * falha momentânea do Firestore não pode parar a operação crítica do
+ * hospital: envolvida em try/catch, com um array HARDCODED de fallback
+ * (ver _GATILHOS_FALLBACK_HARDCODED) usado só quando o Firestore falha.
  *
  * DEDUPLICAÇÃO: a versão Sheets lia toda a planilha pra montar um Set de
  * IDs existentes antes de inserir (O(n) de leitura). Na versão Firestore,
@@ -97,7 +98,7 @@ function handleInsertDB(e) {
 
       // Espelho síncrono no Sheets — sem reler o Firestore (objeto já em memória)
       // Se falhar, vai para fila de retry (processarFilaEspelho, trigger 5 min)
-      espelharCasoNoSheets_(idLimpo, objetoCaso, 'INSERT');
+      espelharCasoNoSheets_(idLimpo, objetoCaso, 'CRIACAO');
 
       inseridos++;
 
@@ -121,23 +122,45 @@ function handleInsertDB(e) {
 
     return createJsonResponse({ status: 'sucesso', inseridos: inseridos });
   } catch (erro) {
-    return createJsonResponse({ status: 'erro', mensagem: erro.message });
+    // Resposta montada ANTES do log best-effort — nunca atrasa/bloqueia o
+    // retorno ao robô PowerShell.
+    const resposta = createJsonResponse({ status: 'erro', mensagem: erro.message });
+    try { fsRegistrarLog_('ERRO_INSERTDB', 'N/A', erro.message); } catch (e) { /* ignora */ }
+    return resposta;
   }
 }
 
 /**
- * Retorna a lista de gatilhos (DB_Antidotos) para o robô PowerShell.
- * INALTERADO — continua lendo do Sheets. Ver nota no cabeçalho do arquivo.
+ * Fallback de ÚLTIMA INSTÂNCIA — usado SOMENTE quando o Firestore falha ao
+ * responder handleGetTriggers(). Mantém o robô PowerShell operante (não gera
+ * alertas de RAM para NENHUM medicamento seria pior que gerar com uma lista
+ * desatualizada). Ajuste esta lista para refletir os medicamentos-gatilho
+ * realmente monitorados pela farmácia — ela não é lida em nenhum outro lugar,
+ * só existe para não parar o ETL em caso de indisponibilidade momentânea.
+ */
+const _GATILHOS_FALLBACK_HARDCODED = [
+  'VANCOMICINA', 'GENTAMICINA', 'AMICACINA', 'DIGOXINA',
+  'VARFARINA', 'INSULINA', 'HEPARINA', 'AMIODARONA'
+];
+
+/**
+ * Retorna a lista de gatilhos (medicamentos monitorados) para o robô
+ * PowerShell — Fase 9: Firestore é a ÚNICA fonte (coleção SCHEMA.FS.GATILHOS).
+ * Se o Firestore falhar, cai no array hardcoded acima em vez de derrubar o
+ * pipeline do robô.
  */
 function handleGetTriggers() {
-  const plan = getSheet_(SCHEMA.ABAS.ANTIDOTOS);
-  if (!plan) return createJsonResponse([]);
-  const dados = plan.getDataRange().getValues();
-  const triggers = [];
-  for (let i = 1; i < dados.length; i++) {
-    const medicamento = dados[i][0];
-    const ativo = dados[i][3] != null ? dados[i][3] : true;
-    if (medicamento && ativo) triggers.push(String(medicamento).trim());
+  try {
+    const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
+    const triggers = docs
+      .filter(function (d) { return d.medicamento && d.ativo !== false; })
+      .map(function (d) { return String(d.medicamento).trim(); })
+      .sort();
+    return createJsonResponse(triggers);
+  } catch (erro) {
+    console.error('handleGetTriggers: Firestore indisponível, usando fallback hardcoded — ' + erro.message);
+    // Log best-effort — nunca deve impedir a resposta ao robô.
+    try { fsRegistrarLog_('GATILHOS_FALLBACK_HARDCODED', 'N/A', erro.message); } catch (e) { /* ignora */ }
+    return createJsonResponse(_GATILHOS_FALLBACK_HARDCODED);
   }
-  return createJsonResponse(triggers);
 }

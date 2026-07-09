@@ -59,6 +59,14 @@ const SCHEMA = {
   // ── Nomes de coleção no Firestore (Fase 2 — migração gradual) ────────────
   // Espelha SCHEMA.ABAS, mas em formato compatível com Firestore (sem maiúsculas
   // obrigatórias, sem acento, snake_case por convenção).
+  //
+  // ARQUITETURA (Fase 9 — Firestore como Single Source of Truth):
+  // Firestore é a ÚNICA fonte lida em runtime para configuração/cadastros
+  // dinâmicos (setores, listas, naranjo, usuários, gatilhos). O Sheets
+  // (SCHEMA.ABAS) foi rebaixado a repositório "append-only" — recebe
+  // gravações via appendRow (log de auditoria + backup histórico de casos
+  // investigados), mas NENHUMA função de negócio volta a lê-lo para decidir
+  // comportamento. Ver Mirror.gs para o detalhamento do fluxo de backup.
   FS: {
     CASOS:         'casos_ram',
     GERAL:         'config_geral',
@@ -67,6 +75,7 @@ const SCHEMA = {
     NARANJO:       'naranjo',
     LOG:           'log_auditoria',
     USUARIOS:      'usuarios',
+    GATILHOS:      'gatilhos',          // medicamentos monitorados (Trigger Tool / robô PowerShell)
     EMAILS_LEGADO: 'config_emails_legado'
   },
 

@@ -1,38 +1,51 @@
 /**
- * @fileoverview Mirror.gs — Espelho Firestore → Google Sheets (auditoria LGPD).
+ * @fileoverview Mirror.gs — Backup append-only Firestore → Google Sheets (auditoria LGPD).
  *
- * OBJETIVO: garantir que toda escrita no Firestore (casos_ram, log_auditoria)
- * seja replicada nas abas DB_Casos_RAM e DB_Log do Sheets, mantendo o livro-
- * razão auditável sem depender de acesso ao console do Firebase.
+ * FASE 9 — ARQUITETURA "FIRESTORE COMO SINGLE SOURCE OF TRUTH":
+ *   O Sheets deixou de ser um espelho vivo/bidirecional do Firestore. Ele é
+ *   agora um repositório SOMENTE-INSERÇÃO (append-only): toda gravação aqui é
+ *   um appendRow — NUNCA um UPDATE/overwrite de linha existente. O antigo
+ *   modo "UPDATE via TextFinder" (localizar linha pelo ID e sobrescrevê-la)
+ *   foi REMOVIDO: ele fazia o Sheets se comportar como uma segunda fonte da
+ *   verdade sincronizada bidirecionalmente, o que a nova diretriz proíbe.
+ *   Cada linha gravada em DB_Casos_RAM é um "carimbo" histórico imutável de
+ *   um momento do caso (criação ou fechamento) — o mesmo ID pode aparecer em
+ *   mais de uma linha ao longo do tempo, e isso é esperado (é um log, não uma
+ *   tabela editável). O ESTADO ATUAL de qualquer caso só existe no Firestore.
+ *
+ * OBJETIVO: manter um livro-razão auditável/backup histórico no Sheets sem
+ * depender de acesso ao console do Firebase, e sem que nenhuma função do
+ * sistema volte a LER esse livro-razão para decidir comportamento.
  *
  * ARQUITETURA:
- *   1. Cada ponto de escrita em Cases.gs chama espelharCasoNoSheets_() após
- *      a escrita no Firestore.
- *   2. fsRegistrarLog_ chama espelharLogNoSheets_() após gravar no Firestore.
+ *   1. Pontos de escrita que representam um EVENTO DE AUDITORIA (caso novo
+ *      entrando no sistema, ou investigação FINALIZADA) chamam
+ *      espelharCasoNoSheets_() logo após a escrita no Firestore.
+ *   2. fsRegistrarLog_ chama espelharLogNoSheets_() após gravar no Firestore
+ *      — todo evento (erro, login, disparo do robô PowerShell, ação admin)
+ *      vira uma linha em DB_Log/"Logs_Auditoria".
  *   3. Se a gravação no Sheets falhar, o payload é serializado em
- *      PropertiesService (fila MIRROR_RETRY_QUEUE) — máx. 50 itens / 9 KB.
+ *      PropertiesService (fila MIRROR_RETRY_QUEUE) — máx. 50 itens / 9 KB —
+ *      para NUNCA bloquear/atrasar o retorno do payload principal ao
+ *      frontend/PowerShell: a chamada é a ÚLTIMA coisa que a função de
+ *      negócio faz, envolvida em try/catch, depois de o resultado já estar
+ *      pronto para ser devolvido.
  *   4. O trigger processarFilaEspelho() roda a cada 5 minutos e reprocessa
  *      os itens com falha em ordem FIFO, com até 3 tentativas por item.
  *      Após 3 falhas o item é descartado, registrado em console.error e
  *      um alerta é enviado por e-mail à coordenação (ver RETIFICAÇÃO abaixo).
  *
- * INTEGRAÇÃO — pontos de chamada já presentes em Cases.gs / Firestore.gs / Ingest.gs:
+ * INTEGRAÇÃO — pontos de chamada em Cases.gs / Firestore.gs / Ingest.gs:
  *
- *   salvarDemandaEspontanea():
- *     após fsSetDoc_(SCHEMA.FS.CASOS, idCaso, objetoCaso)
- *     → espelharCasoNoSheets_(idCaso, objetoCaso, 'INSERT')
+ *   salvarDemandaEspontanea() / handleInsertDB():
+ *     após fsSetDoc_(SCHEMA.FS.CASOS, idCaso, objetoCaso) — caso NOVO entrando
+ *     → espelharCasoNoSheets_(idCaso, objetoCaso, 'CRIACAO')
  *
- *   registrarTriagem():
+ *   registrarInvestigacao() — SOMENTE quando dados.encerrar finaliza o caso:
  *     após fsRunTransaction_() bem-sucedido
- *     → espelharCasoNoSheets_(dados.idCaso, null, 'UPDATE')
- *
- *   registrarInvestigacao():
- *     após fsRunTransaction_() bem-sucedido
- *     → espelharCasoNoSheets_(dados.idCaso, null, 'UPDATE')
- *
- *   Ingest.gs (handleInsertDB):
- *     após fsSetDoc_/fsUpdateDoc_ do caso ETL
- *     → espelharCasoNoSheets_(idCaso, objetoCaso, 'INSERT')
+ *     → espelharCasoNoSheets_(dados.idCaso, docAtualizado, 'FECHAMENTO')
+ *     (rascunhos de triagem/investigação NÃO tocam mais o Sheets — só o
+ *     Firestore, que é a fonte única durante o trabalho em andamento)
  *
  *   Firestore.gs (fsRegistrarLog_):
  *     após fsSetDoc_() do log
@@ -53,12 +66,11 @@
  * RETIFICAÇÃO [Regra de Ouro #2 — Concorrência]:
  *   _gravarCasoNoSheets/_gravarLogNoSheets gravavam DIRETO no Sheets sem
  *   passar por comTrava_(). Com 22 usuários + robô PowerShell escrevendo
- *   simultâneo, TextFinder podia localizar linha desatualizada ou dois
- *   appendRow concorrentes duplicavam/perdiam linha — falha silenciosa que
- *   ia parar na fila de retry e, sem trigger instalado, nunca era
- *   reprocessada. Agora espelharCasoNoSheets_/espelharLogNoSheets_ e o
- *   reprocessamento da fila encapsulam a gravação em comTrava_(), igual ao
- *   resto do sistema.
+ *   simultâneo, dois appendRow concorrentes podiam duplicar/perder linha —
+ *   falha silenciosa que ia parar na fila de retry e, sem trigger instalado,
+ *   nunca era reprocessada. Agora espelharCasoNoSheets_/espelharLogNoSheets_
+ *   e o reprocessamento da fila encapsulam a gravação em comTrava_(), igual
+ *   ao resto do sistema.
  *
  * RETIFICAÇÃO [Visibilidade]:
  *   Falha de mirror antes só ia para console.error (ninguém lê). Ao
@@ -78,18 +90,19 @@ const MIRROR_FILA_MAX_ITENS = 50;  // limite de itens na fila
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Espelha um caso no DB_Casos_RAM do Sheets.
- * Chamado após cada escrita no Firestore em Cases.gs e Ingest.gs.
+ * Grava uma linha de backup/auditoria (appendRow) em DB_Casos_RAM — NUNCA
+ * sobrescreve uma linha existente. Chamado em dois momentos apenas:
+ * criação do caso (ETL/DE) e FECHAMENTO da investigação (Cases.gs).
  *
  * @param {string} idCaso
- * @param {Object|null} dadosObjeto — objeto já montado (INSERT) ou null (UPDATE:
- *   relê do Firestore para garantir consistência do espelho).
- * @param {'INSERT'|'UPDATE'} operacao
+ * @param {Object|null} dadosObjeto — objeto já montado; se ausente, relê o
+ *   documento atual do Firestore (garante que o backup reflete o estado
+ *   pós-transação, não dados parciais do caller).
+ * @param {'CRIACAO'|'FECHAMENTO'} motivo — só para rastreio/logs; não afeta
+ *   a gravação (é sempre um appendRow, independente do motivo).
  */
-function espelharCasoNoSheets_(idCaso, dadosObjeto, operacao) {
+function espelharCasoNoSheets_(idCaso, dadosObjeto, motivo) {
   try {
-    // Para UPDATE relê o documento atual do Firestore — garante que o espelho
-    // reflete o estado pós-transação, não dados parciais do caller.
     const doc = dadosObjeto || fsGetDoc_(SCHEMA.FS.CASOS, idCaso);
     if (!doc) {
       console.warn('Mirror: caso não encontrado no Firestore para espelhar — ' + idCaso);
@@ -99,12 +112,12 @@ function espelharCasoNoSheets_(idCaso, dadosObjeto, operacao) {
     // [RETIFICADO] gravação no Sheets agora sob comTrava_ — evita corrida
     // com frontend/ETL escrevendo na mesma aba ao mesmo tempo (Regra de Ouro #2).
     comTrava_(function () {
-      _gravarCasoNoSheets(idCaso, doc, operacao);
+      _gravarCasoNoSheets(idCaso, doc);
     });
 
   } catch (e) {
-    console.error('Mirror [espelharCasoNoSheets_] falhou para ' + idCaso + ': ' + e.message);
-    _enfileirarRetry({ tipo: 'CASO', idCaso: idCaso, operacao: operacao || 'UPDATE', tentativas: 0 });
+    console.error('Mirror [espelharCasoNoSheets_] falhou para ' + idCaso + ' (' + motivo + '): ' + e.message);
+    _enfileirarRetry({ tipo: 'CASO', idCaso: idCaso, tentativas: 0 });
   }
 }
 
@@ -131,14 +144,15 @@ function espelharLogNoSheets_(payload) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Grava ou atualiza uma linha em DB_Casos_RAM respeitando SCHEMA.COL.*.
- * INSERT: appendRow. UPDATE: localiza por ID (coluna 1) via TextFinder e
- * sobrescreve a linha inteira (exceto ID e DATA, imutáveis).
+ * Grava uma linha NOVA em DB_Casos_RAM respeitando SCHEMA.COL.* — SEMPRE
+ * appendRow, nunca sobrescreve uma linha existente (Sheets é append-only:
+ * ver cabeçalho do arquivo). Cada chamada representa um carimbo histórico
+ * (criação do caso ou fechamento da investigação), não o estado "atual".
  * IMPORTANTE: já deve ser chamada de dentro de comTrava_() pelo caller
  * (espelharCasoNoSheets_ / processarFilaEspelho) — esta função não trava
  * sozinha para evitar lock aninhado.
  */
-function _gravarCasoNoSheets(idCaso, doc, operacao) {
+function _gravarCasoNoSheets(idCaso, doc) {
   const aba = getSheet_(SCHEMA.ABAS.CASOS);
   if (!aba) throw new Error('Aba ' + SCHEMA.ABAS.CASOS + ' não encontrada.');
 
@@ -208,26 +222,8 @@ function _gravarCasoNoSheets(idCaso, doc, operacao) {
   linha[SCHEMA.COL.SAFETYREPORTID_E2B - 1] = String(doc.safetyReportIdE2B || '').trim();
   // ── Dashboard de Produtividade (revisão 07/2026) ─────────────────────────
   linha[SCHEMA.COL.DATA_TRIAGEM       - 1] = fmtData(doc.dataTriagem);
-  if (operacao === 'INSERT') {
-    aba.appendRow(linha);
-    return;
-  }
 
-  // UPDATE — localiza linha existente por ID via TextFinder (O(1) com índice)
-  const finder = aba.createTextFinder(idCaso)
-    .matchEntireCell(true)
-    .matchCase(false);
-  const resultado = finder.findNext();
-
-  if (resultado) {
-    const numLinha = resultado.getRow();
-    aba.getRange(numLinha, 1, 1, SCHEMA.LARGURA).setValues([linha]);
-  } else {
-    // Caso não existe no Sheets ainda (ex: migrado do Firestore sem espelho)
-    // — insere como novo ao invés de perder a atualização.
-    console.warn('Mirror: ID ' + idCaso + ' não encontrado no Sheets — inserindo como novo.');
-    aba.appendRow(linha);
-  }
+  aba.appendRow(linha);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -341,7 +337,7 @@ function processarFilaEspelho() {
         if (!doc) throw new Error('Caso não encontrado no Firestore: ' + item.idCaso);
         // [RETIFICADO] gravação sob comTrava_
         comTrava_(function () {
-          _gravarCasoNoSheets(item.idCaso, doc, item.operacao || 'UPDATE');
+          _gravarCasoNoSheets(item.idCaso, doc);
         });
         console.log('Mirror retry OK: CASO ' + item.idCaso);
 
@@ -457,16 +453,21 @@ function verificarTriggerEspelho() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Sincroniza TODOS os casos do Firestore para o Sheets de uma vez.
- * Use após instalar o Mirror para sincronizar o histórico existente.
- * Seguro de rodar múltiplas vezes — usa UPDATE (TextFinder) que sobrescreve
- * ou insere se não existir.
+ * Exporta um SNAPSHOT append-only de TODOS os casos do Firestore para o
+ * Sheets — uma linha nova por caso, no estado em que estiverem agora.
+ *
+ * FASE 9: NÃO é mais idempotente da forma antiga (o comportamento antigo
+ * fazia UPDATE/overwrite via TextFinder; Sheets agora é append-only, então
+ * esta função sempre ADICIONA linhas novas). Rodar duas vezes duplica um
+ * carimbo de snapshot por caso — isso é aceitável para uma reconciliação
+ * pontual (ex: preencher o histórico após instalar o Mirror pela primeira
+ * vez), mas NÃO deve virar rotina automática/agendada.
  *
  * @param {boolean} dryRun — true: só loga, não grava (padrão: true)
  */
 function sincronizarTodosOsCasosParaSheets(dryRun) {
   const modo = (dryRun !== false);
-  Logger.log('=== Sincronização Mirror: modo ' + (modo ? 'DRY-RUN' : 'APLICADO') + ' ===');
+  Logger.log('=== Snapshot Mirror (append-only): modo ' + (modo ? 'DRY-RUN' : 'APLICADO') + ' ===');
 
   const docs = fsListarTodos_(SCHEMA.FS.CASOS);
   Logger.log(docs.length + ' caso(s) encontrados no Firestore.');
@@ -477,18 +478,18 @@ function sincronizarTodosOsCasosParaSheets(dryRun) {
     const id = doc.id || doc._id;
     if (!id) return;
     try {
-      // [RETIFICADO] gravação sob comTrava_ também na sincronização em massa
-      if (!modo) comTrava_(function () { _gravarCasoNoSheets(id, doc, 'UPDATE'); });
+      // [RETIFICADO] gravação sob comTrava_ também no snapshot em massa
+      if (!modo) comTrava_(function () { _gravarCasoNoSheets(id, doc); });
       ok++;
     } catch (e) {
       erros++;
-      console.error('Sincronização: erro no caso ' + id + ': ' + e.message);
+      console.error('Snapshot Mirror: erro no caso ' + id + ': ' + e.message);
     }
   });
 
   Logger.log('Resultado: ' + ok + ' OK, ' + erros + ' erro(s).');
   if (modo) Logger.log('Dry-run concluído. Para aplicar, chame sincronizarTodosOsCasosParaSheets(false).');
-  else Logger.log('Sincronização aplicada ao DB_Casos_RAM.');
+  else Logger.log('Snapshot gravado (append) em DB_Casos_RAM.');
 }
 
 /** Wrapper para execução manual no editor — DRY RUN (só loga, não grava) */

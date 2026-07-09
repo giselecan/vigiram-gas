@@ -11,6 +11,19 @@
  *   salvarListas(listas, token)       → { sucesso, mensagem }
  *   salvarGatilhos(gatilhos, token)   → { sucesso, mensagem }
  *   listarGatilhos(token)             → Array<{medicamento}>
+ *
+ * FASE 9 — FIRESTORE COMO SINGLE SOURCE OF TRUTH:
+ *   listarGatilhos/salvarGatilhos deixaram de ler/gravar em DB_Antidotos
+ *   (Sheets) e passaram a operar 100% em Firestore (SCHEMA.FS.GATILHOS),
+ *   com a mesma estratégia "upsert + delete-de-órfãos" de salvarSetores —
+ *   nunca há uma janela em que a coleção fica vazia/parcial em caso de falha
+ *   no meio da operação.
+ *
+ *   Toda função aqui trocou o log Sheets-only registrarLog_() (Audit.gs) por
+ *   fsRegistrarLog_() (Firestore.gs) — grava a auditoria no Firestore (fonte
+ *   única) e, de forma best-effort/não bloqueante, espelha em Sheets via
+ *   appendRow (ver Mirror.gs). Nenhuma função do sistema volta a LER esses
+ *   logs do Sheets para funcionar — é só trilha de auditoria.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +51,7 @@ function salvarConfigGeral(dados, token) {
     });
 
     invalidarConfig();
-    registrarLog_('CONFIG_GERAL_ATUALIZADA', 'config_geral',
+    fsRegistrarLog_('CONFIG_GERAL_ATUALIZADA', 'config_geral',
       'Campos: ' + Object.keys(dados).join(', ') + ' | Por: ' + __emailSessaoAtual);
 
     return { sucesso: true, mensagem: 'Configurações salvas com sucesso.' };
@@ -104,7 +117,7 @@ function salvarSetores(setores, token) {
     });
 
     invalidarConfig(); // limpa também o cache público do form (ver Config.gs)
-    registrarLog_('SETORES_ATUALIZADOS', 'setores',
+    fsRegistrarLog_('SETORES_ATUALIZADOS', 'setores',
       upserts + ' setor(es) salvos, ' + removidos + ' removido(s) | Por: ' + __emailSessaoAtual);
 
     return { sucesso: true, mensagem: upserts + ' setor(es) salvos com sucesso.' };
@@ -146,7 +159,7 @@ function salvarListas(listas, token) {
     });
 
     invalidarConfig();
-    registrarLog_('LISTAS_ATUALIZADAS', 'listas',
+    fsRegistrarLog_('LISTAS_ATUALIZADAS', 'listas',
       salvos + ' lista(s) salvas | Por: ' + __emailSessaoAtual);
 
     return { sucesso: true, mensagem: salvos + ' lista(s) salvas com sucesso.' };
@@ -154,32 +167,34 @@ function salvarListas(listas, token) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GATILHOS (medicamentos monitorados pelo ETL)
+// GATILHOS (medicamentos monitorados pelo ETL) — Firestore SOMENTE (Fase 9)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Lê a lista de gatilhos da aba DB_Antidotos (Sheets) — o ETL lê daqui.
+ * Lê a lista de gatilhos direto da coleção Firestore SCHEMA.FS.GATILHOS.
+ * DB_Antidotos (Sheets) não é mais lido aqui — ver handleGetTriggers()
+ * em Ingest.gs para a rota equivalente consumida pelo robô PowerShell.
  * Retorna array de objetos { medicamento }.
  */
 function listarGatilhos(token) {
   return comAutenticacao_(token, function () {
-    const aba = SpreadsheetApp
-      .getActiveSpreadsheet()
-      .getSheetByName(SCHEMA.ABAS.ANTIDOTOS);
-
-    if (!aba) return [];
-
-    const dados = aba.getDataRange().getValues();
-    // Assume coluna A = medicamento, linha 1 = cabeçalho
-    return dados.slice(1)
-      .filter(function (row) { return String(row[0] || '').trim(); })
-      .map(function (row) { return { medicamento: String(row[0]).trim().toUpperCase() }; });
+    try {
+      const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
+      return docs
+        .filter(function (d) { return d.medicamento && d.ativo !== false; })
+        .map(function (d) { return { medicamento: String(d.medicamento).trim().toUpperCase() }; })
+        .sort(function (a, b) { return a.medicamento.localeCompare(b.medicamento); });
+    } catch (erro) {
+      throw new Error('Não foi possível carregar os gatilhos do Firestore: ' + erro.message);
+    }
   });
 }
 
 /**
- * Substitui todos os gatilhos na aba DB_Antidotos.
- * Mantém o cabeçalho original (linha 1) e regrava as linhas de dados.
+ * Substitui a lista de gatilhos na coleção Firestore SCHEMA.FS.GATILHOS.
+ * Mesma estratégia "upsert + delete-de-órfãos" de salvarSetores — nunca há
+ * uma janela em que a coleção fica vazia/parcial em caso de falha no meio
+ * da operação. ID do documento = nome do medicamento em SNAKE_CASE.
  * @param {string[]} gatilhos — lista de nomes de medicamentos (strings)
  */
 function salvarGatilhos(gatilhos, token) {
@@ -196,27 +211,34 @@ function salvarGatilhos(gatilhos, token) {
       return { sucesso: false, mensagem: 'Adicione ao menos um medicamento.' };
     }
 
-    return comTrava_(function () {
-      const aba = SpreadsheetApp
-        .getActiveSpreadsheet()
-        .getSheetByName(SCHEMA.ABAS.ANTIDOTOS);
-
-      if (!aba) return { sucesso: false, mensagem: 'Aba ' + SCHEMA.ABAS.ANTIDOTOS + ' não encontrada.' };
-
-      // Preserva cabeçalho e limpa dados
-      const ultimaLinha = aba.getLastRow();
-      if (ultimaLinha > 1) {
-        aba.getRange(2, 1, ultimaLinha - 1, aba.getLastColumn()).clearContent();
-      }
-
-      // Reinsere
-      const linhas = nomesFiltrados.map(function (nome) { return [nome]; });
-      aba.getRange(2, 1, linhas.length, 1).setValues(linhas);
-
-      registrarLog_('GATILHOS_ATUALIZADOS', SCHEMA.ABAS.ANTIDOTOS,
-        nomesFiltrados.length + ' gatilho(s) | Por: ' + __emailSessaoAtual);
-
-      return { sucesso: true, mensagem: nomesFiltrados.length + ' gatilho(s) salvo(s) com sucesso.' };
+    // 1) Upsert — coleção nunca fica menor que o conjunto final durante a operação
+    const idsNovos = {};
+    let upserts = 0;
+    nomesFiltrados.forEach(function (nome) {
+      const id = nome.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+      if (!id) return;
+      idsNovos[id] = true;
+      fsSetDoc_(SCHEMA.FS.GATILHOS, id, { medicamento: nome, ativo: true });
+      upserts++;
     });
+
+    if (upserts === 0) {
+      return { sucesso: false, mensagem: 'Nenhum medicamento válido na lista.' };
+    }
+
+    // 2) Delete só dos órfãos (IDs que saíram da lista)
+    let removidos = 0;
+    const existentes = fsListarTodos_(SCHEMA.FS.GATILHOS);
+    existentes.forEach(function (doc) {
+      if (doc._id && !idsNovos[doc._id]) {
+        fsDeleteDoc_(SCHEMA.FS.GATILHOS, doc._id);
+        removidos++;
+      }
+    });
+
+    fsRegistrarLog_('GATILHOS_ATUALIZADOS', 'N/A',
+      upserts + ' gatilho(s) salvos, ' + removidos + ' removido(s) | Por: ' + __emailSessaoAtual);
+
+    return { sucesso: true, mensagem: upserts + ' gatilho(s) salvo(s) com sucesso.' };
   });
 }
