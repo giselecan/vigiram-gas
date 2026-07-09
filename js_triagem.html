@@ -1,0 +1,91 @@
+<script>
+// =========================================================
+// js_triagem.html — v2.2
+//
+// P1.2: enviarTriagem() agora usa atualizarCasoLocal() (merge local do
+// caso retornado por registrarTriagem) em vez de carregarCasos() — elimina
+// o full-scan de casos_ram após uma triagem pontual.
+//
+// Depende de: js_core (casosGlobais, mostrarToast, atualizarCasoLocal,
+//             tokenSessao, escapeHtml)
+// =========================================================
+
+let _triagemIdAtual = '';
+
+// ---------------------------------------------------------
+// ABRIR MODAL
+// ---------------------------------------------------------
+function abrirTriagem(id) {
+  const caso = casosGlobais.find(c => c.id === id);
+  if (!caso) return;
+
+  _triagemIdAtual = id;
+
+  document.getElementById('trgProntuario').innerText = caso.prontuario;
+  document.getElementById('trgSetor').innerText      = caso.setor;
+  document.getElementById('trgGatilho').innerText    = caso.medicamento;
+  document.getElementById('trgIniciais').innerText = caso.paciente || 'N/I';
+
+  document.getElementById('formTriagem').reset();
+  toggleFormTriagem(null);
+
+  document.getElementById('modalTriagem').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------
+// FECHAR MODAL
+// ---------------------------------------------------------
+function fecharModalTriagem() {
+  document.getElementById('modalTriagem').classList.add('hidden');
+  _triagemIdAtual = '';
+}
+
+// ---------------------------------------------------------
+// TOGGLE: exibe sub-formulário correto
+// ---------------------------------------------------------
+function toggleFormTriagem(isRam) {
+  document.getElementById('trgAreaSim').classList.toggle('hidden', isRam !== true);
+  document.getElementById('trgAreaNao').classList.toggle('hidden', isRam !== false);
+  document.getElementById('trgMedSuspeito').required    = isRam === true;
+  document.getElementById('trgMotivoDescarte').required = isRam === false;
+}
+
+// ---------------------------------------------------------
+// ENVIO
+// ---------------------------------------------------------
+function enviarTriagem(e) {
+  e.preventDefault();
+
+  const radioChecked = document.querySelector('input[name="trgHouveRam"]:checked');
+  if (!radioChecked) {
+    mostrarToast('Selecione se houve RAM ou não.', 'erro');
+    return;
+  }
+
+  const btn = document.getElementById('btnSalvarTriagem');
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
+  btn.disabled  = true;
+
+  const dados = {
+    idCaso:         _triagemIdAtual,
+    houveRam:       radioChecked.value === 'SIM',
+    medSuspeito:    document.getElementById('trgMedSuspeito').value,
+    motivoDescarte: document.getElementById('trgMotivoDescarte').value
+  };
+
+  google.script.run
+    .withSuccessHandler(casoAtualizado => {
+      fecharModalTriagem();
+      btn.innerHTML = '<i class="fas fa-check mr-1"></i> Salvar e Enviar';
+      btn.disabled  = false;
+      atualizarCasoLocal(casoAtualizado);
+      mostrarToast('Triagem registrada com sucesso.', 'sucesso');
+    })
+    .withFailureHandler(err => {
+      mostrarToast('Erro na triagem: ' + err.message, 'erro');
+      btn.innerHTML = '<i class="fas fa-check mr-1"></i> Salvar e Enviar';
+      btn.disabled  = false;
+    })
+    .registrarTriagem(dados, tokenSessao);
+}
+</script>

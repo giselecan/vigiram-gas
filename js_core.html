@@ -1,0 +1,626 @@
+<script>
+// =========================================================
+// js_core.html — v2.5
+//
+// NOVIDADE v2.5 (UX navbar):
+//   _exibirNomeUsuario() agora popula avatar circular com
+//   iniciais (#avatarUsuario) + tooltip desktop (#tooltipUsuario)
+//   + popover mobile (#popoverUsuario), no lugar do nome por
+//   extenso fixo na navbar. _gerarIniciais() extrai primeira +
+//   última palavra do nome, ignorando preposições curtas
+//   (de/da/do/dos/das). btnAtualizar (Sincronizar) passa a ser
+//   ícone-only — texto "Sincronizando..." sai do innerHTML nos
+//   3 pontos de troca de estado (loading/sucesso/erro).
+//
+// NOVIDADE v2.4 (P1.2 — atualização otimista local):
+//   atualizarCasoLocal(casoAtualizado) — merge de um único caso em
+//   casosGlobais + re-render local, sem round-trip completo ao servidor.
+//   Usada por js_triagem.html e js_investigacao.html após uma escrita
+//   pontual bem-sucedida, no lugar de carregarCasos().
+//
+// CORREÇÕES ANTERIORES (v2.3):
+//   FIX-SESSAO-1/2/3/4 — ver histórico de versões anteriores.
+//
+// Responsabilidade: estado global, constantes compartilhadas,
+// funções de infraestrutura (escapeHtml, SLA, carregamento),
+// controle de abas e mapa setor → farmacêutico responsável.
+// =========================================================
+
+// ---------------------------------------------------------
+// STATUS — espelha SCHEMA.STATUS (Schema.gs) — fonte única da verdade
+// ---------------------------------------------------------
+const STATUS = {
+  TRIAGEM:     "PENDENTE TRIAGEM",
+  INVESTIGACAO:"EM INVESTIGAÇÃO",
+  CONCLUIDO:   "CONCLUÍDO",
+  DESCARTADO:  "DESCARTADO"
+};
+const ST = STATUS;
+
+// ---------------------------------------------------------
+// CONSTANTES DE NEGÓCIO
+// ---------------------------------------------------------
+let SLA_PADRAO_HORAS = 48;
+const CARDS_POR_PAGINA = 15;
+
+// ---------------------------------------------------------
+// ESTADO GLOBAL
+// ---------------------------------------------------------
+let casosGlobais         = [];
+let delegacaoConfigurada = false;
+let configGlobal         = null;
+
+const paginaAtual = { triagem: 1, investigacao: 1, concluidos: 1 };
+const casosFiltrados = { triagem: [], investigacao: [], concluidos: [] };
+
+let mapaSetorResponsavel = {};
+let listaCanonicaFarmas  = [];
+let tokenSessao          = null;
+
+// ---------------------------------------------------------
+// SEGURANÇA: ESCAPE XSS (P0)
+// ---------------------------------------------------------
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#39;');
+}
+
+// ---------------------------------------------------------
+// FORMATAÇÃO CENTRAL DE DATA — EXIBIÇÃO (dd/MM/yyyy HH:mm)
+// Hora só aparece se existir na origem — sem inventar 00:00.
+//
+// Fonte de dados é heterogênea por origem: ETL/BA grava
+// "dd/MM/yyyy HH:mm:ss", formulários DE gravam "yyyy-MM-dd"
+// (input type=date) e o Firestore pode devolver ISO completo.
+// TODA exibição de data no frontend passa por aqui — NUNCA
+// formatar espalhado no ponto de render.
+//
+// ESCOPO: só camada de EXIBIÇÃO. Não usar para:
+//   - inputs type=date (browser exige yyyy-MM-dd);
+//   - valores enviados ao backend (formato de armazenamento
+//     não muda);
+//   - E2B (YYYYMMDD ICH, boundary protegido em E2b.gs).
+// ---------------------------------------------------------
+function formatarDataExibicao(valor) {
+  const v = String(valor == null ? '' : valor).trim();
+  if (!v || v === 'N/I' || v === '-') return '';
+
+  // dd/MM/yyyy [HH:mm[:ss]] → mantém data, anexa HH:mm se existir na origem.
+  const br = v.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{2}):(\d{2}))?/);
+  if (br) return br[1] + '/' + br[2] + '/' + br[3] + (br[4] ? ' ' + br[4] + ':' + br[5] : '');
+
+  // yyyy-MM-dd [THH:mm | " HH:mm"] → inverte, anexa HH:mm se existir.
+  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (iso) return iso[3] + '/' + iso[2] + '/' + iso[1] + (iso[4] ? ' ' + iso[4] + ':' + iso[5] : '');
+
+  // Fallback: qualquer coisa que o Date parseie.
+  const d = new Date(v);
+  if (!isNaN(d)) {
+    const p = n => String(n).padStart(2, '0');
+    const base = p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear();
+    const temHora = d.getHours() || d.getMinutes() || d.getSeconds();
+    return temHora ? base + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) : base;
+  }
+
+  return v; // não reconhecido → devolve cru, sem esconder dado
+}
+
+// ---------------------------------------------------------
+// CONVERSÃO PARA INPUTS type="datetime-local"
+// value exigido pelo browser: "yyyy-MM-ddTHH:mm".
+// Aceita os formatos armazenados (com/sem hora, BR/ISO, "T" ou espaço).
+// Legado só-data ganha T00:00 — necessário pro input aceitar o valor;
+// a hora só persiste se o usuário salvar de novo.
+// ---------------------------------------------------------
+function paraInputDateTimeLocal(valor) {
+  const v = String(valor == null ? '' : valor).trim();
+  if (!v || v === 'N/I' || v === '-') return '';
+
+  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (iso) return iso[1] + '-' + iso[2] + '-' + iso[3] + 'T' + (iso[4] || '00') + ':' + (iso[5] || '00');
+
+  const br = v.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ T](\d{2}):(\d{2}))?/);
+  if (br) return br[3] + '-' + br[2] + '-' + br[1] + 'T' + (br[4] || '00') + ':' + (br[5] || '00');
+
+  return '';
+}
+
+/** Agora local em "yyyy-MM-ddTHH:mm" — pré-preenchimento de datetime-local.
+ *  NÃO usar toISOString(): é UTC e vira o dia às 21h locais (UTC-3). */
+function agoraInputDateTimeLocal() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+         'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+
+// ---------------------------------------------------------
+// INICIALIZAÇÃO E AUTENTICAÇÃO
+// ---------------------------------------------------------
+function _mostrarLogin() {
+  document.getElementById('view-login').classList.remove('hidden');
+  document.getElementById('view-login').classList.add('flex');
+  document.getElementById('app-container').classList.add('hidden');
+  document.getElementById('app-container').classList.remove('flex');
+}
+
+function inicializar() {
+  tokenSessao = sessionStorage.getItem('vigi_token');
+
+  if (!tokenSessao) {
+    _mostrarLogin();
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(function(valido) {
+      if (valido) {
+        const nomeGuardado = sessionStorage.getItem('vigi_nome');
+        if (nomeGuardado) _exibirNomeUsuario(nomeGuardado);
+        iniciarAppSeguro();
+      } else {
+        sessionStorage.removeItem('vigi_token');
+        sessionStorage.removeItem('vigi_nome');
+        sessionStorage.removeItem('vigi_perfil');
+        tokenSessao = null;
+        _mostrarLogin();
+      }
+    })
+    .withFailureHandler(function() {
+      sessionStorage.removeItem('vigi_token');
+      sessionStorage.removeItem('vigi_nome');
+      sessionStorage.removeItem('vigi_perfil');
+      tokenSessao = null;
+      _mostrarLogin();
+    })
+    .validarSessao(tokenSessao); // FIX: funções com sufixo "_" não são
+                                 // invocáveis via google.script.run — a chamada
+                                 // antiga caía sempre no failure handler e
+                                 // deslogava o usuário a cada reload.
+}
+
+function iniciarAppSeguro() {
+  document.getElementById('view-login').classList.add('hidden');
+  document.getElementById('view-login').classList.remove('flex');
+
+  const containerApp = document.getElementById('app-container');
+  containerApp.classList.remove('hidden');
+  containerApp.classList.add('flex');
+  _configurarAbaAdmin();
+  construirNaranjo();
+  carregarConfig();
+}
+
+function _configurarAbaAdmin() {
+  const perfil = sessionStorage.getItem('vigi_perfil') || '';
+  const btnAdmin = document.getElementById('btnAbaAdmin');
+  if (btnAdmin) btnAdmin.classList.toggle('hidden', perfil !== 'ADMIN');
+}
+
+function realizarLogin(event) {
+  event.preventDefault();
+  const email = document.getElementById('loginEmail').value;
+  const senha  = document.getElementById('loginSenha').value;
+  const btn    = document.getElementById('btnLogin');
+
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML  = '<i class="fas fa-circle-notch fa-spin"></i>';
+  btn.disabled   = true;
+
+  google.script.run
+    .withSuccessHandler(res => {
+      if (res.sucesso) {
+        sessionStorage.setItem('vigi_token', res.token);
+        sessionStorage.setItem('vigi_nome', res.nome);
+        sessionStorage.setItem('vigi_perfil', res.perfil || 'FARMACEUTICO');
+        tokenSessao = res.token;
+        _exibirNomeUsuario(res.nome || '');
+        mostrarToast('Bem-vindo(a), ' + res.nome, 'sucesso');
+        iniciarAppSeguro();
+      } else {
+        mostrarToast(res.erro, 'erro');
+        btn.innerHTML = originalHtml;
+        btn.disabled  = false;
+      }
+    })
+    .withFailureHandler(() => {
+      mostrarToast('Falha na comunicação com o servidor.', 'erro');
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+    })
+    .autenticarUsuario(email, senha);
+}
+
+// ---------------------------------------------------------
+// AVATAR DO USUÁRIO — bolinha com iniciais + tooltip/popover
+// com nome completo (substitui nome por extenso fixo na navbar)
+// ---------------------------------------------------------
+function _gerarIniciais(nome) {
+  const partes = String(nome || '').trim().split(/\s+/).filter(p =>
+    p.length > 2 || !/^(de|da|do|dos|das)$/i.test(p)
+  );
+  if (partes.length === 0) return '?';
+  if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
+  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+}
+
+function _exibirNomeUsuario(nome) {
+  if (!nome) return;
+  const avatar  = document.getElementById('avatarUsuario');
+  const lbl     = document.getElementById('lblUsuarioLogado');
+  const tooltip = document.getElementById('tooltipUsuario');
+  if (avatar)  avatar.textContent  = _gerarIniciais(nome);
+  if (lbl)     lbl.textContent     = nome;
+  if (tooltip) tooltip.textContent = nome;
+}
+
+function _posicionarTooltip(el, tooltip) {
+  const r = el.getBoundingClientRect();
+  tooltip.style.top   = (r.bottom + 8) + 'px';
+  tooltip.style.left  = 'auto';
+  tooltip.style.right = (window.innerWidth - r.right) + 'px';
+}
+
+function _mostrarTooltipUsuario() {
+  // Desktop: hover. Em telas touch (sem hover real) o navegador não dispara
+  // mouseenter, então isso não conflita com o toggle por clique no mobile.
+  const avatar  = document.getElementById('avatarUsuario');
+  const tooltip = document.getElementById('tooltipUsuario');
+  if (!avatar || !tooltip) return;
+  _posicionarTooltip(avatar, tooltip);
+  tooltip.classList.remove('hidden');
+}
+
+function _esconderTooltipUsuario() {
+  const tooltip = document.getElementById('tooltipUsuario');
+  if (tooltip) tooltip.classList.add('hidden');
+}
+
+function _toggleTooltipUsuario() {
+  // Mobile/click: toggle explícito, reaproveita mesmo posicionamento.
+  const avatar  = document.getElementById('avatarUsuario');
+  const tooltip = document.getElementById('tooltipUsuario');
+  if (!avatar || !tooltip) return;
+  const estaEscondido = tooltip.classList.contains('hidden');
+  if (estaEscondido) {
+    _posicionarTooltip(avatar, tooltip);
+    tooltip.classList.remove('hidden');
+  } else {
+    tooltip.classList.add('hidden');
+  }
+}
+
+function fazerLogout() {
+  const t = tokenSessao || sessionStorage.getItem('vigi_token');
+
+  sessionStorage.removeItem('vigi_token');
+  sessionStorage.removeItem('vigi_nome');
+  sessionStorage.removeItem('vigi_perfil');
+  tokenSessao = null;
+
+  const _recarregar = () => window.location.reload();
+
+  if (t && window.google && google.script && google.script.run) {
+    google.script.run
+      .withSuccessHandler(_recarregar)
+      .withFailureHandler(_recarregar)
+      .encerrarSessao(t);
+  } else {
+    _recarregar();
+  }
+}
+
+// ---------------------------------------------------------
+// CARREGAMENTO DE CONFIGURAÇÃO
+// ---------------------------------------------------------
+function carregarConfig() {
+  google.script.run
+    .withSuccessHandler(cfg => {
+      aplicarConfig(cfg);
+      carregarCasos();
+    })
+    .withFailureHandler(e => {
+      console.warn('getConfig falhou:', e.message);
+      carregarCasos();
+    })
+    .getConfig();
+}
+
+function aplicarConfig(cfg) {
+  configGlobal = cfg;
+
+  mapaSetorResponsavel = {};
+  listaCanonicaFarmas  = [];
+  const setores  = (cfg && cfg.setores) ? cfg.setores : [];
+  const farmaSet = new Set();
+
+  setores.forEach(s => {
+    if (!s.setor) return;
+    const chave = s.setor.toUpperCase().trim();
+    mapaSetorResponsavel[chave] = {
+      farmaceutico: (s.farmaceutico || '').trim(),
+      email:        (s.email        || '').trim()
+    };
+    if (s.farmaceutico && s.farmaceutico.trim()) {
+      farmaSet.add(s.farmaceutico.trim());
+    }
+  });
+  listaCanonicaFarmas = [...farmaSet].sort();
+  _popularFiltroFarmaceutico();
+
+  if (cfg && cfg.geral && cfg.geral.SLA_PADRAO_HORAS) {
+    SLA_PADRAO_HORAS = Number(cfg.geral.SLA_PADRAO_HORAS) || 48;
+  }
+
+  if (cfg && cfg.listas) {
+    _popularSelect('invReadministrado', cfg.listas.readministrado);
+    _popularSelect('invEvolucao',       cfg.listas.evolucao);
+    _popularSelect('invGravidade',      cfg.listas.gravidade);
+    _popularSelect('invDesfecho',       cfg.listas.desfecho);
+    _popularSelect('invConclusao',      cfg.listas.conclusao);
+    _popularSelect('trgMotivoDescarte', cfg.listas.motivo_descarte);
+    // Fase 2 (roadmap) — campos novos da tela de investigação
+    _popularSelect('invAcaoAdotada',              cfg.listas.acao_adotada);
+    _popularSelect('invRelacaoMedicamentoEvento', cfg.listas.relacao_medicamento_evento);
+    _popularSelect('invUnidadeIntervalo',         cfg.listas.unidade_intervalo);
+    _popularCheckboxes('invProblemasAdicionais',  cfg.listas.problemas_adicionais);
+  }
+}
+
+function _popularSelect(id, lista) {
+  const el = document.getElementById(id);
+  if (!el || !Array.isArray(lista)) return;
+  const atual = el.value;
+  el.innerHTML = '<option value="">Selecione…</option>';
+  lista.forEach(opt => {
+    el.innerHTML += `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`;
+  });
+  if (lista.includes(atual)) el.value = atual;
+}
+
+/**
+ * F2-12 — popula um container de checkboxes (multi-select) a partir de
+ * uma lista de rótulos. Preserva os itens já marcados (chamada de novo
+ * a cada getConfig() não desmarca o que o farmacêutico já escolheu).
+ */
+function _popularCheckboxes(containerId, lista) {
+  const el = document.getElementById(containerId);
+  if (!el || !Array.isArray(lista)) return;
+  const marcados = new Set(
+    [...el.querySelectorAll('input[type="checkbox"]:checked')].map(c => c.value)
+  );
+  el.innerHTML = '';
+  lista.forEach((opt, i) => {
+    const id = containerId + '_' + i;
+    const marcado = marcados.has(opt);
+    el.innerHTML += `
+      <label for="${id}" class="flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" id="${id}" value="${escapeHtml(opt)}" ${marcado ? 'checked' : ''}
+               onchange="agendarAutosave()" class="w-3.5 h-3.5">
+        ${escapeHtml(opt)}
+      </label>`;
+  });
+}
+
+// ---------------------------------------------------------
+// HELPER — farmacêutico canônico de um setor
+// ---------------------------------------------------------
+function getFarmaceuticoPorSetor(setor) {
+  if (!setor) return '';
+  const resp = mapaSetorResponsavel[setor.toUpperCase().trim()];
+  return resp ? resp.farmaceutico : '';
+}
+
+function _popularFiltroFarmaceutico() {
+  const select   = document.getElementById('filtroFarmaceutico');
+  if (!select) return;
+  const anterior = select.value;
+  select.innerHTML = '<option value="TODOS">Todos os Farmacêuticos</option>';
+  listaCanonicaFarmas.forEach(f => {
+    select.innerHTML += `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`;
+  });
+  if (listaCanonicaFarmas.includes(anterior)) select.value = anterior;
+}
+
+// ---------------------------------------------------------
+// CONTROLE DE ABAS
+// ---------------------------------------------------------
+function alternarAba(aba) {
+  ['kanban','dashboard','admin'].forEach(function(v) {
+    const el = document.getElementById('view-' + v);
+    if (el) el.classList.toggle('hidden', aba !== v);
+  });
+
+  const barraFiltros = document.getElementById('barraFiltros');
+  if (barraFiltros) barraFiltros.classList.toggle('hidden', aba === 'admin');
+
+  document.getElementById('btnAbaKanban').className =
+    'px-5 py-3 rounded-t-lg font-bold text-sm transition ' +
+    (aba === 'kanban' ? 'aba-ativa' : 'aba-inativa');
+
+  document.getElementById('btnAbaDash').className =
+    'px-5 py-3 rounded-t-lg font-bold text-sm transition ' +
+    (aba === 'dashboard' ? 'aba-ativa' : 'aba-inativa');
+
+  const btnAdmin = document.getElementById('btnAbaAdmin');
+  if (btnAdmin) btnAdmin.className =
+    'px-5 py-3 rounded-t-lg font-bold text-sm transition ' +
+    (aba === 'admin' ? 'aba-ativa' : 'aba-inativa');
+
+  if (aba === 'dashboard') desenharGraficos();
+  if (aba === 'admin') carregarUsuarios();
+}
+
+// ---------------------------------------------------------
+// CARREGAMENTO DE DADOS PROTEGIDO (sincronização completa)
+// Usado apenas no login e no botão manual "Sincronizar" — ações
+// pontuais de escrita agora usam atualizarCasoLocal() (ver abaixo).
+//
+// btnAtualizar é ícone-only (ver navbar em index.html): loading
+// usa fa-spin no próprio ícone, sem texto "Sincronizando...".
+// ---------------------------------------------------------
+function carregarCasos() {
+  const btn = document.getElementById('btnAtualizar');
+  if (btn) btn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i>';
+
+  mostrarSkeletons();
+
+  google.script.run
+    .withSuccessHandler(processarDados)
+    .withFailureHandler(e => {
+      limparSkeletons();
+      const msg = (e && e.message) ? e.message : String(e);
+      console.error('[carregarCasos] Falha:', msg);
+
+      const ehSessaoExpirada =
+        msg.includes('Sessão expirada') ||
+        msg.includes('não autorizada')  ||
+        msg.includes('consolidar base Kanban');
+
+      if (ehSessaoExpirada) {
+        sessionStorage.removeItem('vigi_token');
+        sessionStorage.removeItem('vigi_nome');
+        sessionStorage.removeItem('vigi_perfil');
+        tokenSessao = null;
+        mostrarToast('Sessão expirada. Redirecionando...', 'erro');
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        mostrarToast('Erro ao carregar casos: ' + msg, 'erro');
+        if (btn) btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+      }
+    })
+    .getTodosOsCasos(tokenSessao);
+}
+
+function processarDados(casos) {
+  casosGlobais = casos;
+
+  const btn = document.getElementById('btnAtualizar');
+  if (btn) btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+
+  const selectSetor = document.getElementById('filtroSetor');
+  const setorAtual  = selectSetor.value;
+  const setores     = [...new Set(casos.map(c => c.setor))].filter(Boolean).sort();
+  selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>';
+  setores.forEach(s => {
+    selectSetor.innerHTML += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
+  });
+  if (setores.includes(setorAtual)) selectSetor.value = setorAtual;
+
+  _popularFiltroFarmaceutico();
+
+  paginaAtual.triagem = paginaAtual.investigacao = paginaAtual.concluidos = 1;
+  processarFiltros();
+}
+
+// ---------------------------------------------------------
+// P1.2 — ATUALIZAÇÃO OTIMISTA LOCAL
+//
+// Substitui carregarCasos() após uma ação de escrita pontual em UM caso
+// (triagem, investigação). registrarTriagem/registrarInvestigacao agora
+// retornam o caso já atualizado (resumo) — este merge evita um novo
+// full-scan de casos_ram só para refletir uma mudança de um único card.
+// ---------------------------------------------------------
+function atualizarCasoLocal(casoAtualizado) {
+  if (!casoAtualizado || !casoAtualizado.id) return;
+
+  const idx = casosGlobais.findIndex(c => c.id === casoAtualizado.id);
+  if (idx === -1) {
+    casosGlobais.push(casoAtualizado);
+  } else {
+    casosGlobais[idx] = casoAtualizado;
+  }
+
+  // Setor/farmacêutico podem ter mudado — repopula os filtros também
+  const selectSetor = document.getElementById('filtroSetor');
+  if (selectSetor) {
+    const setorAtual = selectSetor.value;
+    const setores = [...new Set(casosGlobais.map(c => c.setor))].filter(Boolean).sort();
+    selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>';
+    setores.forEach(s => {
+      selectSetor.innerHTML += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
+    });
+    if (setores.includes(setorAtual)) selectSetor.value = setorAtual;
+  }
+
+  paginaAtual.triagem = paginaAtual.investigacao = paginaAtual.concluidos = 1;
+  processarFiltros();
+}
+
+// ---------------------------------------------------------
+// SLA — CÁLCULO
+// ---------------------------------------------------------
+function calcularSLA(caso) {
+  if (!caso.data_evento || caso.data_evento === 'Data N/I')
+    return { status: 'SEM', restanteH: null };
+
+  let dataEvento = null;
+  const m = caso.data_evento.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+  if (m) {
+    dataEvento = new Date(
+      parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]),
+      parseInt(m[4]), parseInt(m[5])
+    );
+  } else {
+    const iso = caso.data_evento.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+    if (iso) {
+      // Parse manual — "yyyy-MM-dd HH:mm" (espaço) é NaN no Safari/iOS.
+      dataEvento = new Date(
+        parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3]),
+        parseInt(iso[4] || '0'), parseInt(iso[5] || '0')
+      );
+    } else {
+      dataEvento = new Date(caso.data_evento);
+    }
+  }
+  if (isNaN(dataEvento)) return { status: 'SEM', restanteH: null };
+
+  const restanteH = (dataEvento.getTime() + SLA_PADRAO_HORAS * 3600000 - Date.now()) / 3600000;
+  if (restanteH < 0)   return { status: 'VENCIDO',  restanteH };
+  if (restanteH < 12)  return { status: 'VENCENDO', restanteH };
+  return { status: 'OK', restanteH };
+}
+
+function formatarTempoSLA(h) {
+  if (h === null) return '';
+  const abs = Math.abs(h);
+  if (abs < 1)  return `${Math.round(abs * 60)}min`;
+  if (abs < 24) return `${Math.round(abs)}h`;
+  return `${Math.floor(abs / 24)}d ${Math.round(abs % 24)}h`;
+}
+
+function badgeSLAHtml(caso) {
+  const { status, restanteH } = calcularSLA(caso);
+  const tempo = formatarTempoSLA(restanteH);
+  const cfg = {
+    OK:       { cls: 'badge-sla-ok',   ico: 'fa-clock',               label: `${tempo} restante`   },
+    VENCENDO: { cls: 'badge-sla-warn', ico: 'fa-exclamation-triangle', label: `Vence em ${tempo}`   },
+    VENCIDO:  { cls: 'badge-sla-late', ico: 'fa-fire',                 label: `Vencido há ${tempo}` },
+    SEM:      { cls: 'badge-sla-sem',  ico: 'fa-minus-circle',         label: 'Sem SLA'             }
+  };
+  const c = cfg[status];
+  return `<span class="${c.cls} text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit">
+    <i class="fas ${c.ico}"></i> ${c.label}
+  </span>`;
+}
+
+// ---------------------------------------------------------
+// TOAST — notificação não-intrusiva
+// ---------------------------------------------------------
+function mostrarToast(msg, tipo) {
+  const cor = tipo === 'erro' ? 'bg-red-600 text-white' : 'bg-green-600 text-white';
+  const ico = tipo === 'erro' ? 'fa-exclamation-triangle' : 'fa-check-circle';
+  const toast = document.createElement('div');
+  toast.className =
+    `fixed bottom-6 left-1/2 -translate-x-1/2 ${cor} text-sm font-bold
+     px-5 py-3 rounded-xl shadow-xl z-[9999] fade-in flex items-center gap-2`;
+  toast.innerHTML = `<i class="fas ${ico}"></i> ${escapeHtml(msg)}`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+</script>

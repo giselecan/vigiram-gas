@@ -1,0 +1,802 @@
+<script>
+// =========================================================
+// js_investigacao.html — v2.3
+//
+// P2: casosGlobais agora contém apenas o RESUMO de cada caso (ver
+// Cases.gs). abrirInvestigacao() foi dividida em duas etapas:
+//   1. Preenche o cabeçalho read-only IMEDIATAMENTE com dados já em
+//      memória (prontuário, setor, medicamento, tipo, data, iniciais).
+//   2. Busca o DETALHE COMPLETO via getCasoDetalhado(id, token) e só
+//      então preenche história clínica, Naranjo, notificador etc.
+// O modal abre instantaneamente; o formulário aparece "carregando" por
+// uma fração de segundo enquanto o detalhe chega — ganho de percepção
+// de velocidade sem esperar o payload pesado antes de abrir o modal.
+//
+// P1.2: enviarInvestigacao() usa atualizarCasoLocal() em vez de
+// carregarCasos().
+//
+// FASE 8 (Exportação E2B(R3) para VigiMed) — v2.3:
+//   Adicionados 5 campos novos: reacaoTermo, doseMedicamento,
+//   doseUnidade, viaAdministracao, dataInicioReacao. Tocados em
+//   _limparFormularioInvestigacao, _preencherFormularioInvestigacao,
+//   _coletarFormulario e enviarInvestigacao (reacaoTermo agora
+//   obrigatório para finalizar, junto com Gravidade/Desfecho/Conclusão).
+//
+//   DEPENDÊNCIA: os 5 <input>/<select> correspondentes (ids
+//   invReacaoTermo, invDoseMedicamento, invDoseUnidade,
+//   invViaAdministracao, invDataInicioReacao) precisam existir no
+//   markup do modal (index.html) — este arquivo é só a lógica, o HTML
+//   do modal vive em outro partial. Sem esses elementos no DOM, os
+//   getElementById(...) retornam null e o código aqui já trata isso
+//   com checagem defensiva (if (el) ...) — não quebra, mas o dado
+//   também não é coletado/exibido até o HTML ser adicionado.
+//
+// Depende de: js_core (escapeHtml, casosGlobais, mostrarToast,
+//             atualizarCasoLocal, getFarmaceuticoPorSetor, STATUS,
+//             tokenSessao)
+// =========================================================
+
+// ---------------------------------------------------------
+// CONFIGURAÇÃO DO NARANJO
+// ---------------------------------------------------------
+const NARANJO_CONFIG = [
+  { id: 1,  pergunta: 'Há relatos prévios sobre esta reação?',
+    tooltip: 'Existem publicações científicas, bulas ou comunicações anteriores que relatem essa reação adversa para este medicamento?',
+    sim: { valor: 1,  label: 'Sim (+1)' }, nao: { valor: 0,  label: 'Não (0)'  }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 2,  pergunta: 'A reação apareceu após o uso do medicamento?',
+    tooltip: 'A reação adversa ocorreu após o início do uso do medicamento suspeito? Estabeleça a relação temporal de causa e efeito.',
+    sim: { valor: 2,  label: 'Sim (+2)' }, nao: { valor: -1, label: 'Não (-1)' }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 3,  pergunta: 'A reação melhorou ao suspender o medicamento ou usar antagonista?',
+    tooltip: 'Houve melhora clínica após a suspensão do medicamento suspeito ou após uso de antídoto/antagonista específico?',
+    sim: { valor: 1,  label: 'Sim (+1)' }, nao: { valor: 0,  label: 'Não (0)'  }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 4,  pergunta: 'A reação reapareceu ao readministrar o medicamento?',
+    tooltip: 'Quando o medicamento foi readministrado (rechallenge), a reação adversa voltou a ocorrer? Resposta "Não" penaliza o escore.',
+    sim: { valor: 2,  label: 'Sim (+2)' }, nao: { valor: -1, label: 'Não (-1)' }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 5,  pergunta: 'Existem causas alternativas que poderiam ter causado a reação?',
+    tooltip: 'A reação poderia ser explicada pela doença de base, por outra medicação, ou por outros fatores clínicos não relacionados ao medicamento suspeito?',
+    sim: { valor: -1, label: 'Sim (-1)' }, nao: { valor: 2,  label: 'Não (+2)' }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 6,  pergunta: 'A reação reapareceu ao dar placebo?',
+    tooltip: 'Se o paciente recebeu placebo no lugar do medicamento, a reação continuou ocorrendo? Se sim, sugere que o medicamento não é a causa.',
+    sim: { valor: -1, label: 'Sim (-1)' }, nao: { valor: 1,  label: 'Não (+1)' }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 7,  pergunta: 'O medicamento foi detectado no sangue em concentração tóxica?',
+    tooltip: 'Exames laboratoriais (nível sérico, dosagem) confirmaram concentração do medicamento acima do intervalo terapêutico ou em nível tóxico?',
+    sim: { valor: 1,  label: 'Sim (+1)' }, nao: { valor: 0,  label: 'Não (0)'  }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 8,  pergunta: 'A reação foi mais grave ao aumentar a dose?',
+    tooltip: 'Existe relação dose-resposta? Aumento da dose intensificou a reação; redução da dose a atenuou? Isso reforça a causalidade.',
+    sim: { valor: 1,  label: 'Sim (+1)' }, nao: { valor: 0,  label: 'Não (0)'  }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 9,  pergunta: 'O paciente já apresentou reação semelhante ao mesmo medicamento?',
+    tooltip: 'Há histórico prévio do paciente com reação adversa semelhante ao ser exposto ao mesmo agente farmacológico ou a agentes da mesma classe?',
+    sim: { valor: 1,  label: 'Sim (+1)' }, nao: { valor: 0,  label: 'Não (0)'  }, ns: { valor: 0, label: 'NS (0)' } },
+  { id: 10, pergunta: 'A reação adversa foi confirmada por evidência objetiva?',
+    tooltip: 'Exames complementares (laboratoriais, imagem, biópsia, etc.) confirmaram objetivamente a reação adversa de forma inequívoca?',
+    sim: { valor: 1,  label: 'Sim (+1)' }, nao: { valor: 0,  label: 'Não (0)'  }, ns: { valor: 0, label: 'NS (0)' } }
+];
+
+const NARANJO_FAIXAS = [
+  { min: -Infinity, max: 0, label: 'DUVIDOSA',  css: 'bg-gray-100 text-gray-700 border-gray-300',     ponto: 'Escore ≤ 0 — causalidade improvável'          },
+  { min: 1,  max: 4,        label: 'POSSÍVEL',  css: 'bg-yellow-50 text-yellow-800 border-yellow-300', ponto: 'Escore 1–4 — possível relação causal'          },
+  { min: 5,  max: 8,        label: 'PROVÁVEL',  css: 'bg-orange-50 text-orange-800 border-orange-400', ponto: 'Escore 5–8 — relação provavelmente causal'     },
+  { min: 9,  max: Infinity, label: 'DEFINIDA',  css: 'bg-red-50 text-red-800 border-red-400',          ponto: 'Escore ≥ 9 — relação definitivamente causal'   }
+];
+
+const CAMPOS_PROGRESSO = [
+  'invHistoriaClinica', 'invRelatoEvento',     'invExames',
+  'invReadministrado',  'invEvolucao',
+  'invGravidade',       'invDesfecho',         'invConclusao',
+  'invFarmaceutico',    'invObservacoes',      'invLote',
+  'invLaboratorio',
+  'invReacaoTermo',     'invDoseMedicamento',  'invDoseUnidade',
+  'invViaAdministracao','invDataInicioReacao'
+];
+
+// ---------------------------------------------------------
+// ESTADO INTERNO
+// ---------------------------------------------------------
+let _invIdAtual         = '';
+let _classNaranjoFinal  = 'DUVIDOSA';
+let _autosaveTimer      = null;
+const _rascunhosEmMemoria = new Map();
+
+// ---------------------------------------------------------
+// CONSTRUÇÃO DINÂMICA DO NARANJO
+// ---------------------------------------------------------
+function construirNaranjo() {
+  const container = document.getElementById('naranjoPerguntas');
+  if (!container) return;
+  container.innerHTML = '';
+
+  NARANJO_CONFIG.forEach(q => {
+    const row = document.createElement('div');
+    row.className = 'naranjo-row flex items-center justify-between py-2 border-b border-gray-100 gap-3';
+    row.setAttribute('data-tooltip', q.tooltip);
+    row.innerHTML = `
+      <p class="text-xs text-gray-700 flex-1 leading-snug select-none">
+        <span class="font-bold text-gray-400 mr-1">${q.id}.</span>${escapeHtml(q.pergunta)}
+        <i class="fas fa-info-circle text-gray-300 ml-1 text-[10px]"></i>
+      </p>
+      <select class="naranjo-select text-xs border rounded-lg px-2 py-1.5 min-w-[110px]
+        focus:ring-2 focus:ring-blue-400 transition" onchange="calcularNaranjo()">
+        <option value="${q.ns.valor}">${escapeHtml(q.ns.label)}</option>
+        <option value="${q.sim.valor}">${escapeHtml(q.sim.label)}</option>
+        <option value="${q.nao.valor}">${escapeHtml(q.nao.label)}</option>
+      </select>`;
+    container.appendChild(row);
+  });
+}
+
+// ---------------------------------------------------------
+// NARANJO — CÁLCULO E BADGE
+// ---------------------------------------------------------
+function calcularNaranjo() {
+  let score = 0;
+  document.querySelectorAll('.naranjo-select').forEach(s => { score += parseInt(s.value) || 0; });
+
+  const faixa = NARANJO_FAIXAS.find(f => score >= f.min && score <= f.max) || NARANJO_FAIXAS[0];
+  _classNaranjoFinal = faixa.label;
+
+  const c = document.getElementById('naranjoFaixaContainer');
+  c.className = `flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-bold
+    transition-all duration-300 ${faixa.css}`;
+
+  document.getElementById('naranjoEscore').textContent        = score > 0 ? `+${score}` : `${score}`;
+  document.getElementById('naranjoClassificacao').textContent  = faixa.label;
+  document.getElementById('naranjoInterpretacao').textContent  = faixa.ponto;
+
+  agendarAutosave();
+}
+
+// ---------------------------------------------------------
+// HELPER — calcula idade a partir de data de nascimento
+// ---------------------------------------------------------
+function _calcularIdade(nascimento) {
+  if (!nascimento || nascimento === 'N/I') return '';
+  let d;
+  const m1 = String(nascimento).match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  const m2 = String(nascimento).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m1)      d = new Date(parseInt(m1[3]), parseInt(m1[2]) - 1, parseInt(m1[1]));
+  else if (m2) d = new Date(parseInt(m2[1]), parseInt(m2[2]) - 1, parseInt(m2[3]));
+  else         d = new Date(nascimento);
+  if (isNaN(d)) return '';
+  const hoje  = new Date();
+  let anos    = hoje.getFullYear() - d.getFullYear();
+  const m     = hoje.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && hoje.getDate() < d.getDate())) anos--;
+  if (anos < 0 || anos > 130) return '';
+  return `${anos} anos`;
+}
+
+// ---------------------------------------------------------
+// ABRIR MODAL — ETAPA 1: cabeçalho instantâneo (dados resumo em memória)
+// ---------------------------------------------------------
+function abrirInvestigacao(id) {
+  const caso = casosGlobais.find(c => c.id === id);
+  if (!caso) return;
+
+  _invIdAtual = id;
+
+  // Cabeçalho read-only — dados de resumo já disponíveis, sem espera
+  document.getElementById('invProntuario').innerText  = caso.prontuario;
+  document.getElementById('invSetor').innerText       = caso.setor;
+  document.getElementById('invMedicamento').innerText = caso.medicamento;
+  document.getElementById('invTipoBadge').innerText   = caso.tipo;
+  document.getElementById('invDataEvento').innerText  = formatarDataExibicao(caso.data_evento) || '-';
+  document.getElementById('invSubtitulo').textContent = `ID: ${caso.id} · ${caso.setor}`;
+  _aplicarModoSomenteLeitura(caso.status === STATUS.CONCLUIDO);
+
+  const elIniciais = document.getElementById('invIniciais');
+  const elIdade    = document.getElementById('invIdade');
+  if (elIniciais) elIniciais.innerText = caso.paciente || '-';
+  if (elIdade) {
+    const idade = _calcularIdade(caso.data_nascimento || caso.nascimento);
+    elIdade.innerText = idade || (caso.data_nascimento && caso.data_nascimento !== 'N/I'
+      ? caso.data_nascimento : '-');
+  }
+
+  _limparFormularioInvestigacao();
+  document.getElementById('modalInvestigacao').classList.remove('hidden');
+  _mostrarCarregandoInvestigacao(true);
+
+  // ETAPA 2: busca o detalhe completo (P2) — só agora traz história
+  // clínica, Naranjo, PII do notificador etc. Payload pesado fica fora
+  // da sincronização geral do Kanban.
+  google.script.run
+    .withSuccessHandler(casoCompleto => {
+      _mostrarCarregandoInvestigacao(false);
+      _preencherFormularioInvestigacao(casoCompleto);
+    })
+    .withFailureHandler(err => {
+      _mostrarCarregandoInvestigacao(false);
+      mostrarToast('Erro ao carregar detalhes do caso: ' + (err.message || err), 'erro');
+      fecharModalInvestigacao();
+    })
+    .getCasoDetalhado(id, tokenSessao);
+}
+
+
+
+/**
+ * Alterna um leve estado de "carregando" no formulário enquanto o
+ * detalhe completo é buscado. Elementos são OPCIONAIS — se
+ * #invCarregandoDetalhe ou #formInvestigacaoCampos não existirem no
+ * index.html, a função simplesmente não faz nada (sem quebrar).
+ * Sugestão: adicionar um <div id="invCarregandoDetalhe" class="hidden">
+ * com um spinner no topo do modal, e envolver os campos do formulário
+ * num container id="formInvestigacaoCampos" para o efeito de opacidade.
+ */
+function _mostrarCarregandoInvestigacao(mostrar) {
+  const elSpinner = document.getElementById('invCarregandoDetalhe');
+  if (elSpinner) elSpinner.classList.toggle('hidden', !mostrar);
+  const elForm = document.getElementById('formInvestigacaoCampos');
+  if (elForm) elForm.classList.toggle('opacity-40', mostrar);
+}
+
+function _limparFormularioInvestigacao() {
+  ['invHistoriaClinica','invRelatoEvento','invExames','invNumVigimed',
+   'invDataVigimed','invObservacoes','invLote','invLaboratorio','invFarmaceutico',
+   'invReacaoTermo','invDoseMedicamento','invDoseUnidade',
+   'invViaAdministracao','invDataInicioReacao',
+   'invDataInicioAdministracao','invDataNascimento',
+   // Fase 2 (roadmap) — campos novos da tela de investigação
+   'invAcaoAdotada','invRelacaoMedicamentoEvento','invFormaFarmaceutica',
+   'invIndicacaoUso','invDataFimAdministracao','invNumeroDosesIntervalo',
+   'invUnidadeIntervalo','invPesoKg','invAlturaCm','invDataFimReacao',
+   'invDum','invDataObito'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.querySelectorAll('.naranjo-select').forEach(s => s.value = '0');
+  calcularNaranjo();
+  const bloco = document.getElementById('invBlocoNotificador');
+  if (bloco) bloco.classList.add('hidden');
+
+  // Fase 2 (roadmap)
+  const elGestante = document.getElementById('invGestante');
+  if (elGestante) elGestante.checked = false;
+  const elLactante = document.getElementById('invLactante');
+  if (elLactante) elLactante.checked = false;
+  document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]').forEach(c => c.checked = false);
+  const blocoGestante = document.getElementById('invBlocoGestante');
+  if (blocoGestante) blocoGestante.classList.add('hidden');
+  const blocoObito = document.getElementById('invBlocoObito');
+  if (blocoObito) blocoObito.classList.add('hidden');
+  _renderizarExamesEstruturados([]);
+}
+
+function _preencherFormularioInvestigacao(caso) {
+  document.getElementById('invHistoriaClinica').value = caso.historiaClinica || '';
+  document.getElementById('invRelatoEvento').value    = caso.relatoEvento    || '';
+  document.getElementById('invExames').value          = caso.exames          || '';
+  document.getElementById('invNumVigimed').value      = caso.numVigimed      || '';
+  document.getElementById('invDataVigimed').value     = paraInputDateTimeLocal(caso.dataVigimed);
+  document.getElementById('invObservacoes').value     = caso.observacoes     || '';
+  const elLote = document.getElementById('invLote');
+  if (elLote) elLote.value = caso.lote || '';
+  const elLab = document.getElementById('invLaboratorio');
+  if (elLab) elLab.value = caso.laboratorio || '';
+
+  // Fase 8 / Exportação E2B(R3) — campos opcionais, preenche se existirem no DOM
+  const elReacaoTermo = document.getElementById('invReacaoTermo');
+  if (elReacaoTermo) elReacaoTermo.value = caso.reacaoTermo || '';
+  const elDose = document.getElementById('invDoseMedicamento');
+  if (elDose) elDose.value = caso.doseMedicamento || '';
+  const elDoseUnidade = document.getElementById('invDoseUnidade');
+  if (elDoseUnidade) elDoseUnidade.value = caso.doseUnidade || '';
+  const elVia = document.getElementById('invViaAdministracao');
+  if (elVia) elVia.value = caso.viaAdministracao || '';
+  const elDataReacao = document.getElementById('invDataInicioReacao');
+  if (elDataReacao) elDataReacao.value = paraInputDateTimeLocal(caso.dataInicioReacao);
+  const elDataAdm = document.getElementById('invDataInicioAdministracao');
+  if (elDataAdm) elDataAdm.value = paraInputDateTimeLocal(caso.dataInicioAdministracao);
+  const elNasc = document.getElementById('invDataNascimento');
+  if (elNasc) elNasc.value = caso.nascimento || '';
+
+  // Fase 2 (roadmap) — campos novos, opcionais no DOM
+  const elIndicacaoUso = document.getElementById('invIndicacaoUso');
+  if (elIndicacaoUso) elIndicacaoUso.value = caso.indicacaoUso || '';
+  const elFormaFarm = document.getElementById('invFormaFarmaceutica');
+  if (elFormaFarm) elFormaFarm.value = caso.formaFarmaceutica || '';
+  const elDataFimAdm = document.getElementById('invDataFimAdministracao');
+  if (elDataFimAdm) elDataFimAdm.value = paraInputDateTimeLocal(caso.dataFimAdministracao);
+  const elNumDoses = document.getElementById('invNumeroDosesIntervalo');
+  if (elNumDoses) elNumDoses.value = caso.numeroDosesIntervalo || '';
+  const elPeso = document.getElementById('invPesoKg');
+  if (elPeso) elPeso.value = caso.pesoKg || '';
+  const elAltura = document.getElementById('invAlturaCm');
+  if (elAltura) elAltura.value = caso.alturaCm || '';
+  const elDataFimReacao = document.getElementById('invDataFimReacao');
+  if (elDataFimReacao) elDataFimReacao.value = paraInputDateTimeLocal(caso.dataFimReacao);
+  const elDum = document.getElementById('invDum');
+  if (elDum) elDum.value = caso.dum || '';
+  const elDataObito = document.getElementById('invDataObito');
+  if (elDataObito) elDataObito.value = caso.dataObito || '';
+  const elGestante = document.getElementById('invGestante');
+  if (elGestante) elGestante.checked = !!caso.gestante;
+  const elLactante = document.getElementById('invLactante');
+  if (elLactante) elLactante.checked = !!caso.lactante;
+
+  document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]').forEach(c => {
+    c.checked = Array.isArray(caso.problemasAdicionais) && caso.problemasAdicionais.includes(c.value);
+  });
+
+  // F2-13 — só mostra DUM/Gestante/Lactante se o sexo (ETL, não editável
+  // neste modal) for Feminino.
+  const blocoGestante = document.getElementById('invBlocoGestante');
+  if (blocoGestante) {
+    const sexo = String(caso.sexo || '').toUpperCase();
+    blocoGestante.classList.toggle('hidden', sexo !== 'F' && sexo !== 'FEMININO');
+  }
+  _renderizarExamesEstruturados(caso.examesEstruturados || []);
+
+  _setSelectSeguro('invReadministrado', caso.readministrado);
+  _setSelectSeguro('invEvolucao',       caso.evolucao);
+  _setSelectSeguro('invDesfecho',       caso.desfecho);
+  _setSelectSeguro('invConclusao',      caso.conclusao);
+  _setSelectSeguro('invGravidade',      caso.gravidade);
+  _setSelectSeguro('invAcaoAdotada',              caso.acaoAdotada);
+  _setSelectSeguro('invRelacaoMedicamentoEvento', caso.relacaoMedicamentoEvento);
+  _setSelectSeguro('invUnidadeIntervalo',         caso.unidadeIntervalo);
+  _toggleBlocoObito(); // depende de invDesfecho já setado acima
+
+  const farmaDoCaso   = (caso.farmaceutico || '').trim();
+  const farmaCanonica = getFarmaceuticoPorSetor(caso.setor);
+  document.getElementById('invFarmaceutico').value = farmaDoCaso || farmaCanonica;
+  _sinalizarFarmaceuticoAutopreenchido(!!((!farmaDoCaso) && farmaCanonica));
+
+  const selects = document.querySelectorAll('.naranjo-select');
+  if (caso.naranjoRespostas) {
+    const resp = caso.naranjoRespostas.split('|');
+    selects.forEach((s, i) => { s.value = resp[i] !== undefined ? resp[i] : '0'; });
+  } else {
+    selects.forEach(s => s.value = '0');
+  }
+  calcularNaranjo();
+
+  _carregarRascunhoMemoria(_invIdAtual);
+  atualizarProgresso();
+  _preencherBlocoNotificador(caso);
+}
+
+// ---------------------------------------------------------
+// FASE 2 (roadmap) — F2-10: bloco de data do óbito só visível
+// quando Desfecho = Óbito. Chamada no onchange de invDesfecho (index.html)
+// e ao preencher o formulário (_preencherFormularioInvestigacao).
+// ---------------------------------------------------------
+function _toggleBlocoObito() {
+  const desfecho = (document.getElementById('invDesfecho') || {}).value || '';
+  const bloco = document.getElementById('invBlocoObito');
+  if (bloco) bloco.classList.toggle('hidden', desfecho.toUpperCase() !== 'ÓBITO');
+}
+
+// ---------------------------------------------------------
+// FASE 2 (roadmap) — F2-09: exames estruturados (subtabela repetível)
+// ---------------------------------------------------------
+let _examesEstruturadosSeq = 0;
+
+function _renderizarExamesEstruturados(lista) {
+  const corpo = document.getElementById('corpoExamesEstruturados');
+  if (!corpo) return;
+  corpo.innerHTML = '';
+  _examesEstruturadosSeq = 0;
+  (Array.isArray(lista) ? lista : []).forEach(exame => _adicionarLinhaExameEstruturado(exame));
+  if (corpo.children.length === 0) _adicionarLinhaExameEstruturado();
+}
+
+/** Chamada pelo botão "Adicionar Exame" — linha em branco + autosave. */
+function adicionarLinhaExameEstruturado() {
+  _adicionarLinhaExameEstruturado();
+  agendarAutosave();
+}
+
+function _adicionarLinhaExameEstruturado(exame) {
+  const corpo = document.getElementById('corpoExamesEstruturados');
+  if (!corpo) return;
+  const id = 'exameLinha' + (_examesEstruturadosSeq++);
+  const e = exame || {};
+  const tr = document.createElement('tr');
+  tr.id = id;
+  tr.className = 'border-b border-gray-100';
+  tr.innerHTML = `
+    <td class="py-1 px-2"><input type="text" class="exame-nome w-full border rounded px-2 py-1 text-xs uppercase" value="${escapeHtml(e.nome || '')}"></td>
+    <td class="py-1 px-2"><input type="date" class="exame-data w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.data || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-valor w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.valor || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-unidade w-full border rounded px-2 py-1 text-xs" placeholder="mg/dL" value="${escapeHtml(e.unidade || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-refmin w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMin || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-refmax w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMax || '')}"></td>
+    <td class="py-1 px-2"><button type="button" onclick="document.getElementById('${id}').remove(); agendarAutosave();" class="text-red-400 hover:text-red-600" title="Remover exame"><i class="fas fa-trash-alt"></i></button></td>`;
+  tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', agendarAutosave));
+  corpo.appendChild(tr);
+}
+
+/** Lê a subtabela de exames — linhas totalmente vazias são descartadas aqui e de novo no backend (registrarInvestigacao). */
+function _coletarExamesEstruturados() {
+  const linhas = document.querySelectorAll('#corpoExamesEstruturados tr');
+  return [...linhas].map(tr => ({
+    nome:    (tr.querySelector('.exame-nome')    || {}).value || '',
+    data:    (tr.querySelector('.exame-data')    || {}).value || '',
+    valor:   (tr.querySelector('.exame-valor')   || {}).value || '',
+    unidade: (tr.querySelector('.exame-unidade') || {}).value || '',
+    refMin:  (tr.querySelector('.exame-refmin')  || {}).value || '',
+    refMax:  (tr.querySelector('.exame-refmax')  || {}).value || ''
+  })).filter(e => e.nome || e.valor);
+}
+
+// ---------------------------------------------------------
+// MODO SOMENTE LEITURA (casos CONCLUÍDOS)
+// ---------------------------------------------------------
+function _aplicarModoSomenteLeitura(somenteLeitura) {
+  const form = document.getElementById('formInvestigacao');
+  if (form) {
+    form.querySelectorAll('input, select, textarea').forEach(el => {
+      if (el.id === 'invNumVigimed' || el.id === 'invDataVigimed') return; // regidos à parte
+      el.disabled = somenteLeitura;
+    });
+  }
+  document.querySelectorAll('.naranjo-select').forEach(s => s.disabled = somenteLeitura);
+
+  const btnRascunho    = document.getElementById('btnRascunho');
+  const btnFinalizar   = document.getElementById('btnFinalizar');
+  const btnReabrir     = document.getElementById('btnReabrir');
+  const btnExportarE2B = document.getElementById('btnExportarE2B');
+  const blocoVigimed   = document.getElementById('invBlocoConclusaoVigimed');
+
+  if (btnRascunho)     btnRascunho.classList.toggle('hidden', somenteLeitura);
+  if (btnFinalizar)    btnFinalizar.classList.toggle('hidden', somenteLeitura);
+  if (btnReabrir)      btnReabrir.classList.toggle('hidden', !somenteLeitura);
+  if (btnExportarE2B)  btnExportarE2B.classList.toggle('hidden', !somenteLeitura);
+  if (blocoVigimed)    blocoVigimed.classList.toggle('hidden', !somenteLeitura);
+}
+
+// ---------------------------------------------------------
+// REABRIR CASO CONCLUÍDO
+// ---------------------------------------------------------
+function reabrirCaso() {
+  if (!_invIdAtual) return;
+  if (!confirm('Retornar este caso para "Em Investigação"? Os campos voltarão a ficar editáveis.')) return;
+
+  const btn = document.getElementById('btnReabrir');
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  btn.disabled  = true;
+
+  google.script.run
+    .withSuccessHandler(casoAtualizado => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      atualizarCasoLocal(casoAtualizado);
+      _aplicarModoSomenteLeitura(false);
+      mostrarToast('Caso reaberto para investigação.', 'sucesso');
+    })
+    .withFailureHandler(err => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      mostrarToast('Erro ao reabrir: ' + (err.message || err), 'erro');
+    })
+    .reabrirInvestigacao(_invIdAtual, tokenSessao);
+}
+
+// ---------------------------------------------------------
+// REGISTRAR IMPORTAÇÃO VIGIMED (tela de conclusão)
+// ---------------------------------------------------------
+function salvarImportacaoVigimed() {
+  if (!_invIdAtual) return;
+
+  const numVigimed  = document.getElementById('invNumVigimed').value.trim();
+  const dataVigimed = document.getElementById('invDataVigimed').value;
+  if (!numVigimed || !dataVigimed) {
+    mostrarToast('Informe o número e a data da importação no VigiMed.', 'erro');
+    return;
+  }
+
+  const btn = document.getElementById('btnSalvarVigimed');
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  btn.disabled  = true;
+
+  google.script.run
+    .withSuccessHandler(casoAtualizado => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      atualizarCasoLocal(casoAtualizado);
+      mostrarToast('Importação VigiMed registrada.', 'sucesso');
+    })
+    .withFailureHandler(err => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      mostrarToast('Erro ao registrar: ' + (err.message || err), 'erro');
+    })
+    .registrarImportacaoVigimed({ idCaso: _invIdAtual, numVigimed, dataVigimed }, tokenSessao);
+}
+
+/**
+ * Fase 6 — Preenche o bloco read-only com o relato ORIGINAL da assistência.
+ */
+function _preencherBlocoNotificador(caso) {
+  const bloco = document.getElementById('invBlocoNotificador');
+  if (!bloco) return;
+
+  const temDados = caso.relatoNotificador || caso.condutaNotificador || caso.notifNome;
+  if (caso.tipo !== 'DE' && !temDados) { bloco.classList.add('hidden'); return; }
+
+  document.getElementById('invNotifRelato').textContent  = caso.relatoNotificador  || '—';
+  document.getElementById('invNotifConduta').textContent = caso.condutaNotificador || '—';
+
+  const partes = [];
+  if (caso.notifNome)       partes.push('Notificado por: ' + caso.notifNome);
+  if (caso.notifCategoria)  partes.push('(' + caso.notifCategoria + ')');
+  if (caso.dataNotificacao) partes.push('em ' + caso.dataNotificacao);
+  if (caso.notifEmail)      partes.push('· feedback: ' + caso.notifEmail);
+  document.getElementById('invNotifMeta').textContent = partes.join(' ');
+
+  bloco.classList.remove('hidden');
+}
+
+function _setSelectSeguro(id, valor) {
+  const el = document.getElementById(id);
+  if (!el || !valor) return;
+  if ([...el.options].some(o => o.value === valor)) {
+    el.value = valor;
+  }
+}
+
+function _sinalizarFarmaceuticoAutopreenchido(auto) {
+  const el = document.getElementById('invFarmaceutico');
+  if (!el) return;
+  if (auto) {
+    el.classList.add('border-teal-400', 'bg-teal-50');
+    el.title = 'Preenchido automaticamente com o farmacêutico responsável pelo setor (DB_Setores). Edite se necessário.';
+  } else {
+    el.classList.remove('border-teal-400', 'bg-teal-50');
+    el.title = '';
+  }
+}
+
+// ---------------------------------------------------------
+// FECHAR MODAL
+// ---------------------------------------------------------
+function fecharModalInvestigacao() {
+  if (_autosaveTimer) clearTimeout(_autosaveTimer);
+  document.getElementById('modalInvestigacao').classList.add('hidden');
+  _invIdAtual = '';
+}
+
+// ---------------------------------------------------------
+// PROGRESSO
+// ---------------------------------------------------------
+function atualizarProgresso() {
+  let preenchidos = 0;
+  CAMPOS_PROGRESSO.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el.value && el.value.trim()) preenchidos++;
+  });
+
+  let narRespondidas = 0;
+  document.querySelectorAll('.naranjo-select').forEach(s => {
+    if (s.value !== '0') narRespondidas++;
+  });
+  if (narRespondidas >= 5) preenchidos = Math.min(preenchidos + 1, CAMPOS_PROGRESSO.length);
+
+  const total = CAMPOS_PROGRESSO.length;
+  const pct   = Math.round((preenchidos / total) * 100);
+
+  document.getElementById('barraProgresso').style.width = pct + '%';
+  document.getElementById('barraProgresso').className =
+    'h-2 rounded-full transition-all duration-300 ' +
+    (pct < 40 ? 'bg-red-400' : pct < 70 ? 'bg-yellow-400' : 'bg-green-500');
+
+  document.getElementById('textoProgresso').textContent    = `${preenchidos} de ${total} campos`;
+  document.getElementById('textoProgressoPct').textContent = `${pct}%`;
+}
+
+// ---------------------------------------------------------
+// AUTOSAVE (debounce 2s) — memória em vez de localStorage
+// ---------------------------------------------------------
+function agendarAutosave() {
+  if (_autosaveTimer) clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(_salvarRascunhoMemoria, 2000);
+}
+
+function _salvarRascunhoMemoria() {
+  if (!_invIdAtual) return;
+  _rascunhosEmMemoria.set(_invIdAtual, {
+    ts:    Date.now(),
+    dados: _coletarFormulario(false)
+  });
+  _mostrarIndicadorAutosave();
+}
+
+function _carregarRascunhoMemoria(id) {
+  const entry = _rascunhosEmMemoria.get(id);
+  if (!entry) return;
+
+  const { dados } = entry;
+  const mesclar = (elId, val) => {
+    const el = document.getElementById(elId);
+    if (el && val && !el.value) el.value = val;
+  };
+  mesclar('invHistoriaClinica', dados.historiaClinica);
+  mesclar('invRelatoEvento',    dados.relatoEvento);
+  mesclar('invExames',          dados.exames);
+  mesclar('invFarmaceutico',    dados.farmaceutico);
+  mesclar('invObservacoes',     dados.observacoes);
+  mesclar('invLote',            dados.lote);
+  mesclar('invLaboratorio',     dados.laboratorio);
+  // Fase 2 (roadmap) — só os campos de texto livre; datas/selects/checkboxes/
+  // subtabela ficam de fora do rascunho em memória por simplicidade (o
+  // "Salvar Rascunho" via backend continua persistindo tudo normalmente).
+  mesclar('invIndicacaoUso',      dados.indicacaoUso);
+  mesclar('invFormaFarmaceutica', dados.formaFarmaceutica);
+  atualizarProgresso();
+}
+
+function _mostrarIndicadorAutosave() {
+  const el = document.getElementById('autosaveStatus');
+  if (!el) return;
+  el.style.opacity = '1';
+  setTimeout(() => { el.style.opacity = '0'; }, 2500);
+}
+
+// ---------------------------------------------------------
+// COLETAR DADOS DO FORMULÁRIO
+// ---------------------------------------------------------
+function _coletarFormulario(encerrar) {
+  const respNaranjo = Array.from(document.querySelectorAll('.naranjo-select'))
+    .map(s => s.value).join('|');
+
+  return {
+    idCaso:          _invIdAtual,
+    historiaClinica: document.getElementById('invHistoriaClinica').value,
+    relatoEvento:    document.getElementById('invRelatoEvento').value,
+    exames:          document.getElementById('invExames').value,
+    readministrado:  document.getElementById('invReadministrado').value,
+    evolucao:        document.getElementById('invEvolucao').value,
+    desfecho:        document.getElementById('invDesfecho').value,
+    conclusao:       document.getElementById('invConclusao').value,
+    naranjo:         _classNaranjoFinal,
+    naranjoRespostas: respNaranjo,
+    gravidade:       document.getElementById('invGravidade').value,
+    farmaceutico:    document.getElementById('invFarmaceutico').value,
+    numVigimed:      document.getElementById('invNumVigimed').value,
+    dataVigimed:     document.getElementById('invDataVigimed').value,
+    observacoes:     document.getElementById('invObservacoes').value,
+    lote:            (document.getElementById('invLote')        || {}).value || '',
+    laboratorio:     (document.getElementById('invLaboratorio') || {}).value || '',
+
+    // Fase 8 / Exportação E2B(R3)
+    reacaoTermo:       (document.getElementById('invReacaoTermo')      || {}).value || '',
+    doseMedicamento:   (document.getElementById('invDoseMedicamento')  || {}).value || '',
+    doseUnidade:       (document.getElementById('invDoseUnidade')      || {}).value || '',
+    viaAdministracao:  (document.getElementById('invViaAdministracao') || {}).value || '',
+    dataInicioReacao:  (document.getElementById('invDataInicioReacao')|| {}).value || '',
+    dataInicioAdministracao: (document.getElementById('invDataInicioAdministracao') || {}).value || '',
+    nascimento:              (document.getElementById('invDataNascimento')          || {}).value || '',
+
+    // Fase 2 (roadmap) — campos novos da tela de investigação
+    acaoAdotada:              (document.getElementById('invAcaoAdotada')              || {}).value || '',
+    indicacaoUso:             (document.getElementById('invIndicacaoUso')             || {}).value || '',
+    dataFimAdministracao:     (document.getElementById('invDataFimAdministracao')     || {}).value || '',
+    dataFimReacao:            (document.getElementById('invDataFimReacao')            || {}).value || '',
+    pesoKg:                   (document.getElementById('invPesoKg')                   || {}).value || '',
+    alturaCm:                 (document.getElementById('invAlturaCm')                 || {}).value || '',
+    formaFarmaceutica:        (document.getElementById('invFormaFarmaceutica')        || {}).value || '',
+    numeroDosesIntervalo:     (document.getElementById('invNumeroDosesIntervalo')     || {}).value || '',
+    unidadeIntervalo:         (document.getElementById('invUnidadeIntervalo')         || {}).value || '',
+    examesEstruturados:       _coletarExamesEstruturados(),
+    dataObito:                (document.getElementById('invDataObito')                || {}).value || '',
+    relacaoMedicamentoEvento: (document.getElementById('invRelacaoMedicamentoEvento') || {}).value || '',
+    problemasAdicionais:      [...document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]:checked')].map(c => c.value),
+    dum:                      (document.getElementById('invDum')                      || {}).value || '',
+    gestante:                 (document.getElementById('invGestante') || {}).checked || false,
+    lactante:                 (document.getElementById('invLactante') || {}).checked || false,
+
+    encerrar:        encerrar
+  };
+}
+
+// ---------------------------------------------------------
+// ENVIO COM VALIDAÇÃO INTELIGENTE
+// ---------------------------------------------------------
+function enviarInvestigacao(finalizar) {
+  if (finalizar) {
+    const obrigatorios = [
+      { id: 'invHistoriaClinica',  label: 'História Clínica'          },
+      { id: 'invRelatoEvento',     label: 'Relato do Evento'          },
+      { id: 'invExames',           label: 'Exames Complementares'     },
+      { id: 'invReadministrado',   label: 'Readministração'           },
+      { id: 'invEvolucao',         label: 'Evolução'                  },
+      { id: 'invGravidade',        label: 'Gravidade'                 },
+      { id: 'invDesfecho',         label: 'Desfecho'                  },
+      { id: 'invConclusao',        label: 'Conclusão'                 },
+      { id: 'invFarmaceutico',     label: 'Farmacêutico(a)'           },
+      { id: 'invReacaoTermo',      label: 'Reação (termo curto)'      },
+      { id: 'invDoseMedicamento',  label: 'Dose'                      },
+      { id: 'invDoseUnidade',      label: 'Unidade da Dose'           },
+      { id: 'invViaAdministracao', label: 'Via de Administração'      },
+      { id: 'invDataInicioReacao', label: 'Data de Início da Reação'  }
+    ];
+    const faltando = obrigatorios.filter(c => !document.getElementById(c.id).value);
+
+    const narRespondidas = Array.from(document.querySelectorAll('.naranjo-select'))
+      .filter(s => s.value !== '0').length;
+    if (narRespondidas < 10) {
+      mostrarToast('Para finalizar, responda todas as 10 perguntas do Algoritmo de Naranjo.', 'erro');
+      return;
+    }
+    if (faltando.length > 0) {
+      mostrarToast(`Para finalizar, preencha: ${faltando.map(c => c.label).join(', ')}.`, 'erro');
+      faltando.forEach(c => {
+        const el = document.getElementById(c.id);
+        el.classList.add('border-red-400', 'ring-2', 'ring-red-200');
+        el.addEventListener('change', () => {
+          el.classList.remove('border-red-400', 'ring-2', 'ring-red-200');
+        }, { once: true });
+      });
+      return;
+    }
+  }
+
+  const btn = finalizar
+    ? document.getElementById('btnFinalizar')
+    : document.getElementById('btnRascunho');
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  btn.disabled  = true;
+
+  google.script.run
+    .withSuccessHandler(casoAtualizado => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      if (finalizar) _rascunhosEmMemoria.delete(_invIdAtual);
+      fecharModalInvestigacao();
+      atualizarCasoLocal(casoAtualizado);
+      mostrarToast(finalizar ? 'Investigação finalizada.' : 'Rascunho salvo.', 'sucesso');
+    })
+    .withFailureHandler(err => {
+      mostrarToast('Erro ao salvar: ' + err.message, 'erro');
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+    })
+    .registrarInvestigacao(_coletarFormulario(finalizar), tokenSessao);
+}
+
+// ---------------------------------------------------------
+// EXPORTAÇÃO E2B(R3) — Fase 8
+// ---------------------------------------------------------
+function exportarE2B() {
+  if (!_invIdAtual) return;
+
+  const btn = document.getElementById('btnExportarE2B');
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  btn.disabled  = true;
+
+  google.script.run
+    .withSuccessHandler(resultado => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+
+      if (resultado.avisos && resultado.avisos.length) {
+        mostrarToast('XML gerado com avisos: ' + resultado.avisos.join(' | '), 'erro');
+      } else {
+        mostrarToast('XML E2B gerado: ' + resultado.nomeArquivo, 'sucesso');
+      }
+
+      // Download via Blob — google.script.run não retorna arquivo diretamente,
+      // então construímos o Blob no cliente e disparamos o download.
+      const blob = new Blob([resultado.xml], { type: 'application/xml' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = resultado.nomeArquivo;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    })
+    .withFailureHandler(err => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      mostrarToast('Erro ao gerar E2B: ' + (err.message || err), 'erro');
+    })
+    .gerarXmlE2B(_invIdAtual, tokenSessao);
+}
+</script>

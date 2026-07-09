@@ -1,0 +1,359 @@
+<script>
+// =========================================================
+// js_kanban.html — v2.2
+//
+// ATUALIZAÇÃO DESTA VERSÃO:
+//   B1 — construirCard() exibe iniciais do paciente e idade
+//        calculada (a partir de data_nascimento) logo abaixo
+//        do prontuário. Renderização condicional: se os campos
+//        vierem como "N/I" ou vazios, a linha não é exibida
+//        para não poluir cards de casos BA antigos.
+//   B2 — Coluna "Em Investigação" não exibe mais badge de SLA.
+//        Prazo regulatório vale só para a fase Triagem (entrada
+//        do gatilho até avaliação inicial); investigação clínica
+//        não tem prazo fixo institucional. Card mostra apenas
+//        "Em análise desde <data>". Ordenação da coluna passa a
+//        ser por data_evento (mais antigo primeiro, FIFO) em vez
+//        de status de SLA. Filtro "Qualquer prazo" (filtroSLA)
+//        passa a filtrar somente casos em Triagem.
+//
+// Depende de: js_core (escapeHtml, STATUS, calcularSLA,
+//   badgeSLAHtml, casosGlobais, casosFiltrados, paginaAtual,
+//   CARDS_POR_PAGINA, mapaSetorResponsavel, getFarmaceuticoPorSetor)
+// Chama: abrirTriagem (js_triagem), abrirInvestigacao (js_investigacao)
+// =========================================================
+
+// ---------------------------------------------------------
+// SKELETONS
+// ---------------------------------------------------------
+function mostrarSkeletons() {
+  ['coluna-triagem', 'coluna-investigacao', 'coluna-concluidos'].forEach(id => {
+    const col = document.getElementById(id);
+    col.innerHTML = '';
+    for (let i = 0; i < 4; i++) col.innerHTML += '<div class="skeleton skeleton-card"></div>';
+  });
+}
+
+function limparSkeletons() {
+  ['coluna-triagem', 'coluna-investigacao', 'coluna-concluidos'].forEach(id => {
+    document.getElementById(id).innerHTML = '';
+  });
+}
+
+// ---------------------------------------------------------
+// FILTROS E BUSCA
+// ---------------------------------------------------------
+function limparFiltros() {
+  document.getElementById('inputBusca').value          = '';
+  document.getElementById('filtroSetor').value         = 'TODOS';
+  document.getElementById('filtroFarmaceutico').value  = 'TODOS';
+  document.getElementById('filtroSLA').value           = 'TODOS';
+  document.getElementById('filtroDe').value            = '';
+  document.getElementById('filtroAte').value           = '';
+  processarFiltros();
+}
+
+function processarFiltros() {
+  const busca     = document.getElementById('inputBusca').value.trim().toLowerCase();
+  const setor     = document.getElementById('filtroSetor').value;
+  const farmaceut = document.getElementById('filtroFarmaceutico').value;
+  const slaFiltro = document.getElementById('filtroSLA').value;
+  const dataDe    = document.getElementById('filtroDe').value;
+  const dataAte   = document.getElementById('filtroAte').value;
+
+  const casosFiltradosLocal = casosGlobais.filter(c => {
+    if (busca) {
+      const pront = String(c.prontuario   || '').toLowerCase();
+      const med   = String(c.medicamento  || '').toLowerCase();
+      const inic  = String(c.paciente     || '').toLowerCase();
+      if (!pront.includes(busca) && !med.includes(busca) && !inic.includes(busca)) return false;
+    }
+
+    if (setor !== 'TODOS' && c.setor !== setor) return false;
+
+    if (farmaceut !== 'TODOS') {
+      const canonico = getFarmaceuticoPorSetor(c.setor);
+      const doCaso   = (c.farmaceutico || '').trim();
+      if (canonico !== farmaceut && doCaso !== farmaceut) return false;
+    }
+
+    // B2 — filtro de prazo agora só se aplica a casos em Triagem;
+    // Investigação não tem SLA exibido, então não deve ser
+    // afetada/escondida por este filtro.
+    if (slaFiltro !== 'TODOS' && c.status === STATUS.TRIAGEM && calcularSLA(c).status !== slaFiltro) return false;
+
+    if (dataDe || dataAte) {
+      const p = (c.data_evento || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (p) {
+        const dEv = new Date(parseInt(p[3]), parseInt(p[2]) - 1, parseInt(p[1]));
+        if (dataDe && dEv < new Date(dataDe)) return false;
+        if (dataAte && dEv > new Date(dataAte)) return false;
+      }
+    }
+
+    return true;
+  });
+
+  const ordenarPorSLA = lista => lista.slice().sort((a, b) => {
+    const ord = { VENCIDO: 0, VENCENDO: 1, SEM: 2, OK: 3 };
+    return (ord[calcularSLA(a).status] ?? 4) - (ord[calcularSLA(b).status] ?? 4);
+  });
+
+  // B2 — Investigação ordena por data do evento (mais antigo primeiro),
+  // já que não existe mais ranking por SLA nesta coluna.
+  const ordenarPorDataEvento = lista => lista.slice().sort((a, b) => {
+    const pa = new Date((a.data_evento || '').replace(/^(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'));
+    const pb = new Date((b.data_evento || '').replace(/^(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'));
+    return (isNaN(pa) ? 0 : pa) - (isNaN(pb) ? 0 : pb);
+  });
+
+  casosFiltrados.triagem      = ordenarPorSLA(casosFiltradosLocal.filter(c => c.status === STATUS.TRIAGEM));
+  casosFiltrados.investigacao = ordenarPorDataEvento(casosFiltradosLocal.filter(c => c.status === STATUS.INVESTIGACAO));
+  casosFiltrados.concluidos   = casosFiltradosLocal.filter(
+    c => c.status === STATUS.CONCLUIDO || c.status === STATUS.DESCARTADO
+  );
+
+  document.getElementById('contadorResultados').textContent =
+    `${casosFiltradosLocal.length} caso${casosFiltradosLocal.length !== 1 ? 's' : ''} exibido${casosFiltradosLocal.length !== 1 ? 's' : ''}`;
+
+  paginaAtual.triagem = paginaAtual.investigacao = paginaAtual.concluidos = 1;
+  renderizarColuna('triagem');
+  renderizarColuna('investigacao');
+  renderizarColuna('concluidos');
+
+  if (!document.getElementById('view-dashboard').classList.contains('hidden')) {
+    desenharGraficos();
+  }
+}
+
+// ---------------------------------------------------------
+// LAZY RENDER
+// ---------------------------------------------------------
+function renderizarColuna(tipo) {
+  configurarDelegacaoKanban();
+  const col   = document.getElementById(`coluna-${tipo}`);
+  const casos = casosFiltrados[tipo];
+  const slice = casos.slice(0, paginaAtual[tipo] * CARDS_POR_PAGINA);
+
+  col.innerHTML = casos.length === 0
+    ? construirEmptyState(tipo)
+    : slice.map(c => construirCard(c)).join('');
+
+  const idCont = {
+    triagem:      'contador-triagem',
+    investigacao: 'contador-investigacao',
+    concluidos:   'contador-concluidos'
+  }[tipo];
+  document.getElementById(idCont).textContent = casos.length;
+
+  const idBtn = {
+    triagem:      'btnMaisTriagem',
+    investigacao: 'btnMaisInvestigacao',
+    concluidos:   'btnMaisConcluidos'
+  }[tipo];
+  const btn   = document.getElementById(idBtn);
+  if (btn) {
+    const restam = casos.length - slice.length;
+    btn.classList.toggle('hidden', restam <= 0);
+    if (restam > 0)
+      btn.innerHTML = `<i class="fas fa-chevron-down mr-1"></i> Ver mais ${restam} casos`;
+  }
+}
+
+function carregarMais(tipo) {
+  paginaAtual[tipo]++;
+  renderizarColuna(tipo);
+}
+
+// ---------------------------------------------------------
+// EMPTY STATES
+// ---------------------------------------------------------
+function construirEmptyState(tipo) {
+  const cfg = {
+    triagem: {
+      ico: 'fa-check-circle', cor: 'text-orange-300',
+      titulo: 'Nenhum caso aguardando triagem',
+      sub: 'Os gatilhos detectados pelo robô aparecerão aqui.'
+    },
+    investigacao: {
+      ico: 'fa-search', cor: 'text-blue-300',
+      titulo: 'Nenhum caso em investigação',
+      sub: 'Casos triados como RAM serão movidos para cá.'
+    },
+    concluidos: {
+      ico: 'fa-archive', cor: 'text-gray-400',
+      titulo: 'Nenhum caso finalizado',
+      sub: 'Casos concluídos ou descartados aparecerão aqui.'
+    }
+  };
+  const c = cfg[tipo] || cfg.concluidos;
+  return `
+    <div class="flex flex-col items-center justify-center py-12 text-center">
+      <i class="fas ${c.ico} text-4xl ${c.cor} mb-3"></i>
+      <p class="font-semibold text-gray-500 text-sm">${c.titulo}</p>
+      <p class="text-xs text-gray-400 mt-1 max-w-[180px]">${c.sub}</p>
+    </div>`;
+}
+
+// ---------------------------------------------------------
+// CONSTRUÇÃO DOS CARDS
+//
+// B1 — Exibe iniciais do paciente e idade calculada abaixo
+//      do prontuário. Renderização condicional: só aparece
+//      quando o dado está disponível (≠ "N/I" e ≠ vazio),
+//      evitando poluição visual em casos BA antigos.
+// B2 — SLA (badgeSLAHtml) só é calculado/exibido para casos
+//      em STATUS.TRIAGEM. Investigação exibe tempo decorrido
+//      neutro ("Em análise desde"), sem conotação de atraso.
+// ---------------------------------------------------------
+function construirCard(caso) {
+  const isDE  = caso.tipo === 'DE';
+  const id    = escapeHtml(caso.id);
+  const tipo  = escapeHtml(caso.tipo);
+  const pront = escapeHtml(caso.prontuario);
+  const setor = escapeHtml(caso.setor);
+  const med   = escapeHtml(caso.medicamento);
+  const data  = escapeHtml(formatarDataExibicao(caso.data_evento)); // dd/MM/yyyy unificado (util em js_core)
+
+  // B1 — Iniciais + idade
+  const iniciais = (caso.paciente && caso.paciente !== 'N/I') ? caso.paciente : '';
+  const idade    = _calcularIdade(caso.data_nascimento || caso.nascimento || '');
+  const pacHtml  = (iniciais || idade)
+    ? `<p class="text-[10px] text-gray-500 mt-0.5 truncate">
+         ${iniciais ? `<span class="font-semibold">${escapeHtml(iniciais)}</span>` : ''}
+         ${iniciais && idade ? ' · ' : ''}
+         ${idade ? `<span>${escapeHtml(idade)}</span>` : ''}
+       </p>`
+    : '';
+
+  // Farmacêutico canônico
+  const farmaCanonica = getFarmaceuticoPorSetor(caso.setor);
+  const farmaNome     = farmaCanonica || caso.farmaceutico || '';
+  const farmaHtml     = farmaNome
+    ? `<p class="text-[10px] text-gray-400 mt-1 truncate flex items-center gap-1">
+         <i class="fas fa-user-md text-gray-300"></i>
+         <span class="font-semibold">${escapeHtml(farmaNome)}</span>
+       </p>`
+    : '';
+
+  // Badge de tipo: DE = roxo, BA = vermelho
+  const tipoCss = isDE ? 'bg-purple-100 text-purple-800' : 'bg-red-100 text-red-800';
+  const tipoIco = isDE ? 'fa-user-nurse'                 : 'fa-robot';
+
+  const base = `
+    <div class="kanban-card bg-white p-3 rounded-lg shadow-sm border border-gray-200 fade-in">
+      <div class="flex justify-between items-start mb-2">
+        <span class="${tipoCss} text-[10px] font-bold px-2 py-0.5 rounded-full uppercase flex items-center gap-1">
+          <i class="fas ${tipoIco}"></i> ${tipo}
+        </span>
+        <span class="text-[10px] text-gray-400 font-semibold">${data}</span>
+      </div>
+      <h3 class="font-bold text-gray-800 text-sm">Pront: <span class="text-teal-700">${pront}</span></h3>
+      ${pacHtml}
+      <p class="text-xs text-gray-500 truncate">Setor: <span class="font-semibold text-gray-700">${setor}</span></p>`;
+
+  if (caso.status === STATUS.TRIAGEM) {
+    return base + `
+      <p class="text-xs text-red-600 font-medium mt-1 truncate">
+        <i class="fas fa-exclamation-circle mr-1"></i>Gatilho: ${med}
+      </p>
+      ${farmaHtml}
+      <div class="mt-2">${badgeSLAHtml(caso)}</div>
+      <button data-acao="triar" data-id="${id}"
+        class="w-full bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold py-1.5
+               rounded-lg mt-3 shadow-sm transition flex items-center justify-center gap-1">
+        Triar Caso <i class="fas fa-filter"></i>
+      </button>
+    </div>`;
+  }
+
+  if (caso.status === STATUS.INVESTIGACAO) {
+    return base + `
+      <p class="text-xs text-teal-700 font-bold mt-1 truncate">
+        <i class="fas fa-pills mr-1"></i>Suspeito: ${med}
+      </p>
+      ${farmaHtml}
+      <p class="text-[10px] text-gray-400 mt-2 flex items-center gap-1">
+        <i class="fas fa-hourglass-half"></i> Em análise desde ${data}
+      </p>
+      <button data-acao="investigar" data-id="${id}"
+        class="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5
+               rounded-lg mt-3 shadow-sm transition flex items-center justify-center gap-1">
+        Investigar <i class="fas fa-microscope"></i>
+      </button>
+    </div>`;
+  }
+
+  // Concluído / Descartado
+  const isDesc      = caso.status === STATUS.DESCARTADO;
+  const stsCss      = isDesc ? 'text-gray-500' : 'text-green-700';
+  const stsIco      = isDesc ? 'fa-ban'         : 'fa-check-circle';
+  const conclusaoHtml = caso.conclusao
+    ? `<p class="text-[10px] text-gray-400 mt-0.5">${escapeHtml(caso.conclusao)}</p>` : '';
+
+  const vigimedHtml = (!isDesc)
+    ? (caso.numVigimed
+        ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-2">
+             <i class="fas fa-check-circle"></i> Importado VigiMed
+           </span>`
+        : `<span class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full mt-2">
+             <i class="fas fa-clock"></i> Pendente Importação VigiMed
+           </span>`)
+    : '';
+
+  return base + `
+    <p class="text-xs font-bold ${stsCss} mt-1 uppercase flex items-center gap-1">
+      <i class="fas ${stsIco}"></i> ${escapeHtml(caso.status)}
+    </p>
+    ${conclusaoHtml}
+    ${vigimedHtml}
+    ${farmaHtml}
+    <button data-acao="investigar" data-id="${id}"
+      class="w-full bg-gray-200 hover:bg-gray-300 text-gray-600 text-xs font-bold py-1.5
+             rounded-lg mt-3 shadow-sm transition flex items-center justify-center gap-1">
+      Ver detalhes <i class="fas fa-eye"></i>
+    </button>
+  </div>`;
+}
+
+// ---------------------------------------------------------
+// HELPER — calcula idade (duplicado de js_investigacao para
+// manter independência de módulo, conforme arquitetura)
+// ---------------------------------------------------------
+function _calcularIdade(nascimento) {
+  if (!nascimento || nascimento === 'N/I') return '';
+  let d;
+  const m1 = String(nascimento).match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  const m2 = String(nascimento).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m1)      d = new Date(parseInt(m1[3]), parseInt(m1[2]) - 1, parseInt(m1[1]));
+  else if (m2) d = new Date(parseInt(m2[1]), parseInt(m2[2]) - 1, parseInt(m2[3]));
+  else         d = new Date(nascimento);
+  if (isNaN(d)) return '';
+  const hoje = new Date();
+  let anos   = hoje.getFullYear() - d.getFullYear();
+  const m    = hoje.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && hoje.getDate() < d.getDate())) anos--;
+  if (anos < 0 || anos > 130) return '';
+  return `${anos} anos`;
+}
+
+// ---------------------------------------------------------
+// DELEGAÇÃO DE EVENTOS (configurada UMA vez)
+// ---------------------------------------------------------
+function configurarDelegacaoKanban() {
+  if (delegacaoConfigurada) return;
+  ['coluna-triagem', 'coluna-investigacao', 'coluna-concluidos'].forEach(idCol => {
+    const col = document.getElementById(idCol);
+    if (!col) return;
+    col.addEventListener('click', ev => {
+      const btn = ev.target.closest('button[data-acao]');
+      if (!btn) return;
+      const id   = btn.getAttribute('data-id');
+      const acao = btn.getAttribute('data-acao');
+      if (acao === 'triar')     abrirTriagem(id);
+      if (acao === 'investigar') abrirInvestigacao(id);
+    });
+  });
+  delegacaoConfigurada = true;
+}
+</script>
