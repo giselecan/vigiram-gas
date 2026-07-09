@@ -154,7 +154,33 @@ O `score` do Naranjo, se `methodCode` precisar ser literal, migra para
 
 ---
 
-## 🟡 Fase 2 — Campos novos na tela de investigação
+## 🟡 Fase 2 — Campos novos na tela de investigação ✅ CONCLUÍDA (09/07/2026)
+
+> Implementada em uma passada só (2A+2B+2C) usando o `IG_Complete_Package_v1_11_1`
+> para confirmar cada XPath contra o XSD oficial e/ou os exemplos de referência,
+> igual ao método usado na Fase 0. Validado com `xmllint --schema` contra
+> `MCCI_IN200100UV01.xsd` em 4 cenários (completo, mínimo, óbito, período de dose
+> incompleto). **Não testado ainda contra o VigiFlow real** — mesma ressalva de
+> sempre: gerar XML de teste e importar como "Não validado" antes de confiar em produção.
+>
+> **Decisão de escopo:** os 12 campos novos foram implementados no Firestore
+> (fonte da verdade) e na UI, mas **não** foram adicionados ao espelho no Google
+> Sheets (`Mirror.gs` / `SCHEMA.COL`) — isso exigiria adicionar colunas físicas
+> numa planilha que este agente não tem como ver/coordenar com segurança. A
+> exportação E2B lê direto do Firestore (`fsGetDoc_`), então isso **não afeta**
+> a exportação VIGIMED — só significa que `DB_Casos_RAM` (a cópia de auditoria
+> LGPD) não vai mostrar esses campos até alguém adicionar as colunas 47+ na
+> planilha física e as linhas correspondentes em `_gravarCasoNoSheets`
+> (Mirror.gs). Aviso, não bloqueio.
+>
+> **Achado no caminho:** a estrutura real de `G.k.3.3`/`G.k.10.r`/`G.k.11` no XSD
+> é mais rica do que este roadmap descrevia — `G.k.10.r` (codificado, CL17) existe
+> separado de `G.k.11` (texto livre); F2-12 usa `G.k.10.r` porque o multi-select
+> já é vocabulário fechado (ver Schema.gs). "DUM/Gestante/Lactante" (F2-13):
+> confirmado que só a DUM (`D.6`) tem elemento próprio no core do E2B(R3) —
+> Gestante/Lactante não existem nem no exemplo oficial nem na Reference Instance
+> v3.1, então ficam registrados na narrativa (`H.1`/`H.5`), não como elemento
+> codificado.
 
 Cada linha = **um campo novo** no schema (`Schema.gs`), no `registrarInvestigacao` e no
 modal `js_investigacao.html`.
@@ -163,11 +189,11 @@ modal `js_investigacao.html`.
 
 | ID | Campo novo | UI | Alvo E2B | Justificativa normativa |
 |---|---|---|---|---|
-| F2-01 | **Ação adotada** | dropdown fechado | `G.k.8` | Manual §5.5.6 — *dechallenge* |
-| F2-02 | **Resultado da reexposição** | dropdown 4 opções | `G.k.9.i.4` | Manual §5.5.6 — *rechallenge*. Hoje `readministrado` é sim/não e **não mapeia** nos 4 estados |
-| F2-03 | **Indicação de uso** | texto (250AN) | `G.k.7.r.1` | Manual §5.5.6 |
-| F2-04 | **Data fim da administração** | data | `G.k.4.r.5` | Manual §5.5.6, nota 4 — plausibilidade temporal |
-| F2-05 | **Data fim da reação** | data | `E.i.5` (→ `E.i.6a/b` derivada) | Manual §5.5.5 |
+| F2-01 | **Ação adotada** | dropdown fechado | `G.k.8` | Manual §5.5.6 — *dechallenge* — ✅ implementado |
+| F2-02 | **Resultado da reexposição** | dropdown 4 opções | `G.k.9.i.4` | Manual §5.5.6 — *rechallenge* — ✅ implementado na Fase 0 (F0-01), o dropdown já cobria os 4 estados |
+| F2-03 | **Indicação de uso** | texto (250AN) | `G.k.7.r.1` | Manual §5.5.6 — ✅ implementado |
+| F2-04 | **Data fim da administração** | data | `G.k.4.r.5` | Manual §5.5.6, nota 4 — plausibilidade temporal — ✅ implementado |
+| F2-05 | **Data fim da reação** | data | `E.i.5` (→ `E.i.6a/b` derivada) | Manual §5.5.5 — ✅ implementado, duração calculada automaticamente em dias |
 
 #### Listas fechadas a implementar
 
@@ -195,21 +221,21 @@ modal `js_investigacao.html`.
 
 | ID | Campo novo | UI | Alvo E2B | Justificativa |
 |---|---|---|---|---|
-| F2-06 | **Peso (kg)** e **Altura (cm)** | numérico | `D.3` / `D.4` | Manual §5.5.2 — "permite identificar se a dose foi adequada" |
-| F2-07 | **Forma farmacêutica** | texto (60AN) | `G.k.4.r.9.1` | hoje o código traz `<!-- em branco, nao coletado -->` |
-| F2-08 | **Nº de doses no intervalo** + **unidade** | numérico + dropdown | `G.k.4.r.2` / `G.k.4.r.3` | posologia sai truncada |
-| F2-09 | **Exames estruturados** (nome, data, valor, unidade, ref. mín/máx) | subtabela repetível | `F.r.1 / F.r.2.1 / F.r.3.2 / F.r.3.3 / F.r.3.4` | Manual §5.5.7 — **unidade obrigatória** se houver valor numérico |
+| F2-06 | **Peso (kg)** e **Altura (cm)** | numérico | `D.3` / `D.4` | Manual §5.5.2 — "permite identificar se a dose foi adequada" — ✅ implementado |
+| F2-07 | **Forma farmacêutica** | texto (60AN) | `G.k.4.r.9.1` | hoje o código traz `<!-- em branco, nao coletado -->` — ✅ implementado |
+| F2-08 | **Nº de doses no intervalo** + **unidade** | numérico + dropdown | `G.k.4.r.2` / `G.k.4.r.3` | posologia sai truncada — ✅ implementado, combina com G.k.4.r.4/5 num único `SXPR_TS` quando período E data-fim estão presentes |
+| F2-09 | **Exames estruturados** (nome, data, valor, unidade, ref. mín/máx) | subtabela repetível | `F.r.1 / F.r.2.1 / F.r.3.2 / F.r.3.3 / F.r.3.4` | Manual §5.5.7 — **unidade obrigatória** se houver valor numérico — ✅ implementado; valor não numérico ou sem unidade cai em texto livre (`F.r.3.4`) em vez de forçar `PQ` |
 
 ### 2C · Prioridade baixa / condicional
 
 | ID | Campo novo | UI | Alvo E2B | Observação |
 |---|---|---|---|---|
-| F2-10 | **Data do óbito** | data condicional | `D.9.1` | só habilita se `desfecho = Fatal/Óbito` |
-| F2-11 | **Relação medicamento × evento** | dropdown | `G.k.1` (CL13) | hoje **hardcoded `1` = Suspeito** |
-| F2-12 | **Problemas adicionais do medicamento** | multi-select | `G.k.11` (texto livre) | off-label, erro de medicação, superdose — Manual §5.5.6 |
-| F2-13 | **DUM / Gestante / Lactante** | data + checkbox | `D.6` | só se `sexo = Feminino` |
+| F2-10 | **Data do óbito** | data condicional | `D.9.1` | só habilita se `desfecho = Fatal/Óbito` — ✅ implementado (`<deceasedTime>`, filho direto de `player1`) |
+| F2-11 | **Relação medicamento × evento** | dropdown | `G.k.1` (CL13) | hoje **hardcoded `1` = Suspeito** — ✅ implementado, dinâmico com fallback `1` |
+| F2-12 | **Problemas adicionais do medicamento** | multi-select | `G.k.10.r` (CL17, codificado) | off-label, erro de medicação, superdose — Manual §5.5.6 — ✅ implementado; roadmap citava `G.k.11` (texto livre), mas como o multi-select já é vocabulário fechado usamos `G.k.10.r` (codificado), confirmado na Reference Instance v3.1 |
+| F2-13 | **DUM / Gestante / Lactante** | data + checkbox | `D.6` (só DUM) | só se `sexo = Feminino` (lido do ETL, não editável neste modal) — ✅ implementado; Gestante/Lactante não têm elemento E2B próprio confirmado, ficam na narrativa |
 
-**Esforço estimado:** 1 sprint · **Campos novos na UI:** 9–13
+**Esforço estimado:** 1 sprint · **Campos novos na UI:** 9–13 → **entregue: 12 campos + 1 subtabela repetível**
 
 ---
 

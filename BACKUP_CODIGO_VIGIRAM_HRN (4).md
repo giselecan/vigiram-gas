@@ -647,6 +647,29 @@ function _mapearCasoCompleto_(doc) {
     dataInicioAdministracao:  (doc.dataInicioAdministracao instanceof Date)
       ? Utilities.formatDate(doc.dataInicioAdministracao, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
       : String(doc.dataInicioAdministracao || '').trim(),
+
+    // ── Fase 2 (roadmap) — campos novos da tela de investigação ────────────
+    acaoAdotada:              String(doc.acaoAdotada             || '').trim(),
+    indicacaoUso:             String(doc.indicacaoUso            || '').trim(),
+    dataFimAdministracao:     (doc.dataFimAdministracao instanceof Date)
+      ? Utilities.formatDate(doc.dataFimAdministracao, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
+      : String(doc.dataFimAdministracao || '').trim(),
+    dataFimReacao:            (doc.dataFimReacao instanceof Date)
+      ? Utilities.formatDate(doc.dataFimReacao, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')
+      : String(doc.dataFimReacao || '').trim(),
+    pesoKg:                   String(doc.pesoKg                  != null ? doc.pesoKg  : '').trim(),
+    alturaCm:                 String(doc.alturaCm                != null ? doc.alturaCm : '').trim(),
+    formaFarmaceutica:        String(doc.formaFarmaceutica       || '').trim(),
+    numeroDosesIntervalo:     String(doc.numeroDosesIntervalo    != null ? doc.numeroDosesIntervalo : '').trim(),
+    unidadeIntervalo:         String(doc.unidadeIntervalo        || '').trim(),
+    // F2-09 — subtabela repetível [{ nome, data, valor, unidade, refMin, refMax }]
+    examesEstruturados:       Array.isArray(doc.examesEstruturados) ? doc.examesEstruturados : [],
+    dataObito:                String(doc.dataObito               || '').trim(),
+    relacaoMedicamentoEvento: String(doc.relacaoMedicamentoEvento|| '').trim(),
+    problemasAdicionais:      Array.isArray(doc.problemasAdicionais) ? doc.problemasAdicionais : [],
+    dum:                      String(doc.dum                     || '').trim(),
+    gestante:                 !!doc.gestante,
+    lactante:                 !!doc.lactante,
   };
 }
 
@@ -945,7 +968,31 @@ function registrarInvestigacao(dados, token) {
 
           // ── Ajuste E2B (D.2.1 Nascimento editável / G.k.4.r.4 Início Adm.) ────
           nascimento:              dados.nascimento              || caso.nascimento,
-          dataInicioAdministracao: _normalizarDataHoraInput_(dados.dataInicioAdministracao) || null
+          dataInicioAdministracao: _normalizarDataHoraInput_(dados.dataInicioAdministracao) || null,
+
+          // ── Fase 2 (roadmap) — campos novos da tela de investigação ────────
+          acaoAdotada:              dados.acaoAdotada              || '',
+          indicacaoUso:             dados.indicacaoUso             || '',
+          dataFimAdministracao:     _normalizarDataHoraInput_(dados.dataFimAdministracao) || null,
+          dataFimReacao:            _normalizarDataHoraInput_(dados.dataFimReacao)         || null,
+          pesoKg:                   dados.pesoKg                   || '',
+          alturaCm:                 dados.alturaCm                 || '',
+          formaFarmaceutica:        dados.formaFarmaceutica        || '',
+          numeroDosesIntervalo:     dados.numeroDosesIntervalo     || '',
+          unidadeIntervalo:         dados.unidadeIntervalo         || '',
+          // F2-09 — array já vem pronto do frontend (subtabela repetível);
+          // filtra qualquer linha totalmente vazia antes de persistir.
+          examesEstruturados:       Array.isArray(dados.examesEstruturados)
+            ? dados.examesEstruturados.filter(function (e) {
+                return e && (e.nome || e.valor);
+              })
+            : [],
+          dataObito:                dados.dataObito                || '',
+          relacaoMedicamentoEvento: dados.relacaoMedicamentoEvento || '',
+          problemasAdicionais:      Array.isArray(dados.problemasAdicionais) ? dados.problemasAdicionais : [],
+          dum:                      dados.dum                      || '',
+          gestante:                 !!dados.gestante,
+          lactante:                 !!dados.lactante
         });
         
         fsCarimbarAuditoria_(ctx, dados.idCaso);
@@ -1089,7 +1136,18 @@ const DEFAULT_LISTAS = {
   motivo_descarte:  ["Uso Profilático / Rotina", "Erro de Prescrição", "Evolução da Doença", "Outros"],
   readministrado:   ["Não", "Sim", "Sim. Sintomas reapareceram", "Sim. Sintomas não reapareceram"],
   evolucao:         ["NENHUMA CONDUTA REALIZADA", "SINTOMAS DESAPARECERAM",
-                     "MELHORA DOS SINTOMAS", "SINTOMAS NÃO DESAPARECERAM"]
+                     "MELHORA DOS SINTOMAS", "SINTOMAS NÃO DESAPARECERAM"],
+  // ── Fase 2 (roadmap) — campos novos da tela de investigação ──────────────
+  // Rótulos aqui precisam bater (após toUpperCase) com as chaves dos mapas
+  // SCHEMA.E2B.*_MAP correspondentes — ver Schema.gs.
+  acao_adotada:               ["Retirada do medicamento", "Redução da dose", "Aumento da dose",
+                               "Sem alteração da dose", "Desconhecido", "Não aplicável"],
+  relacao_medicamento_evento: ["Suspeito", "Concomitante", "Interagente", "Medicamento não administrado"],
+  problemas_adicionais:       ["Falsificação", "Superdosagem", "Medicamento usado pelo pai",
+                               "Uso após validade", "Lote testado — dentro das especificações",
+                               "Lote testado — fora das especificações", "Erro de medicação",
+                               "Uso indevido", "Abuso", "Exposição ocupacional", "Uso off-label"],
+  unidade_intervalo:          ["Hora(s)", "Dia(s)", "Semana(s)", "Mês(es)", "Ano(s)"]
 };
 
 const DEFAULT_NARANJO = [
@@ -1785,6 +1843,95 @@ function _calcularIdadeAnosE2B_(nascimentoYYYYMMDD, referenciaYYYYMMDD) {
   return (idade >= 0 && idade < 130) ? idade : null;
 }
 
+/**
+ * F2-05 — dias corridos entre duas datas 'YYYYMMDD' (saída de
+ * _formatarDataE2B_). Usado para E.i.6a/b (duração da reação), derivada
+ * de E.i.4/E.i.5 em vez de coletada separadamente. Retorna null se
+ * qualquer data faltar ou o resultado for negativo (fim antes do início —
+ * erro de digitação, não envia duração errada).
+ */
+function _diasEntreE2B_(inicioYYYYMMDD, fimYYYYMMDD) {
+  if (!inicioYYYYMMDD || !fimYYYYMMDD) return null;
+  const d1 = new Date(
+    parseInt(inicioYYYYMMDD.substring(0, 4), 10),
+    parseInt(inicioYYYYMMDD.substring(4, 6), 10) - 1,
+    parseInt(inicioYYYYMMDD.substring(6, 8), 10)
+  );
+  const d2 = new Date(
+    parseInt(fimYYYYMMDD.substring(0, 4), 10),
+    parseInt(fimYYYYMMDD.substring(4, 6), 10) - 1,
+    parseInt(fimYYYYMMDD.substring(6, 8), 10)
+  );
+  if (isNaN(d1) || isNaN(d2)) return null;
+  const dias = Math.round((d2 - d1) / 86400000);
+  return (dias >= 0) ? dias : null;
+}
+
+/**
+ * F2-09 — monta o <component> de UM exame estruturado (F.r). Sem MedDRA:
+ * nome do teste sai como texto livre (F.r.2.1), igual ao padrão do
+ * "teste #2" do exemplo oficial (1-1_ExampleCase_literature_initial_v1_0.xml,
+ * linhas 259-270). Resultado numérico COM unidade vira PQ (F.r.3.2/3.3);
+ * qualquer outro caso (texto, ou numérico sem unidade — PQ exige unidade
+ * confiável) cai em ED (F.r.3.4), igual ao restante do texto livre do
+ * projeto. Faixa de referência (F.r.5/F.r.6) só sai se o resultado for
+ * numérico — comparar texto livre contra min/máx não faz sentido.
+ */
+function _montarComponenteExameE2B_(exame) {
+  const nome     = escaparHtml_(String((exame && exame.nome) || 'EXAME COMPLEMENTAR').trim().toUpperCase());
+  const dataExame = _formatarDataE2B_(exame && exame.data);
+  const unidade  = escaparHtml_(String((exame && exame.unidade) || '').trim());
+  const valorRaw = String((exame && exame.valor) || '').trim();
+  const valorNum = valorRaw.replace(',', '.');
+  const ehNumerico = valorRaw !== '' && unidade !== '' && !isNaN(Number(valorNum));
+
+  const refMin = String((exame && exame.refMin) || '').trim().replace(',', '.');
+  const refMax = String((exame && exame.refMax) || '').trim().replace(',', '.');
+  const temRefMin = ehNumerico && refMin !== '' && !isNaN(Number(refMin));
+  const temRefMax = ehNumerico && refMax !== '' && !isNaN(Number(refMax));
+
+  return (
+    '                      <component typeCode="COMP">\n' +
+    '                        <observation classCode="OBS" moodCode="EVN">\n' +
+    '                          <code codeSystem="2.16.840.1.113883.6.163">\n' +
+    '                            <originalText>' + nome + '</originalText>\n' +
+    '                            <!-- F.r.2.1: Test Name (free text) -->\n' +
+    '                          </code>\n' +
+    (dataExame
+      ? '                          <effectiveTime value="' + dataExame + '"/>\n' +
+        '                          <!-- F.r.1: Test Date -->\n'
+      : '') +
+    (ehNumerico
+      ? '                          <value xsi:type="PQ" value="' + valorNum + '" unit="' + unidade + '"/>\n' +
+        '                          <!-- F.r.3.2/F.r.3.3: Test Result (value/unit) -->\n'
+      : (valorRaw
+          ? '                          <value xsi:type="ED">' + escaparHtml_(valorRaw.toUpperCase()) + '</value>\n' +
+            '                          <!-- F.r.3.4: Result Unstructured Data (free text) -->\n'
+          : '')
+      ) +
+    (temRefMax
+      ? '                          <referenceRange typeCode="REFV">\n' +
+        '                            <observationRange classCode="OBS" moodCode="EVN.CRT">\n' +
+        '                              <value xsi:type="PQ" value="' + refMax + '" unit="' + unidade + '"/>\n' +
+        '                              <interpretationCode code="H" codeSystem="2.16.840.1.113883.5.83"/>\n' +
+        '                              <!-- F.r.5: Normal High Value -->\n' +
+        '                            </observationRange>\n' +
+        '                          </referenceRange>\n'
+      : '') +
+    (temRefMin
+      ? '                          <referenceRange typeCode="REFV">\n' +
+        '                            <observationRange classCode="OBS" moodCode="EVN.CRT">\n' +
+        '                              <value xsi:type="PQ" value="' + refMin + '" unit="' + unidade + '"/>\n' +
+        '                              <interpretationCode code="L" codeSystem="2.16.840.1.113883.5.83"/>\n' +
+        '                              <!-- F.r.6: Normal Low Value -->\n' +
+        '                            </observationRange>\n' +
+        '                          </referenceRange>\n'
+      : '') +
+    '                        </observation>\n' +
+    '                      </component>\n'
+  );
+}
+
 /** Divide um nome completo em { given, family } — heurística: última palavra = sobrenome. */
 function _dividirNome_(nomeCompleto) {
   const partes = String(nomeCompleto || '').trim().split(/\s+/).filter(Boolean);
@@ -1844,7 +1991,13 @@ function _montarNarrativa_(caso, naranjoScore) {
     // methodCode de G.k.9.i.2.r (agora "Naranjo" literal, ver
     // causalityAssessment em _montarXmlE2B_) e não tem mais elemento
     // dedicado no bloco de causalidade; preservado aqui na narrativa.
-    { rotulo: 'NARANJO',                        valor: naranjoScore ? ('ESCORE ' + naranjoScore) : '' }
+    { rotulo: 'NARANJO',                        valor: naranjoScore ? ('ESCORE ' + naranjoScore) : '' },
+    // F2-13 — Gestante/Lactante não têm elemento próprio no core do
+    // E2B(R3) (confirmado: ausentes no exemplo oficial e na Reference
+    // Instance v3.1) — só a data da DUM (D.6) tem elemento dedicado
+    // (ver blocoDum em _montarXmlE2B_). Os dois flags ficam na narrativa.
+    { rotulo: 'GESTANTE/LACTANTE',              valor: [caso.gestante ? 'GESTANTE' : '', caso.lactante ? 'LACTANTE' : '']
+                                                          .filter(Boolean).join(' E ') }
   ];
 
   const partes = [base];
@@ -1892,6 +2045,26 @@ function _montarXmlE2B_(caso, usuario, config) {
   // F0-06 — D.2.2a/b Idade no início da reação (0..1: omitido se faltar nascimento
   // ou data de início da reação, ou o resultado for implausível).
   const idadeReacaoAnos = _calcularIdadeAnosE2B_(dataNascimento, dataInicioReacao);
+
+  // F2-06 — D.3/D.4 Peso (kg) e Altura (cm). Só emite se numérico.
+  const pesoKgE2B   = String(caso.pesoKg   || '').trim().replace(',', '.');
+  const alturaCmE2B = String(caso.alturaCm || '').trim().replace(',', '.');
+
+  // F2-13 — D.6 DUM. Gestante/Lactante não têm elemento próprio no core
+  // do E2B(R3) — confirmado: ausentes tanto no exemplo oficial quanto na
+  // Reference Instance v3.1 — ficam só na narrativa (ver _montarNarrativa_).
+  const dumE2B = _formatarDataE2B_(caso.dum);
+
+  // F2-05 — E.i.5 Data fim da reação + E.i.6a/b duração derivada (dias).
+  const dataFimReacaoE2B  = _formatarDataE2B_(caso.dataFimReacao);
+  const duracaoReacaoDias = _diasEntreE2B_(dataInicioReacao, dataFimReacaoE2B);
+
+  // F2-10 — D.9.1 Data do óbito. Só emite se o desfecho for ÓBITO — evita
+  // enviar deceasedTime num caso que não terminou em óbito por resíduo de
+  // um valor antigo do campo (ex.: caso reaberto e desfecho alterado).
+  const dataObitoE2B = (String(caso.desfecho || '').toUpperCase() === 'ÓBITO')
+    ? _formatarDataE2B_(caso.dataObito)
+    : '';
 
   // D.5 Sexo — mapeia valor livre vindo do ETL; sem match cai em nullFlavor="UNK" (ver abaixo).
   const codigoSexo = SCHEMA.E2B.SEXO_MAP[String(caso.sexo || '').toUpperCase()] || null;
@@ -1949,6 +2122,104 @@ function _montarXmlE2B_(caso, usuario, config) {
   const lote          = escaparHtml_(String(caso.lote || '').toUpperCase());
   // F0-09 — G.k.3.3 Nome do detentor/fabricante.
   const laboratorioE2B = escaparHtml_(String(caso.laboratorio || '').toUpperCase());
+
+  // F2-07 — G.k.4.r.9.1 Forma farmacêutica (texto livre).
+  const formaFarmaceuticaE2B = escaparHtml_(String(caso.formaFarmaceutica || '').trim().toUpperCase());
+
+  // F2-04 — G.k.4.r.5 Data fim da administração.
+  const dataFimAdministracaoE2B = _formatarDataE2B_(caso.dataFimAdministracao);
+
+  // F2-08 — G.k.4.r.2/3 Nº de doses no intervalo + unidade (token UCUM).
+  // Só forma o bloco de periodicidade se AMBOS os dados baterem — período
+  // sem unidade (ou vice-versa) não é um PIVL_TS válido.
+  const numeroDosesIntervaloE2B = String(caso.numeroDosesIntervalo || '').replace(/[^0-9.]/g, '');
+  const unidadeIntervaloE2B = SCHEMA.E2B.UNIDADE_INTERVALO_MAP[String(caso.unidadeIntervalo || '').toUpperCase()] || '';
+
+  // F2-03 — G.k.7.r.1 Indicação de uso (texto livre, sem MedDRA — mesmo
+  // padrão nullFlavor="NI" já usado em E.i.2.1b e D.7.1.r.1b).
+  const indicacaoUsoE2B = escaparHtml_(String(caso.indicacaoUso || '').trim().toUpperCase());
+
+  // F2-01 — G.k.8 Ação adotada com o medicamento (CL15). 0..1: omitido
+  // se vazio/sem match.
+  const codigoAcaoAdotada = SCHEMA.E2B.ACAO_MEDICAMENTO_MAP[String(caso.acaoAdotada || '').toUpperCase()] || null;
+
+  // F2-11 — G.k.1 Caracterização do papel do medicamento (CL13). Fallback
+  // '1' (Suspeito) preserva o comportamento hardcoded anterior para casos
+  // sem o campo preenchido ainda.
+  const codigoCaracterizacao = SCHEMA.E2B.CARACTERIZACAO_DROGA_MAP[String(caso.relacaoMedicamentoEvento || '').toUpperCase()] || '1';
+
+  // F2-12 — G.k.10.r Outras informações sobre o medicamento (CL17,
+  // multi-select 0..N). Itens sem match no mapa são ignorados (não travam
+  // a exportação por uma opção antiga/renomeada na lista).
+  const problemasAdicionaisLista = Array.isArray(caso.problemasAdicionais) ? caso.problemasAdicionais : [];
+  const blocoProblemasAdicionais = problemasAdicionaisLista
+    .map(function (p) {
+      const codigo = SCHEMA.E2B.PROBLEMAS_ADICIONAIS_MAP[String(p || '').toUpperCase()];
+      if (!codigo) return '';
+      return '                          <outboundRelationship2 typeCode="REFR">\n' +
+             '                            <observation classCode="OBS" moodCode="EVN">\n' +
+             '                              <code code="9" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+             '                              <value xsi:type="CE" code="' + codigo + '" codeSystem="' + SCHEMA.E2B.CODESYS.PROBLEMAS_ADICIONAIS + '"/>\n' +
+             '                              <!-- G.k.10.r: Additional Information on Drug (coded) -->\n' +
+             '                            </observation>\n' +
+             '                          </outboundRelationship2>\n';
+    })
+    .join('');
+
+  // F2-04/F2-08 — effectiveTime do G.k.4.r: combina início (G.k.4.r.4,
+  // já existente) com fim (G.k.4.r.5) e periodicidade (G.k.4.r.2/3)
+  // quando disponíveis. Só entra em SXPR_TS (dois <comp>) se numeroDoses
+  // E unidade baterem os DOIS — período parcial não é um PIVL_TS válido;
+  // nesse caso cai no IVL_TS simples de sempre (com <high> se houver fim).
+  // Padrão confirmado no exemplo oficial (linhas 350-361).
+  const temPeriodoAdm = numeroDosesIntervaloE2B !== '' && unidadeIntervaloE2B !== '';
+  const blocoEffectiveTimeAdm = temPeriodoAdm
+    ? '                              <effectiveTime xsi:type="SXPR_TS">\n' +
+      '                                <comp xsi:type="PIVL_TS">\n' +
+      '                                  <period value="' + numeroDosesIntervaloE2B + '" unit="' + unidadeIntervaloE2B + '"/>\n' +
+      '                                  <!-- G.k.4.r.2: Number of Units in the Interval -->\n' +
+      '                                  <!-- G.k.4.r.3: Definition of the Time Interval Unit -->\n' +
+      '                                </comp>\n' +
+      '                                <comp xsi:type="IVL_TS" operator="A">\n' +
+      '                                  <low value="' + dataInicioAdministracao + '"/>\n' +
+      '                                  <!-- G.k.4.r.4: Date and Time of Start of Drug -->\n' +
+      (dataFimAdministracaoE2B
+        ? '                                  <high value="' + dataFimAdministracaoE2B + '"/>\n' +
+          '                                  <!-- G.k.4.r.5: Date and Time of Last Administration -->\n'
+        : '') +
+      '                                </comp>\n' +
+      '                              </effectiveTime>\n'
+    : '                              <effectiveTime xsi:type="IVL_TS">\n' +
+      '                                <low value="' + dataInicioAdministracao + '"/>\n' +
+      '                                <!-- G.k.4.r.4: Date and Time of Start of Drug -->\n' +
+      (dataFimAdministracaoE2B
+        ? '                                <high value="' + dataFimAdministracaoE2B + '"/>\n' +
+          '                                <!-- G.k.4.r.5: Date and Time of Last Administration -->\n'
+        : '') +
+      '                              </effectiveTime>\n';
+
+  // F2-05 — effectiveTime da reação: adiciona E.i.5 (fim) e E.i.6a/b
+  // (duração derivada) quando há data de fim. Padrão confirmado no
+  // exemplo oficial (linhas 134-146). Sem data de fim, mantém o IVL_TS
+  // simples de sempre (só E.i.4).
+  const blocoEffectiveTimeReacao = dataFimReacaoE2B
+    ? '                      <effectiveTime xsi:type="SXPR_TS">\n' +
+      '                        <comp xsi:type="IVL_TS">\n' +
+      '                          <low value="' + dataInicioReacao + '"/>\n' +
+      '                          <!-- E.i.4: Date of Start of Reaction / Event -->\n' +
+      '                          <high value="' + dataFimReacaoE2B + '"/>\n' +
+      '                          <!-- E.i.5: Date of End of Reaction / Event -->\n' +
+      '                        </comp>\n' +
+      (duracaoReacaoDias !== null
+        ? '                        <comp xsi:type="IVL_TS" operator="A">\n' +
+          '                          <width value="' + duracaoReacaoDias + '" unit="d"/>\n' +
+          '                          <!-- E.i.6a/b: Duration of Reaction / Event -->\n' +
+          '                        </comp>\n'
+        : '') +
+      '                      </effectiveTime>\n'
+    : '                      <effectiveTime xsi:type="IVL_TS">\n' +
+      '                        <low value="' + dataInicioReacao + '"/>\n' +
+      '                      </effectiveTime>\n';
 
   // FASE 1 (roadmap, Rodada A / hipótese H2): testar se o VigiMed espera
   // "Provável" (Title Case, como no rótulo da própria tela) em vez de
@@ -2015,6 +2286,33 @@ function _montarXmlE2B_(caso, usuario, config) {
       '                          </outboundRelationship2>\n'
     : '';
 
+  // F2-03 — G.k.7.r.1 Indicação de uso. inboundRelationship RSON no
+  // substanceAdministration do medicamento — padrão confirmado no exemplo
+  // oficial (linhas 395-410 do IG_Complete_Package_v1_11_1). Sem MedDRA:
+  // nullFlavor="NI" + originalText, mesmo padrão de E.i.2.1b/D.7.1.r.1b.
+  const blocoIndicacao = indicacaoUsoE2B
+    ? '                          <inboundRelationship typeCode="RSON">\n' +
+      '                            <observation classCode="OBS" moodCode="EVN">\n' +
+      '                              <code code="19" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+      '                              <value xsi:type="CE" nullFlavor="NI">\n' +
+      '                                <originalText>' + indicacaoUsoE2B + '</originalText>\n' +
+      '                                <!-- G.k.7.r.1: Indication as Reported by the Primary Source -->\n' +
+      '                              </value>\n' +
+      '                            </observation>\n' +
+      '                          </inboundRelationship>\n'
+    : '';
+
+  // F2-01 — G.k.8 Ação adotada com o medicamento. inboundRelationship
+  // CAUS — padrão confirmado no exemplo oficial (linhas 411-416).
+  const blocoAcaoAdotada = codigoAcaoAdotada
+    ? '                          <inboundRelationship typeCode="CAUS">\n' +
+      '                            <act classCode="ACT" moodCode="EVN">\n' +
+      '                              <code code="' + codigoAcaoAdotada + '" codeSystem="' + SCHEMA.E2B.CODESYS.ACAO_MEDICAMENTO + '"/>\n' +
+      '                              <!-- G.k.8: Action(s) Taken with Drug -->\n' +
+      '                            </act>\n' +
+      '                          </inboundRelationship>\n'
+    : '';
+
   // F0-09 — G.k.3.3 Nome do detentor/fabricante, dentro de
   // asManufacturedProduct > subjectOf > approval > holder > role >
   // playingOrganization > name. <id> (G.k.3.1) e <author> (G.k.3.2) do
@@ -2053,6 +2351,39 @@ function _montarXmlE2B_(caso, usuario, config) {
       '                  </subjectOf2>\n'
     : '';
 
+  // F2-06 — D.3 Peso (kg) / D.4 Altura (cm). Padrão confirmado no exemplo
+  // oficial (linhas 86-98): subjectOf2 > observation, code="7"/"17".
+  const blocoPeso = (pesoKgE2B !== '' && !isNaN(Number(pesoKgE2B)))
+    ? '                  <subjectOf2 typeCode="SBJ">\n' +
+      '                    <observation classCode="OBS" moodCode="EVN">\n' +
+      '                      <code code="7" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+      '                      <value xsi:type="PQ" value="' + pesoKgE2B + '" unit="kg"/>\n' +
+      '                      <!-- D.3: Body Weight (kg) -->\n' +
+      '                    </observation>\n' +
+      '                  </subjectOf2>\n'
+    : '';
+  const blocoAltura = (alturaCmE2B !== '' && !isNaN(Number(alturaCmE2B)))
+    ? '                  <subjectOf2 typeCode="SBJ">\n' +
+      '                    <observation classCode="OBS" moodCode="EVN">\n' +
+      '                      <code code="17" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+      '                      <value xsi:type="PQ" value="' + alturaCmE2B + '" unit="cm"/>\n' +
+      '                      <!-- D.4: Height (cm) -->\n' +
+      '                    </observation>\n' +
+      '                  </subjectOf2>\n'
+    : '';
+
+  // F2-13 — D.6 Data da última menstruação. Padrão confirmado no exemplo
+  // oficial (linhas 100-106): code="22", value TS.
+  const blocoDum = dumE2B
+    ? '                  <subjectOf2 typeCode="SBJ">\n' +
+      '                    <observation classCode="OBS" moodCode="EVN">\n' +
+      '                      <code code="22" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+      '                      <value xsi:type="TS" value="' + dumE2B + '"/>\n' +
+      '                      <!-- D.6: Last Menstrual Period Date -->\n' +
+      '                    </observation>\n' +
+      '                  </subjectOf2>\n'
+    : '';
+
   // F0-02 — D.7.1.r.5, dentro de organizer classCode="CATEGORY" code="1"
   // (relevantMedicalHistoryAndConcurrentConditions). O <code> do item de
   // história é 1..1 no schema (PORR_MT049023UV.Observation) mesmo sem
@@ -2086,20 +2417,32 @@ function _montarXmlE2B_(caso, usuario, config) {
   // 6_Example Instances/1-1_ExampleCase_literature_initial_v1_0.xml
   // (linhas 259-270 do IG_Complete_Package_v1_11_1) — mesmo organizer
   // classCode="CATEGORY" code="3" (testResults) usado com MedDRA no "teste #1".
-  const blocoExames = examesE2B
+  //
+  // F2-09 — exames estruturados (subtabela repetível) entram como
+  // <component> ADICIONAIS dentro do MESMO organizer, um por linha —
+  // mesma lógica de "teste #1 + teste #2" do exemplo oficial, só que aqui
+  // todos são texto livre (sem MedDRA). Ver _montarComponenteExameE2B_.
+  const componentesExamesEstruturados = (Array.isArray(caso.examesEstruturados) ? caso.examesEstruturados : [])
+    .filter(function (e) { return e && (e.nome || e.valor); })
+    .map(_montarComponenteExameE2B_)
+    .join('');
+  const blocoExames = (examesE2B || componentesExamesEstruturados)
     ? '                  <subjectOf2 typeCode="SBJ">\n' +
       '                    <organizer classCode="CATEGORY" moodCode="EVN">\n' +
       '                      <code code="3" codeSystem="' + SCHEMA.E2B.CODESYS.CATEGORIA_GK + '"/>\n' +
-      '                      <component typeCode="COMP">\n' +
-      '                        <observation classCode="OBS" moodCode="EVN">\n' +
-      '                          <code codeSystem="2.16.840.1.113883.6.163">\n' +
-      '                            <originalText>EXAME COMPLEMENTAR</originalText>\n' +
-      '                            <!-- F.r.2.1: Test Name (free text) -->\n' +
-      '                          </code>\n' +
-      '                          <value xsi:type="ED">' + examesE2B + '</value>\n' +
-      '                          <!-- F.r.3.4: Result Unstructured Data (free text) -->\n' +
-      '                        </observation>\n' +
-      '                      </component>\n' +
+      (examesE2B
+        ? '                      <component typeCode="COMP">\n' +
+          '                        <observation classCode="OBS" moodCode="EVN">\n' +
+          '                          <code codeSystem="2.16.840.1.113883.6.163">\n' +
+          '                            <originalText>EXAME COMPLEMENTAR</originalText>\n' +
+          '                            <!-- F.r.2.1: Test Name (free text) -->\n' +
+          '                          </code>\n' +
+          '                          <value xsi:type="ED">' + examesE2B + '</value>\n' +
+          '                          <!-- F.r.3.4: Result Unstructured Data (free text) -->\n' +
+          '                        </observation>\n' +
+          '                      </component>\n'
+        : '') +
+      componentesExamesEstruturados +
       '                    </organizer>\n' +
       '                  </subjectOf2>\n'
     : '';
@@ -2180,6 +2523,11 @@ function _montarXmlE2B_(caso, usuario, config) {
   ? '                    <birthTime value="' + dataNascimento + '"/>\n'
   : ''
 ) +
+(dataObitoE2B
+  ? '                    <deceasedTime value="' + dataObitoE2B + '"/>\n' +
+    '                    <!-- D.9.1: Date of Death -->\n'
+  : ''
+) +
 (prontuario
   ? '                    <asIdentifiedEntity classCode="IDENT">\n' +
     '                      <id extension="' + prontuario + '" root="2.16.840.1.113883.3.989.2.1.3.9"/>\n' +
@@ -2191,15 +2539,16 @@ function _montarXmlE2B_(caso, usuario, config) {
 '                  </player1>\n' +
 '\n' +
 blocoIdade +
+blocoPeso +
+blocoAltura +
+blocoDum +
 blocoHistoriaMedica +
 '                  <!-- E.i Reacao -->\n' +
 '                  <subjectOf2 typeCode="SBJ">\n' +
 '                    <observation classCode="OBS" moodCode="EVN">\n' +
 '                      <id root="' + caso.idReacaoE2B + '"/>\n' +
 '                      <code code="29" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
-'                      <effectiveTime xsi:type="IVL_TS">\n' +
-'                        <low value="' + dataInicioReacao + '"/>\n' +
-'                      </effectiveTime>\n' +
+blocoEffectiveTimeReacao +
 '                      <value xsi:type="CE" nullFlavor="NI">\n' +
 '                        <!-- E.i.2.1b: MedDRA code — nullFlavor NI (sem licenca MedDRA) -->\n' +
 '                        <originalText language="por">' + reacaoTermo + '</originalText>\n' +
@@ -2241,10 +2590,7 @@ blocoFabricante +
 '                          </consumable>\n' +
 '                          <outboundRelationship2 typeCode="COMP">\n' +
 '                            <substanceAdministration classCode="SBADM" moodCode="EVN">\n' +
-'                              <effectiveTime xsi:type="IVL_TS">\n' +
-'                                <low value="' + dataInicioAdministracao + '"/>\n' +
-'                                <!-- G.k.4.r.4: Date and Time of Start of Drug -->\n' +
-'                              </effectiveTime>\n' +
+blocoEffectiveTimeAdm +
 '                              <routeCode>\n' +
 '                                <originalText>' + viaOuForma + '</originalText>\n' +
 '                                <!-- G.k.4.r.10.1: Route of Administration (free text) -->\n' +
@@ -2257,13 +2603,22 @@ blocoFabricante +
        '                                    <!-- G.k.4.r.7: Batch / Lot Number -->\n' +
        '                                  </productInstanceInstance>\n' : '') +
 '                                  <kindOfProduct classCode="MMAT" determinerCode="KIND">\n' +
-'                                    <!-- G.k.4.r.9.1 Forma farmaceutica: em branco, nao coletado -->\n' +
+(formaFarmaceuticaE2B
+  ? '                                    <formCode>\n' +
+    '                                      <originalText>' + formaFarmaceuticaE2B + '</originalText>\n' +
+    '                                      <!-- G.k.4.r.9.1: Pharmaceutical Dose Form (free text) -->\n' +
+    '                                    </formCode>\n'
+  : '                                    <!-- G.k.4.r.9.1 Forma farmaceutica: nao informada -->\n'
+) +
 '                                  </kindOfProduct>\n' +
 '                                </instanceOfKind>\n' +
 '                              </consumable>\n' +
 '                            </substanceAdministration>\n' +
 '                          </outboundRelationship2>\n' +
+blocoProblemasAdicionais +
 blocoReexposicao +
+blocoIndicacao +
+blocoAcaoAdotada +
 '                        </substanceAdministration>\n' +
 '                      </component>\n' +
 '                    </organizer>\n' +
@@ -2272,11 +2627,11 @@ blocoReexposicao +
 '                </primaryRole>\n' +
 '              </subject1>\n' +
 '\n' +
-'              <!-- G.k.1: Characterisation of Drug Role = Suspect -->\n' +
+'              <!-- G.k.1: Characterisation of Drug Role (F2-11 — dinamico, ver codigoCaracterizacao) -->\n' +
 '              <component typeCode="COMP">\n' +
 '                <causalityAssessment classCode="OBS" moodCode="EVN">\n' +
 '                  <code code="20" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
-'                  <value xsi:type="CE" code="1" codeSystem="' + SCHEMA.E2B.CODESYS.CARACTERIZACAO_DROGA + '"/>\n' +
+'                  <value xsi:type="CE" code="' + codigoCaracterizacao + '" codeSystem="' + SCHEMA.E2B.CODESYS.CARACTERIZACAO_DROGA + '"/>\n' +
 '                  <subject2 typeCode="SUBJ">\n' +
 '                    <productUseReference classCode="SBADM" moodCode="EVN">\n' +
 '                      <id root="' + caso.idMedicamentoE2B + '"/>\n' +
@@ -4611,7 +4966,7 @@ function fsTestarConexao() {
                   <label class="block text-xs font-bold text-gray-600 mb-1">Desfecho <span class="text-red-500">*</span></label>
                   <!-- A3: populado via _aplicarConfig() (config.listas.desfecho) -->
                   <select id="invDesfecho"
-                          onchange="agendarAutosave(); atualizarProgresso()"
+                          onchange="agendarAutosave(); atualizarProgresso(); _toggleBlocoObito()"
                           class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
                     <option value="">Selecione…</option>
                   </select>
@@ -4743,6 +5098,164 @@ function fsTestarConexao() {
                           class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 resize-none transition"
                           placeholder="Informações adicionais relevantes…"></textarea>
               </div>
+            </div>
+
+            <!-- Fase 2 (roadmap) — Seção 5: Detalhes do Medicamento -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-pills text-teal-500"></i> 5. Detalhes do Medicamento
+                <span class="text-[10px] font-normal text-gray-400">(opcional — enriquece a exportação VIGIMED)</span>
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Ação Adotada</label>
+                  <!-- F2-01: populado via _aplicarConfig() (config.listas.acao_adotada) -->
+                  <select id="invAcaoAdotada"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Relação Medicamento × Evento</label>
+                  <!-- F2-11: populado via _aplicarConfig() (config.listas.relacao_medicamento_evento) -->
+                  <select id="invRelacaoMedicamentoEvento"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Forma Farmacêutica</label>
+                  <input type="text" id="invFormaFarmaceutica"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: Comprimido, Solução injetável…"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Indicação de Uso</label>
+                  <input type="text" id="invIndicacaoUso"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: Hipertensão arterial…"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Data Fim da Administração</label>
+                  <input type="datetime-local" id="invDataFimAdministracao"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Nº de Doses no Intervalo</label>
+                  <input type="number" min="0" step="1" id="invNumeroDosesIntervalo"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: 8"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Unidade do Intervalo</label>
+                  <!-- F2-08: populado via _aplicarConfig() (config.listas.unidade_intervalo) -->
+                  <select id="invUnidadeIntervalo"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Problemas Adicionais do Medicamento</label>
+                <!-- F2-12: populado via _aplicarConfig() (config.listas.problemas_adicionais) -->
+                <div id="invProblemasAdicionais" class="flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-700 p-3 bg-gray-50 rounded-lg border border-gray-200"></div>
+              </div>
+            </div>
+
+            <!-- Fase 2 (roadmap) — Seção 6: Dados Complementares do Paciente -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-user-injured text-teal-500"></i> 6. Dados Complementares do Paciente
+                <span class="text-[10px] font-normal text-gray-400">(opcional)</span>
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Peso (kg)</label>
+                  <input type="number" min="0" step="0.1" id="invPesoKg"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Altura (cm)</label>
+                  <input type="number" min="0" step="1" id="invAlturaCm"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Data Fim da Reação</label>
+                  <input type="datetime-local" id="invDataFimReacao"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+
+              <!-- F2-13 — visibilidade controlada por _preencherFormularioInvestigacao
+                   (js_investigacao.html), com base em caso.sexo === 'F'. Não há
+                   seletor de sexo editável neste modal (vem do ETL). -->
+              <div id="invBlocoGestante" class="hidden grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-3 bg-pink-50 border border-pink-200 rounded-lg">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">DUM (Última Menstruação)</label>
+                  <input type="date" id="invDum"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 transition">
+                </div>
+                <div class="flex items-center gap-2 mt-5">
+                  <input type="checkbox" id="invGestante" onchange="agendarAutosave()" class="w-4 h-4">
+                  <label for="invGestante" class="text-xs font-bold text-gray-600">Gestante</label>
+                </div>
+                <div class="flex items-center gap-2 mt-5">
+                  <input type="checkbox" id="invLactante" onchange="agendarAutosave()" class="w-4 h-4">
+                  <label for="invLactante" class="text-xs font-bold text-gray-600">Lactante</label>
+                </div>
+              </div>
+
+              <!-- F2-10 — visibilidade controlada por _preencherFormularioInvestigacao
+                   e pelo onchange de invDesfecho (ver toggleBlocoObito em js_investigacao.html) -->
+              <div id="invBlocoObito" class="hidden p-3 bg-gray-100 border border-gray-300 rounded-lg">
+                <label class="block text-xs font-bold text-gray-600 mb-1">Data do Óbito</label>
+                <input type="date" id="invDataObito"
+                       onchange="agendarAutosave(); atualizarProgresso()"
+                       class="w-full md:w-1/3 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-gray-400 transition">
+              </div>
+            </div>
+
+            <!-- Fase 2 (roadmap) — Seção 7: Exames Estruturados (F2-09, subtabela repetível) -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-vial text-teal-500"></i> 7. Exames Estruturados
+                <span class="text-[10px] font-normal text-gray-400">(opcional — além do campo livre da Seção 1)</span>
+              </h3>
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="text-left text-gray-400 uppercase text-[10px] border-b border-gray-200">
+                      <th class="py-1.5 px-2">Nome</th>
+                      <th class="py-1.5 px-2">Data</th>
+                      <th class="py-1.5 px-2">Valor</th>
+                      <th class="py-1.5 px-2">Unidade</th>
+                      <th class="py-1.5 px-2">Ref. Mín</th>
+                      <th class="py-1.5 px-2">Ref. Máx</th>
+                      <th class="py-1.5 px-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="corpoExamesEstruturados"></tbody>
+                </table>
+              </div>
+              <button type="button" onclick="adicionarLinhaExameEstruturado()"
+                      class="mt-3 px-3 py-1.5 bg-teal-50 text-teal-700 border border-teal-200 rounded-lg text-xs font-bold hover:bg-teal-100 transition flex items-center gap-1.5">
+                <i class="fas fa-plus"></i> Adicionar Exame
+              </button>
             </div>
 
           </form>
@@ -6186,6 +6699,11 @@ function aplicarConfig(cfg) {
     _popularSelect('invDesfecho',       cfg.listas.desfecho);
     _popularSelect('invConclusao',      cfg.listas.conclusao);
     _popularSelect('trgMotivoDescarte', cfg.listas.motivo_descarte);
+    // Fase 2 (roadmap) — campos novos da tela de investigação
+    _popularSelect('invAcaoAdotada',              cfg.listas.acao_adotada);
+    _popularSelect('invRelacaoMedicamentoEvento', cfg.listas.relacao_medicamento_evento);
+    _popularSelect('invUnidadeIntervalo',         cfg.listas.unidade_intervalo);
+    _popularCheckboxes('invProblemasAdicionais',  cfg.listas.problemas_adicionais);
   }
 }
 
@@ -6198,6 +6716,30 @@ function _popularSelect(id, lista) {
     el.innerHTML += `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`;
   });
   if (lista.includes(atual)) el.value = atual;
+}
+
+/**
+ * F2-12 — popula um container de checkboxes (multi-select) a partir de
+ * uma lista de rótulos. Preserva os itens já marcados (chamada de novo
+ * a cada getConfig() não desmarca o que o farmacêutico já escolheu).
+ */
+function _popularCheckboxes(containerId, lista) {
+  const el = document.getElementById(containerId);
+  if (!el || !Array.isArray(lista)) return;
+  const marcados = new Set(
+    [...el.querySelectorAll('input[type="checkbox"]:checked')].map(c => c.value)
+  );
+  el.innerHTML = '';
+  lista.forEach((opt, i) => {
+    const id = containerId + '_' + i;
+    const marcado = marcados.has(opt);
+    el.innerHTML += `
+      <label for="${id}" class="flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" id="${id}" value="${escapeHtml(opt)}" ${marcado ? 'checked' : ''}
+               onchange="agendarAutosave()" class="w-3.5 h-3.5">
+        ${escapeHtml(opt)}
+      </label>`;
+  });
 }
 
 // ---------------------------------------------------------
@@ -7081,7 +7623,12 @@ function _limparFormularioInvestigacao() {
    'invDataVigimed','invObservacoes','invLote','invLaboratorio','invFarmaceutico',
    'invReacaoTermo','invDoseMedicamento','invDoseUnidade',
    'invViaAdministracao','invDataInicioReacao',
-   'invDataInicioAdministracao','invDataNascimento'].forEach(id => {
+   'invDataInicioAdministracao','invDataNascimento',
+   // Fase 2 (roadmap) — campos novos da tela de investigação
+   'invAcaoAdotada','invRelacaoMedicamentoEvento','invFormaFarmaceutica',
+   'invIndicacaoUso','invDataFimAdministracao','invNumeroDosesIntervalo',
+   'invUnidadeIntervalo','invPesoKg','invAlturaCm','invDataFimReacao',
+   'invDum','invDataObito'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -7089,6 +7636,18 @@ function _limparFormularioInvestigacao() {
   calcularNaranjo();
   const bloco = document.getElementById('invBlocoNotificador');
   if (bloco) bloco.classList.add('hidden');
+
+  // Fase 2 (roadmap)
+  const elGestante = document.getElementById('invGestante');
+  if (elGestante) elGestante.checked = false;
+  const elLactante = document.getElementById('invLactante');
+  if (elLactante) elLactante.checked = false;
+  document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]').forEach(c => c.checked = false);
+  const blocoGestante = document.getElementById('invBlocoGestante');
+  if (blocoGestante) blocoGestante.classList.add('hidden');
+  const blocoObito = document.getElementById('invBlocoObito');
+  if (blocoObito) blocoObito.classList.add('hidden');
+  _renderizarExamesEstruturados([]);
 }
 
 function _preencherFormularioInvestigacao(caso) {
@@ -7119,11 +7678,52 @@ function _preencherFormularioInvestigacao(caso) {
   const elNasc = document.getElementById('invDataNascimento');
   if (elNasc) elNasc.value = caso.nascimento || '';
 
+  // Fase 2 (roadmap) — campos novos, opcionais no DOM
+  const elIndicacaoUso = document.getElementById('invIndicacaoUso');
+  if (elIndicacaoUso) elIndicacaoUso.value = caso.indicacaoUso || '';
+  const elFormaFarm = document.getElementById('invFormaFarmaceutica');
+  if (elFormaFarm) elFormaFarm.value = caso.formaFarmaceutica || '';
+  const elDataFimAdm = document.getElementById('invDataFimAdministracao');
+  if (elDataFimAdm) elDataFimAdm.value = paraInputDateTimeLocal(caso.dataFimAdministracao);
+  const elNumDoses = document.getElementById('invNumeroDosesIntervalo');
+  if (elNumDoses) elNumDoses.value = caso.numeroDosesIntervalo || '';
+  const elPeso = document.getElementById('invPesoKg');
+  if (elPeso) elPeso.value = caso.pesoKg || '';
+  const elAltura = document.getElementById('invAlturaCm');
+  if (elAltura) elAltura.value = caso.alturaCm || '';
+  const elDataFimReacao = document.getElementById('invDataFimReacao');
+  if (elDataFimReacao) elDataFimReacao.value = paraInputDateTimeLocal(caso.dataFimReacao);
+  const elDum = document.getElementById('invDum');
+  if (elDum) elDum.value = caso.dum || '';
+  const elDataObito = document.getElementById('invDataObito');
+  if (elDataObito) elDataObito.value = caso.dataObito || '';
+  const elGestante = document.getElementById('invGestante');
+  if (elGestante) elGestante.checked = !!caso.gestante;
+  const elLactante = document.getElementById('invLactante');
+  if (elLactante) elLactante.checked = !!caso.lactante;
+
+  document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]').forEach(c => {
+    c.checked = Array.isArray(caso.problemasAdicionais) && caso.problemasAdicionais.includes(c.value);
+  });
+
+  // F2-13 — só mostra DUM/Gestante/Lactante se o sexo (ETL, não editável
+  // neste modal) for Feminino.
+  const blocoGestante = document.getElementById('invBlocoGestante');
+  if (blocoGestante) {
+    const sexo = String(caso.sexo || '').toUpperCase();
+    blocoGestante.classList.toggle('hidden', sexo !== 'F' && sexo !== 'FEMININO');
+  }
+  _renderizarExamesEstruturados(caso.examesEstruturados || []);
+
   _setSelectSeguro('invReadministrado', caso.readministrado);
   _setSelectSeguro('invEvolucao',       caso.evolucao);
   _setSelectSeguro('invDesfecho',       caso.desfecho);
   _setSelectSeguro('invConclusao',      caso.conclusao);
   _setSelectSeguro('invGravidade',      caso.gravidade);
+  _setSelectSeguro('invAcaoAdotada',              caso.acaoAdotada);
+  _setSelectSeguro('invRelacaoMedicamentoEvento', caso.relacaoMedicamentoEvento);
+  _setSelectSeguro('invUnidadeIntervalo',         caso.unidadeIntervalo);
+  _toggleBlocoObito(); // depende de invDesfecho já setado acima
 
   const farmaDoCaso   = (caso.farmaceutico || '').trim();
   const farmaCanonica = getFarmaceuticoPorSetor(caso.setor);
@@ -7142,6 +7742,70 @@ function _preencherFormularioInvestigacao(caso) {
   _carregarRascunhoMemoria(_invIdAtual);
   atualizarProgresso();
   _preencherBlocoNotificador(caso);
+}
+
+// ---------------------------------------------------------
+// FASE 2 (roadmap) — F2-10: bloco de data do óbito só visível
+// quando Desfecho = Óbito. Chamada no onchange de invDesfecho (index.html)
+// e ao preencher o formulário (_preencherFormularioInvestigacao).
+// ---------------------------------------------------------
+function _toggleBlocoObito() {
+  const desfecho = (document.getElementById('invDesfecho') || {}).value || '';
+  const bloco = document.getElementById('invBlocoObito');
+  if (bloco) bloco.classList.toggle('hidden', desfecho.toUpperCase() !== 'ÓBITO');
+}
+
+// ---------------------------------------------------------
+// FASE 2 (roadmap) — F2-09: exames estruturados (subtabela repetível)
+// ---------------------------------------------------------
+let _examesEstruturadosSeq = 0;
+
+function _renderizarExamesEstruturados(lista) {
+  const corpo = document.getElementById('corpoExamesEstruturados');
+  if (!corpo) return;
+  corpo.innerHTML = '';
+  _examesEstruturadosSeq = 0;
+  (Array.isArray(lista) ? lista : []).forEach(exame => _adicionarLinhaExameEstruturado(exame));
+  if (corpo.children.length === 0) _adicionarLinhaExameEstruturado();
+}
+
+/** Chamada pelo botão "Adicionar Exame" — linha em branco + autosave. */
+function adicionarLinhaExameEstruturado() {
+  _adicionarLinhaExameEstruturado();
+  agendarAutosave();
+}
+
+function _adicionarLinhaExameEstruturado(exame) {
+  const corpo = document.getElementById('corpoExamesEstruturados');
+  if (!corpo) return;
+  const id = 'exameLinha' + (_examesEstruturadosSeq++);
+  const e = exame || {};
+  const tr = document.createElement('tr');
+  tr.id = id;
+  tr.className = 'border-b border-gray-100';
+  tr.innerHTML = `
+    <td class="py-1 px-2"><input type="text" class="exame-nome w-full border rounded px-2 py-1 text-xs uppercase" value="${escapeHtml(e.nome || '')}"></td>
+    <td class="py-1 px-2"><input type="date" class="exame-data w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.data || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-valor w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.valor || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-unidade w-full border rounded px-2 py-1 text-xs" placeholder="mg/dL" value="${escapeHtml(e.unidade || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-refmin w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMin || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-refmax w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMax || '')}"></td>
+    <td class="py-1 px-2"><button type="button" onclick="document.getElementById('${id}').remove(); agendarAutosave();" class="text-red-400 hover:text-red-600" title="Remover exame"><i class="fas fa-trash-alt"></i></button></td>`;
+  tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', agendarAutosave));
+  corpo.appendChild(tr);
+}
+
+/** Lê a subtabela de exames — linhas totalmente vazias são descartadas aqui e de novo no backend (registrarInvestigacao). */
+function _coletarExamesEstruturados() {
+  const linhas = document.querySelectorAll('#corpoExamesEstruturados tr');
+  return [...linhas].map(tr => ({
+    nome:    (tr.querySelector('.exame-nome')    || {}).value || '',
+    data:    (tr.querySelector('.exame-data')    || {}).value || '',
+    valor:   (tr.querySelector('.exame-valor')   || {}).value || '',
+    unidade: (tr.querySelector('.exame-unidade') || {}).value || '',
+    refMin:  (tr.querySelector('.exame-refmin')  || {}).value || '',
+    refMax:  (tr.querySelector('.exame-refmax')  || {}).value || ''
+  })).filter(e => e.nome || e.valor);
 }
 
 // ---------------------------------------------------------
@@ -7344,6 +8008,11 @@ function _carregarRascunhoMemoria(id) {
   mesclar('invObservacoes',     dados.observacoes);
   mesclar('invLote',            dados.lote);
   mesclar('invLaboratorio',     dados.laboratorio);
+  // Fase 2 (roadmap) — só os campos de texto livre; datas/selects/checkboxes/
+  // subtabela ficam de fora do rascunho em memória por simplicidade (o
+  // "Salvar Rascunho" via backend continua persistindo tudo normalmente).
+  mesclar('invIndicacaoUso',      dados.indicacaoUso);
+  mesclar('invFormaFarmaceutica', dados.formaFarmaceutica);
   atualizarProgresso();
 }
 
@@ -7388,6 +8057,24 @@ function _coletarFormulario(encerrar) {
     dataInicioReacao:  (document.getElementById('invDataInicioReacao')|| {}).value || '',
     dataInicioAdministracao: (document.getElementById('invDataInicioAdministracao') || {}).value || '',
     nascimento:              (document.getElementById('invDataNascimento')          || {}).value || '',
+
+    // Fase 2 (roadmap) — campos novos da tela de investigação
+    acaoAdotada:              (document.getElementById('invAcaoAdotada')              || {}).value || '',
+    indicacaoUso:             (document.getElementById('invIndicacaoUso')             || {}).value || '',
+    dataFimAdministracao:     (document.getElementById('invDataFimAdministracao')     || {}).value || '',
+    dataFimReacao:            (document.getElementById('invDataFimReacao')            || {}).value || '',
+    pesoKg:                   (document.getElementById('invPesoKg')                   || {}).value || '',
+    alturaCm:                 (document.getElementById('invAlturaCm')                 || {}).value || '',
+    formaFarmaceutica:        (document.getElementById('invFormaFarmaceutica')        || {}).value || '',
+    numeroDosesIntervalo:     (document.getElementById('invNumeroDosesIntervalo')     || {}).value || '',
+    unidadeIntervalo:         (document.getElementById('invUnidadeIntervalo')         || {}).value || '',
+    examesEstruturados:       _coletarExamesEstruturados(),
+    dataObito:                (document.getElementById('invDataObito')                || {}).value || '',
+    relacaoMedicamentoEvento: (document.getElementById('invRelacaoMedicamentoEvento') || {}).value || '',
+    problemasAdicionais:      [...document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]:checked')].map(c => c.value),
+    dum:                      (document.getElementById('invDum')                      || {}).value || '',
+    gestante:                 (document.getElementById('invGestante') || {}).checked || false,
+    lactante:                 (document.getElementById('invLactante') || {}).checked || false,
 
     encerrar:        encerrar
   };
@@ -9927,8 +10614,65 @@ const SCHEMA = {
       // oficiais CL4 (ich-medical-record-number-source-type) e CL21 (ich-role-code).
       FONTE_PRONTUARIO:     '2.16.840.1.113883.3.989.2.1.1.4',   // CL4 — D.1.1.3 (código "3" = Hospital Record)
       AUTOR_COMENTARIO:     '2.16.840.1.113883.3.989.2.1.1.21',  // CL21 — H.2/H.4/H.5 (1=sender, 2=reporter, 3=sourceReporter)
+      PROBLEMAS_ADICIONAIS: '2.16.840.1.113883.3.989.2.1.1.17',  // CL17 — G.k.10.r (Fase 2 / F2-12)
       PAIS:                 '1.0.3166.1.2.2',
       SEXO:                 '1.0.5218'   // D.5 administrativeGenderCode — [1] Masculino [2] Feminino
+    },
+
+    // ── Fase 2 (roadmap) — campos novos da tela de investigação ──────────────
+
+    // F2-01 · G.k.8 Ação Adotada com o Medicamento (CL15). Rótulos idênticos
+    // aos do roadmap/DEFAULT_LISTAS.acao_adotada (Config.gs).
+    ACAO_MEDICAMENTO_MAP: {
+      'RETIRADA DO MEDICAMENTO':    '1',
+      'REDUÇÃO DA DOSE':            '2',
+      'AUMENTO DA DOSE':            '3',
+      'SEM ALTERAÇÃO DA DOSE':      '4',
+      'DESCONHECIDO':               '0',
+      'NÃO APLICÁVEL':              '9'
+    },
+
+    // F2-11 · G.k.1 Caracterização do Papel do Medicamento (CL13). Hoje
+    // hardcoded '1' (Suspeito) em _montarXmlE2B_ — dropdown novo o torna
+    // dinâmico. Fallback '1' se vazio/sem match (mantém o comportamento
+    // atual para casos já em andamento sem o campo preenchido).
+    CARACTERIZACAO_DROGA_MAP: {
+      'SUSPEITO':                    '1',
+      'CONCOMITANTE':                '2',
+      'INTERAGENTE':                 '3',
+      'MEDICAMENTO NÃO ADMINISTRADO':'4'
+    },
+
+    // F2-12 · G.k.10.r Outras Informações sobre o Medicamento — CODIFICADO
+    // (CL17, multi-select — 0..N). Confirmado contra a Reference Instance
+    // v3.1 (linhas 1967-1980): outboundRelationship2/observation code="9"
+    // ("codedDrugInformation") + value CE com código CL17. G.k.11 é a
+    // variante em TEXTO LIVRE (code="2", value ST) — não usada aqui porque
+    // o multi-select já é um vocabulário fechado. Tradução PT dos rótulos
+    // oficiais do CL17.
+    PROBLEMAS_ADICIONAIS_MAP: {
+      'FALSIFICAÇÃO':                                   '1',
+      'SUPERDOSAGEM':                                    '2',
+      'MEDICAMENTO USADO PELO PAI':                      '3',
+      'USO APÓS VALIDADE':                               '4',
+      'LOTE TESTADO — DENTRO DAS ESPECIFICAÇÕES':        '5',
+      'LOTE TESTADO — FORA DAS ESPECIFICAÇÕES':          '6',
+      'ERRO DE MEDICAÇÃO':                               '7',
+      'USO INDEVIDO':                                    '8',
+      'ABUSO':                                            '9',
+      'EXPOSIÇÃO OCUPACIONAL':                           '10',
+      'USO OFF-LABEL':                                   '11'
+    },
+
+    // F2-08 · G.k.4.r.3 Unidade do intervalo (CL26 — ich-interval-unit,
+    // tokens UCUM, não é um codelist numérico ICH). Rótulo em PT (mostrado
+    // no dropdown) -> token UCUM (vai literal no atributo `unit` do XML).
+    UNIDADE_INTERVALO_MAP: {
+      'HORA(S)':   'h',
+      'DIA(S)':    'd',
+      'SEMANA(S)': 'wk',
+      'MÊS(ES)':   'mo',
+      'ANO(S)':    'a'
     },
 
     // D.5 — espelha valores livres vindos do ETL (relatório de entradas).
