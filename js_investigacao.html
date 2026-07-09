@@ -307,7 +307,7 @@ function abrirInvestigacao(id) {
   document.getElementById('invMedicamento').innerText = caso.medicamento;
   document.getElementById('invTipoBadge').innerText   = caso.tipo;
   const elMedConfirmado = document.getElementById('invMedicamentoConfirmado');
-  if (elMedConfirmado) elMedConfirmado.innerText = caso.medicamento;
+  if (elMedConfirmado) elMedConfirmado.value = caso.medicamento;
   document.getElementById('invDataEvento').innerText  = formatarDataExibicao(caso.data_evento) || '-';
   document.getElementById('invSubtitulo').textContent = `ID: ${caso.id} · ${caso.setor}`;
   _aplicarModoSomenteLeitura(caso.status === STATUS.CONCLUIDO);
@@ -401,6 +401,8 @@ function _limparFormularioInvestigacao() {
 }
 
 function _preencherFormularioInvestigacao(caso) {
+  const elMedConfirmado = document.getElementById('invMedicamentoConfirmado');
+  if (elMedConfirmado) elMedConfirmado.value = caso.medicamento || '';
   document.getElementById('invHistoriaClinica').value = caso.historiaClinica || '';
   document.getElementById('invRelatoEvento').value    = caso.relatoEvento    || '';
   document.getElementById('invExames').value          = caso.exames          || '';
@@ -795,6 +797,7 @@ function _coletarFormulario(encerrar) {
 
   return {
     idCaso:          _invIdAtual,
+    medicamento:     (document.getElementById('invMedicamentoConfirmado') || {}).value || '',
     historiaClinica: document.getElementById('invHistoriaClinica').value,
     relatoEvento:    document.getElementById('invRelatoEvento').value,
     exames:          document.getElementById('invExames').value,

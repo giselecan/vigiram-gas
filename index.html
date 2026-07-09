@@ -608,9 +608,14 @@
               <h3 class="text-sm font-bold text-gray-700 mb-1 border-b pb-2 flex items-center gap-2">
                 <i class="fas fa-pills text-teal-500"></i> 2. Medicamento Suspeito, Posologia e Conduta
               </h3>
-              <p class="text-xs text-gray-500 mb-4">
-                Medicamento suspeito: <span id="invMedicamentoConfirmado" class="font-bold text-red-600 uppercase">-</span>
-              </p>
+              <div class="mb-4">
+                <label class="block text-xs font-bold text-gray-600 mb-1">Medicamento Suspeito (confirmado)</label>
+                <input type="text" id="invMedicamentoConfirmado"
+                       oninput="agendarAutosave(); atualizarProgresso()"
+                       class="w-full border rounded-lg px-3 py-2 text-sm font-bold text-red-600 uppercase focus:ring-2 focus:ring-blue-400 transition"
+                       placeholder="Nome do medicamento suspeito">
+                <p class="text-[10px] text-gray-400 mt-1">Corrija aqui caso o notificador tenha digitado o nome incorretamente.</p>
+              </div>
 
               <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <div class="md:col-span-2">
