@@ -1,0 +1,177 @@
+<script>
+// =========================================================
+// js_notificacao_interna.html — v1.0 (Fase C)
+//
+// NOVA FUNCIONALIDADE:
+//   Modal de notificação de RAM direta no Kanban, acessível
+//   ao farmacêutico autenticado sem sair do painel.
+//   - Casos entram diretamente em STATUS.INVESTIGACAO (DE),
+//     sem passar pela fila de triagem de trigger tools.
+//   - Setor pré-populado pelo filtro ativo (se existir).
+//   - Farmacêutico pré-preenchido com o nome da sessão (E2)
+//     ou pelo mapa canônico do setor selecionado.
+//   - Reutiliza salvarDemandaEspontanea() do backend, com
+//     campo origem: "KANBAN" para rastreabilidade.
+//   - Segue o padrão modular: sem lógica de negócio inline,
+//     sem hardcode de status ou listas.
+//
+// Depende de: js_core (escapeHtml, mostrarToast, carregarCasos,
+//             tokenSessao, getFarmaceuticoPorSetor, configGlobal)
+// =========================================================
+
+// ---------------------------------------------------------
+// ABRIR MODAL
+// ---------------------------------------------------------
+function abrirNotificacaoInterna() {
+  const modal = document.getElementById('modalNotificacaoInterna');
+  if (!modal) return;
+
+  // Reset completo do formulário
+  document.getElementById('formNotificacaoInterna').reset();
+  document.getElementById('niAreaErro').classList.add('hidden');
+
+  // Pré-preencher setor pelo filtro ativo do Kanban
+  const filtroSetorAtivo = document.getElementById('filtroSetor')?.value;
+  const selectSetor      = document.getElementById('niSetor');
+
+  // Popular select de setores via configGlobal (já carregado em _aplicarConfig)
+  if (selectSetor) {
+    selectSetor.innerHTML = '<option value="">Selecione o setor…</option>';
+    const setores = (configGlobal && configGlobal.setores) ? configGlobal.setores : [];
+    setores.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value       = escapeHtml(s.setor);
+      opt.textContent = s.setor;
+      selectSetor.appendChild(opt);
+    });
+    // Pré-seleciona se filtro do Kanban estiver ativo
+    if (filtroSetorAtivo && filtroSetorAtivo !== 'TODOS') {
+      selectSetor.value = filtroSetorAtivo;
+      _niAtualizarFarmaceutico(filtroSetorAtivo);
+    }
+  }
+
+  // Pré-preencher farmacêutico com nome da sessão (E2) ou mapa canônico
+  _niPreencherFarmaceutico('');
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+
+  // Foco no primeiro campo
+  setTimeout(() => {
+    const primeiro = document.getElementById('niProntuario');
+    if (primeiro) primeiro.focus();
+  }, 100);
+}
+
+// ---------------------------------------------------------
+// FECHAR MODAL
+// ---------------------------------------------------------
+function fecharNotificacaoInterna() {
+  const modal = document.getElementById('modalNotificacaoInterna');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
+
+// ---------------------------------------------------------
+// ATUALIZAR FARMACÊUTICO QUANDO SETOR MUDA
+// ---------------------------------------------------------
+function _niAtualizarFarmaceutico(setor) {
+  const farmaCanonica = getFarmaceuticoPorSetor(setor);
+  _niPreencherFarmaceutico(farmaCanonica);
+}
+
+function _niPreencherFarmaceutico(farmaCanonica) {
+  const el        = document.getElementById('niFarmaceutico');
+  const nomeLogado = sessionStorage.getItem('vigi_nome') || '';
+
+  // Prioridade: 1. canônico do setor, 2. nome logado, 3. vazio
+  const valor = farmaCanonica || nomeLogado;
+  if (el) {
+    el.value = valor;
+    // Indicador visual se veio do mapa canônico
+    if (farmaCanonica) {
+      el.classList.add('border-teal-400', 'bg-teal-50');
+      el.title = 'Farmacêutico responsável pelo setor (DB_Setores). Edite se necessário.';
+    } else {
+      el.classList.remove('border-teal-400', 'bg-teal-50');
+      el.title = '';
+    }
+  }
+}
+
+// ---------------------------------------------------------
+// ENVIO
+// ---------------------------------------------------------
+function enviarNotificacaoInterna(event) {
+  event.preventDefault();
+
+  // Coleta e validação básica
+  const prontuario  = document.getElementById('niProntuario').value.trim();
+  const iniciais    = document.getElementById('niIniciais').value.trim();
+  const nascimento  = document.getElementById('niNascimento').value.trim();
+  const setor       = document.getElementById('niSetor').value.trim();
+  const dataEvento  = document.getElementById('niDataEvento').value.trim();
+  const medicamento = document.getElementById('niMedicamento').value.trim();
+  const descricao   = document.getElementById('niDescricao').value.trim();
+  const condutas    = document.getElementById('niCondutas').value.trim();
+  const farmaceutico = document.getElementById('niFarmaceutico').value.trim();
+
+  const erros = [];
+  if (!prontuario)  erros.push('Prontuário');
+  if (!iniciais)    erros.push('Iniciais');
+  if (!setor)       erros.push('Setor');
+  if (!medicamento) erros.push('Medicamento');
+  if (!descricao)   erros.push('Descrição do evento');
+
+  if (erros.length > 0) {
+    const elErro = document.getElementById('niAreaErro');
+    elErro.textContent = `Preencha os campos obrigatórios: ${erros.join(', ')}.`;
+    elErro.classList.remove('hidden');
+    return;
+  }
+
+  document.getElementById('niAreaErro').classList.add('hidden');
+
+  const btn = document.getElementById('btnEnviarNI');
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i> Enviando…';
+  btn.disabled  = true;
+
+  // Monta payload compatível com salvarDemandaEspontanea()
+  // Campo extra "origem: KANBAN" para rastreabilidade no log
+  const dados = {
+    prontuario:            prontuario,
+    iniciais:              iniciais,
+    nascimento:            nascimento,
+    setor:                 setor,
+    dataEvento:            dataEvento,
+    medicamento:           medicamento,
+    descricao:             descricao,
+    condutas:              condutas,
+    // notificador = farmacêutico logado (campo reutilizado)
+    notificador:           farmaceutico || sessionStorage.getItem('vigi_nome') || '',
+    categoriaProfissional: 'Farmacêutico',
+    // Marca de origem para diferenciar no log
+    origem:                'KANBAN'
+  };
+
+  google.script.run
+    .withSuccessHandler(() => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      fecharNotificacaoInterna();
+      mostrarToast(`Caso DE registrado para prontuário ${prontuario}. Já em investigação.`, 'sucesso');
+      carregarCasos();
+    })
+    .withFailureHandler(err => {
+      btn.innerHTML = originalHtml;
+      btn.disabled  = false;
+      const elErro  = document.getElementById('niAreaErro');
+      elErro.textContent = 'Erro ao enviar: ' + (err.message || err);
+      elErro.classList.remove('hidden');
+    })
+    .salvarDemandaEspontanea(dados);
+}
+</script>

@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>VigiRAM</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <?!= include('styles'); ?>
+</head>
+<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-gray-800"
+      onload="inicializar()">
+
+  <!-- =====================================================
+       TELA DE LOGIN
+  ===================================================== -->
+  <div id="view-login" class="fixed inset-0 bg-teal-800 z-50 flex flex-col items-center justify-center p-4 fade-in">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div class="bg-teal-700 p-6 text-center text-white">
+        <i class="fas fa-shield-virus text-4xl text-teal-300 mb-3"></i>
+        <h1 class="text-2xl font-bold tracking-tight">VigiRAM</h1>
+        <p class="text-teal-200 text-sm mt-1">Acesso Restrito · Farmácia · HRN</p>
+      </div>
+      <form id="formLogin" onsubmit="realizarLogin(event)" class="p-8 space-y-6">
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Email</label>
+          <div class="relative">
+            <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+            <input type="email" id="loginEmail" required
+                   class="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm
+                          focus:bg-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
+                   placeholder="usuario@isgh.org.br">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-700 mb-1.5 uppercase tracking-wider">Senha</label>
+          <div class="relative">
+            <i class="fas fa-lock absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+            <input type="password" id="loginSenha" required
+                   class="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-sm
+                          focus:bg-white focus:ring-2 focus:ring-teal-500 outline-none transition-all"
+                   placeholder="••••••••">
+          </div>
+        </div>
+        <button type="submit" id="btnLogin"
+                class="w-full bg-teal-600 text-white font-bold py-3 rounded-lg shadow-lg
+                       hover:bg-teal-700 transition-all flex items-center justify-center text-sm">
+          Entrar no Sistema
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- =====================================================
+       APLICAÇÃO PRINCIPAL
+  ===================================================== -->
+  <div id="app-container" class="hidden flex-1 flex-col w-full overflow-hidden">
+
+    <!-- NAVBAR -->
+    <nav class="bg-teal-700 text-white shadow-md z-10 relative">
+      <div class="flex justify-between items-end px-4 pt-4">
+
+        <!-- Identidade -->
+        <div class="mb-4 flex items-center gap-3">
+          <div class="bg-white/10 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">
+            <i class="fas fa-shield-virus text-teal-200 text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-xl font-bold tracking-tight leading-none">VigiRAM</h1>
+            <p class="text-teal-200 text-[11px] font-semibold uppercase tracking-wider mt-0.5">
+              Farmacovigilância · HRN
+            </p>
+          </div>
+        </div>
+
+        <!-- Abas -->
+        <div class="flex items-end self-end space-x-1">
+          <button onclick="alternarAba('kanban')" id="btnAbaKanban"
+                  class="px-5 py-3 font-bold text-sm transition aba-ativa">
+            <i class="fas fa-tasks mr-2"></i> Painel de Notificações
+          </button>
+          <button onclick="alternarAba('dashboard')" id="btnAbaDash"
+                  class="px-5 py-3 font-bold text-sm transition aba-inativa">
+            <i class="fas fa-chart-pie mr-2"></i> Dashboard
+          </button>
+        </div>
+
+        <!-- Ações da direita -->
+        <div class="flex items-center gap-2 mb-4">
+          <button onclick="abrirNotificacaoInterna()"
+                  class="pill-action bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg font-semibold
+                         text-sm shadow-sm flex items-center gap-1.5"
+                  title="Registrar suspeita de RAM diretamente (entra em Investigação)">
+            <i class="fas fa-plus-circle"></i>
+            <span class="hidden sm:inline">Notificar RAM</span>
+          </button>
+
+          <button onclick="carregarCasos()" id="btnAtualizar"
+                  class="pill-action bg-teal-600 hover:bg-teal-500 w-9 h-9 rounded-lg flex items-center justify-center shadow-sm"
+                  title="Sincronizar casos">
+            <i class="fas fa-sync-alt"></i>
+          </button>
+
+          <div class="navbar-divider"></div>
+
+          <!-- Avatar usuário — tooltip fixed, posicionado via JS (getBoundingClientRect) -->
+          <button onclick="_toggleTooltipUsuario()"
+                  onmouseenter="_mostrarTooltipUsuario()"
+                  onmouseleave="_esconderTooltipUsuario()"
+                  class="w-9 h-9 rounded-full bg-teal-800 border-2 border-teal-400/40 text-teal-50 text-xs
+                         font-bold flex items-center justify-center shrink-0 hover:border-teal-300 transition"
+                  id="avatarUsuario">
+            --
+          </button>
+          <span id="lblUsuarioLogado" class="hidden"></span>
+
+          <button onclick="document.getElementById('modalSobre').classList.replace('hidden','flex')"
+                  class="pill-action bg-white/10 hover:bg-white/20 w-9 h-9 rounded-lg flex items-center justify-center"
+                  title="Sobre o VigiRAM">
+            <i class="fas fa-info-circle"></i>
+          </button>
+
+          <!-- Configurações — visível apenas para ADMIN, discreto na navbar -->
+          <button id="btnAbaAdmin" onclick="abrirConfiguracoes()"
+                  class="hidden pill-action bg-white/10 hover:bg-white/20 w-9 h-9 rounded-lg
+                         flex items-center justify-center opacity-60 hover:opacity-100 transition"
+                  title="Configurações do sistema">
+            <i class="fas fa-cog text-sm"></i>
+          </button>
+
+          <button onclick="fazerLogout()"
+                  class="pill-action bg-white/10 hover:bg-white/20 w-9 h-9 rounded-lg flex items-center justify-center"
+                  title="Sair do sistema">
+            <i class="fas fa-sign-out-alt"></i>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- BARRA DE FILTROS -->
+    <div id="barraFiltros" class="bg-white px-4 py-2.5 flex flex-nowrap items-center gap-2 overflow-x-auto z-10 shadow-sm border-b border-gray-200">
+      <div class="relative flex-shrink-0 w-56">
+        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+        <input type="text" id="inputBusca" placeholder="Prontuário, iniciais ou medicamento…"
+               oninput="processarFiltros()"
+               class="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-lg
+                      focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition">
+      </div>
+      <select id="filtroSetor" onchange="processarFiltros()"
+              class="flex-shrink-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-700 max-w-[160px]
+                     focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
+        <option value="TODOS">Todos os Setores</option>
+      </select>
+      <select id="filtroFarmaceutico" onchange="processarFiltros()"
+        class="flex-shrink-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-700 w-[190px]
+               focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
+  <option value="TODOS">Todos os Farmacêuticos</option>
+</select>
+      <select id="filtroSLA" onchange="processarFiltros()"
+              class="flex-shrink-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-700 max-w-[150px]
+                     focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
+        <option value="TODOS">Qualquer prazo</option>
+        <option value="VENCIDO">🔴 Vencido</option>
+        <option value="VENCENDO">🟡 Vencendo (&lt;12h)</option>
+        <option value="OK">🟢 No Prazo</option>
+        <option value="SEM">⚪ Sem SLA</option>
+      </select>
+      <div class="flex-shrink-0 flex items-center gap-1 text-sm text-gray-500 whitespace-nowrap">
+        <label class="text-xs font-semibold text-gray-500">De</label>
+        <input type="date" id="filtroDe" onchange="processarFiltros()"
+               class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-[130px]
+                      focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
+        <label class="text-xs font-semibold text-gray-500">até</label>
+        <input type="date" id="filtroAte" onchange="processarFiltros()"
+               class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-[130px]
+                      focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
+      </div>
+      <button onclick="limparFiltros()"
+              class="flex-shrink-0 text-xs text-teal-600 hover:text-teal-800 font-semibold transition flex items-center gap-1">
+        <i class="fas fa-times-circle"></i> Limpar
+      </button>
+      <span id="contadorResultados" class="flex-shrink-0 ml-auto text-xs text-gray-400 font-medium whitespace-nowrap"></span>
+    </div>
+
+    <!-- =====================================================
+         VIEW KANBAN
+    ===================================================== -->
+    <div id="view-kanban" class="p-4 flex-1 overflow-hidden flex flex-col md:flex-row gap-4">
+
+      <!-- Coluna Triagem -->
+      <div class="flex-1 flex flex-col min-w-0">
+        <div class="bg-orange-100 border-t-4 border-orange-500 rounded-t shadow-sm p-3 flex items-center justify-between">
+          <h2 class="text-base font-bold text-orange-800 flex items-center gap-2">
+            <i class="fas fa-filter text-orange-500"></i> Triagem
+          </h2>
+          <span id="contador-triagem" class="bg-orange-200 text-orange-800 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
+        </div>
+        <div id="coluna-triagem" class="bg-orange-50 rounded-b shadow-sm p-3 flex-1 overflow-y-auto kanban-col space-y-2"></div>
+        <button id="btnMaisTriagem" onclick="carregarMais('triagem')"
+                class="hidden mt-2 text-xs text-orange-600 font-semibold hover:text-orange-800 text-center py-1">
+          <i class="fas fa-chevron-down mr-1"></i> Ver mais casos
+        </button>
+      </div>
+
+      <!-- Coluna Investigação -->
+      <div class="flex-1 flex flex-col min-w-0">
+        <div class="bg-blue-100 border-t-4 border-blue-500 rounded-t shadow-sm p-3 flex items-center justify-between">
+          <h2 class="text-base font-bold text-blue-800 flex items-center gap-2">
+            <i class="fas fa-microscope text-blue-500"></i> Em Investigação
+          </h2>
+          <span id="contador-investigacao" class="bg-blue-200 text-blue-800 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
+        </div>
+        <div id="coluna-investigacao" class="bg-blue-50 rounded-b shadow-sm p-3 flex-1 overflow-y-auto kanban-col space-y-2"></div>
+        <button id="btnMaisInvestigacao" onclick="carregarMais('investigacao')"
+                class="hidden mt-2 text-xs text-blue-600 font-semibold hover:text-blue-800 text-center py-1">
+          <i class="fas fa-chevron-down mr-1"></i> Ver mais casos
+        </button>
+      </div>
+
+      <!-- Coluna Concluídos -->
+      <div class="flex-1 flex flex-col min-w-0">
+        <div class="bg-gray-200 border-t-4 border-gray-500 rounded-t shadow-sm p-3 flex items-center justify-between">
+          <h2 class="text-base font-bold text-gray-700 flex items-center gap-2">
+            <i class="fas fa-check-double text-gray-500"></i> Finalizados / Descartados
+          </h2>
+          <span id="contador-concluidos" class="bg-gray-300 text-gray-700 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
+        </div>
+        <div id="coluna-concluidos" class="bg-gray-100 rounded-b shadow-sm p-3 flex-1 overflow-y-auto kanban-col space-y-2"></div>
+        <button id="btnMaisConcluidos" onclick="carregarMais('concluidos')"
+                class="hidden mt-2 text-xs text-gray-500 font-semibold hover:text-gray-700 text-center py-1">
+          <i class="fas fa-chevron-down mr-1"></i> Ver mais casos
+        </button>
+      </div>
+
+    </div>
+
+    <!-- =====================================================
+         VIEW DASHBOARD
+    ===================================================== -->
+    <div id="view-dashboard" class="hidden p-6 flex-1 overflow-y-auto bg-gray-100 fade-in">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500">
+          <p class="text-xs text-gray-500 font-bold uppercase">Total Rastreados</p>
+          <p id="dashCardTotal" class="text-2xl font-black text-gray-800">0</p>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-red-500">
+          <p class="text-xs text-gray-500 font-bold uppercase">RAMs Confirmadas</p>
+          <p id="dashCardRAMs" class="text-2xl font-black text-red-600">0</p>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-gray-400">
+          <p class="text-xs text-gray-500 font-bold uppercase">Falsos Positivos</p>
+          <p id="dashCardDescartes" class="text-2xl font-black text-gray-600">0</p>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-orange-400">
+          <p class="text-xs text-gray-500 font-bold uppercase">Aguardando Avaliação</p>
+          <p id="dashCardPendentes" class="text-2xl font-black text-orange-600">0</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-teal-500">
+          <p class="text-xs text-gray-500 font-bold uppercase">Tempo Médio de Análise (Triagem)</p>
+          <p id="dashCardTempoMedio" class="text-2xl font-black text-teal-700">—</p>
+          <p class="text-[10px] text-gray-400 mt-0.5">Evento → triagem farmacêutica · gatilhos (BA)</p>
+        </div>
+        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-red-600">
+          <p class="text-xs text-gray-500 font-bold uppercase">Triagens Atrasadas (SLA)</p>
+          <p id="dashCardAtrasados" class="text-2xl font-black text-red-700">0</p>
+          <p id="dashCardAtrasadosSub" class="text-[10px] text-gray-400 mt-0.5">—</p>
+        </div>
+      </div>
+       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-chart-pie text-teal-600 mr-2"></i> Desfecho dos Gatilhos
+          </h3>
+          <div class="relative h-64 w-full flex justify-center"><canvas id="graficoDesfechos"></canvas></div>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-heartbeat text-red-500 mr-2"></i> Distribuição de Gravidade
+          </h3>
+          <div class="relative h-64 w-full flex justify-center"><canvas id="graficoGravidade"></canvas></div>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-hospital text-blue-500 mr-2"></i> Setores com Mais Eventos
+          </h3>
+          <div class="relative h-64 w-full"><canvas id="graficoSetores"></canvas></div>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-pills text-purple-500 mr-2"></i> Top Medicamentos Suspeitos
+          </h3>
+          <div class="relative h-64 w-full"><canvas id="graficoMedicamentos"></canvas></div>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-bullseye text-red-600 mr-2"></i> Conversão Gatilho → RAM (Busca Ativa)
+          </h3>
+          <div class="relative h-64 w-full flex justify-center"><canvas id="graficoGatilhoRam"></canvas></div>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-layer-group text-orange-500 mr-2"></i> Notificações de RAM por Setor × Gravidade
+          </h3>
+          <div class="relative h-64 w-full"><canvas id="graficoGravidadeSetor"></canvas></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-ranking-star text-blue-500 mr-2"></i> Ranking de Produção por Setor
+          </h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-left text-gray-400 uppercase text-[10px] border-b border-gray-200">
+                  <th class="py-1.5 px-2">#</th>
+                  <th class="py-1.5 px-2">Setor</th>
+                  <th class="py-1.5 px-2 text-center">Concluídos</th>
+                  <th class="py-1.5 px-2 text-center">Rastreados</th>
+                  <th class="py-1.5 px-2 text-right">% Conclusão</th>
+                </tr>
+              </thead>
+              <tbody id="rankingSetoresBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+            <i class="fas fa-user-md text-teal-600 mr-2"></i> Ranking de Investigação por Farmacêutico
+          </h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-left text-gray-400 uppercase text-[10px] border-b border-gray-200">
+                  <th class="py-1.5 px-2">#</th>
+                  <th class="py-1.5 px-2">Farmacêutico</th>
+                  <th class="py-1.5 px-2 text-center">Casos Concluídos</th>
+                  <th class="py-1.5 px-2 text-right">% do Total</th>
+                </tr>
+              </thead>
+              <tbody id="rankingFarmaceuticosBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- =====================================================
+         MODAL TRIAGEM
+    ===================================================== -->
+    <div id="modalTriagem" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 fade-in">
+        <h2 class="text-xl font-bold text-gray-800 mb-2 border-b pb-3">
+          <i class="fas fa-filter text-orange-500 mr-2"></i> Triagem de Gatilho (Trigger Tools)
+        </h2>
+        <div class="bg-gray-50 p-3 rounded-lg text-xs mb-4 border border-gray-200">
+        <p class="text-gray-600">
+        <strong>Prontuário:</strong> <span id="trgProntuario" class="text-gray-800 font-bold"></span>
+          &nbsp;·&nbsp;
+        <strong>Iniciais:</strong> <span id="trgIniciais" class="text-gray-800 font-bold"></span>
+          &nbsp;·&nbsp;
+        <strong>Setor:</strong> <span id="trgSetor" class="text-gray-800"></span>
+        </p>
+        <p class="text-red-600 font-bold mt-1 text-sm">Gatilho: <span id="trgGatilho"></span></p>
+        </div>
+        <form onsubmit="enviarTriagem(event)" id="formTriagem" class="space-y-4">
+          <div class="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+            <label class="block text-sm font-bold text-orange-800 mb-2">Foi confirmado como RAM?</label>
+            <div class="flex gap-6">
+              <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-800">
+                <input type="radio" name="trgHouveRam" value="SIM" onchange="toggleFormTriagem(true)"> Sim, houve RAM
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-800">
+                <input type="radio" name="trgHouveRam" value="NAO" onchange="toggleFormTriagem(false)"> Não, descartar
+              </label>
+            </div>
+          </div>
+          <div id="trgAreaSim" class="hidden p-3 bg-green-50 border border-green-200 rounded-lg">
+            <label class="block text-xs font-bold text-green-800 mb-1">Medicamento Suspeito Real</label>
+            <input type="text" id="trgMedSuspeito"
+                   class="w-full border rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-green-500 text-gray-800">
+          </div>
+          <div id="trgAreaNao" class="hidden p-3 bg-gray-50 border border-gray-300 rounded-lg">
+            <label class="block text-xs font-bold text-gray-700 mb-1">Motivo do Descarte</label>
+            <!-- E3: populado via _aplicarConfig() em js_core (config.listas.motivo_descarte) -->
+            <select id="trgMotivoDescarte"
+                    class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-gray-400 text-gray-800">
+              <option value="">Selecione o motivo…</option>
+            </select>
+          </div>
+          <div class="pt-3 flex justify-end space-x-3 border-t">
+            <button type="button" onclick="fecharModalTriagem()"
+                    class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-200 transition">
+              Cancelar
+            </button>
+            <button type="submit" id="btnSalvarTriagem"
+                    class="px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold text-sm hover:bg-orange-600 transition">
+              <i class="fas fa-check mr-1"></i> Salvar e Enviar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =====================================================
+         MODAL INVESTIGAÇÃO
+    ===================================================== -->
+    <div id="modalInvestigacao" class="fixed inset-0 bg-black bg-opacity-70 hidden flex items-center justify-center z-50 fade-in">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
+
+        <!-- Header -->
+        <div class="bg-blue-700 p-4 flex justify-between items-center text-white flex-shrink-0">
+          <div class="flex items-center gap-3">
+            <i class="fas fa-microscope text-blue-200 text-lg"></i>
+            <div>
+              <h2 class="text-lg font-bold leading-tight">Investigação de RAM</h2>
+              <p class="text-blue-200 text-xs" id="invSubtitulo">—</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <span id="invTipoBadge" class="bg-white text-blue-800 text-xs font-bold px-3 py-1 rounded-full shadow-sm">BA</span>
+            <span id="autosaveStatus" class="text-xs text-blue-200 opacity-0 flex items-center gap-1 transition-opacity duration-400">
+              <i class="fas fa-cloud-upload-alt"></i> Rascunho salvo
+            </span>
+            <button type="button" onclick="fecharModalInvestigacao()"
+                    class="ml-2 text-blue-200 hover:text-white transition-colors"
+                    title="Fechar investigação">
+              <i class="fas fa-times text-lg"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Barra de progresso -->
+        <div class="bg-blue-50 border-b border-blue-100 px-5 py-2 flex-shrink-0 flex items-center gap-3">
+          <span class="text-xs font-semibold text-blue-700 whitespace-nowrap" id="textoProgresso">0 de 12 campos</span>
+          <div class="flex-1 bg-blue-100 rounded-full h-2 overflow-hidden">
+            <div id="barraProgresso" class="h-2 rounded-full bg-red-400 transition-all duration-300" style="width:0%"></div>
+          </div>
+          <span class="text-xs text-blue-500" id="textoProgressoPct">0%</span>
+        </div>
+
+        <!-- Corpo scrollável -->
+        <div class="p-5 overflow-y-auto bg-gray-50 flex-1">
+
+          <!-- Info do caso (read-only) — B2: agora com Iniciais e Idade -->
+          <div class="bg-white p-4 border border-blue-100 rounded-xl shadow-sm mb-5 flex flex-wrap gap-6 text-sm">
+            <div>
+              <span class="text-gray-400 text-[10px] font-bold block uppercase tracking-wider">Prontuário</span>
+              <p id="invProntuario" class="font-bold text-gray-800 text-base">-</p>
+            </div>
+            <!-- B2 — Iniciais do paciente -->
+            <div>
+              <span class="text-gray-400 text-[10px] font-bold block uppercase tracking-wider">Iniciais</span>
+              <p id="invIniciais" class="font-bold text-gray-800">-</p>
+            </div>
+            <!-- B2 — Idade calculada -->
+            <div>
+              <span class="text-gray-400 text-[10px] font-bold block uppercase tracking-wider">Idade</span>
+              <p id="invIdade" class="font-semibold text-gray-600">-</p>
+            </div>
+            <div>
+              <span class="text-gray-400 text-[10px] font-bold block uppercase tracking-wider">Setor</span>
+              <p id="invSetor" class="font-bold text-gray-800">-</p>
+            </div>
+            <div class="flex-1">
+              <span class="text-gray-400 text-[10px] font-bold block uppercase tracking-wider">Medicamento Suspeito</span>
+              <p id="invMedicamento" class="font-bold text-red-600 uppercase text-base">-</p>
+            </div>
+            <div>
+              <span class="text-gray-400 text-[10px] font-bold block uppercase tracking-wider">Data Evento</span>
+              <p id="invDataEvento" class="font-semibold text-gray-600">-</p>
+            </div>
+          </div>
+
+          <form id="formInvestigacao" class="space-y-5">
+
+            <!-- Fase 6 — Relato original da Assistência (read-only; só aparece em casos DE) -->
+<div id="invBlocoNotificador"
+     class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm">
+  <h3 class="text-sm font-bold text-amber-800 mb-3 border-b border-amber-200 pb-2 flex items-center gap-2">
+    <i class="fas fa-bullhorn text-amber-500"></i> Relato da Assistência (original — não editável)
+  </h3>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+    <div>
+      <p class="text-xs font-bold text-amber-700 mb-1">Descrição do evento</p>
+      <p id="invNotifRelato" class="text-gray-700 whitespace-pre-wrap">—</p>
+    </div>
+    <div>
+      <p class="text-xs font-bold text-amber-700 mb-1">Conduta imediata informada</p>
+      <p id="invNotifConduta" class="text-gray-700 whitespace-pre-wrap">—</p>
+    </div>
+  </div>
+  <p id="invNotifMeta" class="text-xs text-amber-600 mt-3"></p>
+</div>
+
+            <!-- Seção 1: Dados Clínicos -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-notes-medical text-teal-500"></i> 1. Dados Clínicos e Evento
+              </h3>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Resumo da História Clínica</label>
+                  <textarea id="invHistoriaClinica" rows="2"
+                            oninput="agendarAutosave(); atualizarProgresso()"
+                            class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 resize-none transition"
+                            placeholder="Histórico clínico relevante do paciente…"></textarea>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Relato do Evento</label>
+                    <textarea id="invRelatoEvento" rows="2"
+                              oninput="agendarAutosave(); atualizarProgresso()"
+                              class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 resize-none transition"
+                              placeholder="Descrição da reação adversa observada…"></textarea>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-gray-600 mb-1">Exames Complementares</label>
+                    <textarea id="invExames" rows="2"
+                              oninput="agendarAutosave(); atualizarProgresso()"
+                              class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 resize-none transition"
+                              placeholder="Resultados laboratoriais ou de imagem relevantes…"></textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Seção 2: Condutas -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-heartbeat text-teal-500"></i> 2. Condutas e Evolução
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Medicamento Readministrado?</label>
+                  <!-- A3: populado via _aplicarConfig() (config.listas.readministrado) -->
+                  <select id="invReadministrado"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Evolução Pós Condutas</label>
+                  <!-- A3: populado via _aplicarConfig() (config.listas.evolucao) -->
+                  <select id="invEvolucao"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Seção 3: Naranjo -->
+            <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+              <div class="bg-gradient-to-r from-gray-50 to-gray-100 px-5 py-3 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                  <i class="fas fa-calculator text-teal-500"></i> 3. Algoritmo de Naranjo
+                  <span class="text-[10px] font-normal text-gray-400">(Causalidade de RAM)</span>
+                </h3>
+                <div id="naranjoFaixaContainer"
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-bold transition-all duration-300 bg-gray-100 text-gray-700 border-gray-300">
+                  <span id="naranjoEscore" class="text-lg font-extrabold">0</span>
+                  <div>
+                    <span id="naranjoClassificacao" class="block text-xs font-bold">DUVIDOSA</span>
+                    <span id="naranjoInterpretacao" class="block text-[10px] font-normal opacity-75">Escore ≤ 0</span>
+                  </div>
+                </div>
+              </div>
+              <div class="px-5 py-2 bg-gray-50 border-b flex flex-wrap gap-3 text-[10px] font-semibold text-gray-500">
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-gray-300 inline-block"></span> DUVIDOSA (≤ 0)</span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-yellow-300 inline-block"></span> POSSÍVEL (1–4)</span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-orange-400 inline-block"></span> PROVÁVEL (5–8)</span>
+                <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span> DEFINIDA (≥ 9)</span>
+              </div>
+              <div class="p-5 space-y-1" id="naranjoPerguntas"></div>
+            </div>
+
+            <!-- Seção 4: Fechamento Clínico -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-clipboard-check text-teal-500"></i> 4. Fechamento Clínico
+                <span class="ml-auto text-[10px] text-red-500 font-semibold">* Obrigatório para finalizar</span>
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Gravidade <span class="text-red-500">*</span></label>
+                  <!-- A3: populado via _aplicarConfig() (config.listas.gravidade) -->
+                  <select id="invGravidade"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Desfecho <span class="text-red-500">*</span></label>
+                  <!-- A3: populado via _aplicarConfig() (config.listas.desfecho) -->
+                  <select id="invDesfecho"
+                          onchange="agendarAutosave(); atualizarProgresso(); _toggleBlocoObito()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Conclusão <span class="text-red-500">*</span></label>
+                  <!-- A3: populado via _aplicarConfig() (config.listas.conclusao) -->
+                  <select id="invConclusao"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Fase 8 — Exportação E2B(R3): dados adicionais exigidos pelo VigiMed -->
+              <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+                <div class="md:col-span-2">
+                  <label class="block text-xs font-bold text-gray-600 mb-1">
+                    Reação/Evento (termo curto) <span class="text-red-500">*</span>
+                  </label>
+                  <input type="text" id="invReacaoTermo"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: Tontura, Náusea, Rash cutâneo…"
+                         class="w-full border rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-blue-400 transition">
+                  <p class="text-[10px] text-gray-400 mt-1">Termo objetivo — usado na exportação para o VIGIMED, não a narrativa completa.</p>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Dose</label>
+                  <input type="text" id="invDoseMedicamento"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: 10"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Unidade</label>
+                  <input type="text" id="invDoseUnidade"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: mg"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Via de Administração</label>
+                  <input type="text" id="invViaAdministracao"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: Oral, EV, IM…"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Data de Início da Reação</label>
+                  <input type="datetime-local" id="invDataInicioReacao"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Início da Administração</label>
+                  <input type="datetime-local" id="invDataInicioAdministracao"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Data de Nascimento do Paciente</label>
+                  <input type="date" id="invDataNascimento"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="md:col-span-3">
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label class="block text-xs font-bold text-gray-600 mb-1">Farmacêutico(a)</label>
+                      <input type="text" id="invFarmaceutico"
+                             oninput="agendarAutosave(); atualizarProgresso()"
+                             class="w-full border rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-blue-400 transition"
+                             placeholder="CRF ou nome completo">
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-gray-600 mb-1">
+                        <i class="fas fa-barcode text-gray-400 mr-1"></i>Lote
+                      </label>
+                      <input type="text" id="invLote"
+                             oninput="agendarAutosave(); atualizarProgresso()"
+                             class="w-full border rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-blue-400 transition"
+                             placeholder="Ex: 2024A123">
+                    </div>
+                    <div>
+                      <label class="block text-xs font-bold text-gray-600 mb-1">
+                        <i class="fas fa-flask text-gray-400 mr-1"></i>Laboratório
+                      </label>
+                      <input type="text" id="invLaboratorio"
+                             oninput="agendarAutosave(); atualizarProgresso()"
+                             class="w-full border rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-blue-400 transition"
+                             placeholder="Ex: NOVAFARMA">
+                    </div>
+                  </div>
+                  <div id="invBlocoConclusaoVigimed" class="hidden mt-4 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+                    <h4 class="text-xs font-bold text-emerald-800 mb-3 flex items-center gap-2">
+                      <i class="fas fa-file-import"></i> Importação no VigiMed
+                    </h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label class="block text-xs font-bold text-gray-600 mb-1">Nº Notificação Vigimed</label>
+                        <input type="text" id="invNumVigimed"
+                               class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-400 transition">
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold text-gray-600 mb-1">Data da Importação</label>
+                        <input type="datetime-local" id="invDataVigimed"
+                               class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-400 transition">
+                      </div>
+                    </div>
+                    <button type="button" onclick="salvarImportacaoVigimed()" id="btnSalvarVigimed"
+                            class="mt-3 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition flex items-center gap-2">
+                      <i class="fas fa-check"></i> Registrar Importação
+                    </button>
+                    <p class="text-[10px] text-emerald-700 mt-2">
+                      Disponível só após "Finalizar Caso" — exporte o XML, importe no VigiMed e registre aqui o nº/data.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="mt-4">
+                <label class="block text-xs font-bold text-gray-600 mb-1">Observações</label>
+                <textarea id="invObservacoes" rows="2"
+                          oninput="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 resize-none transition"
+                          placeholder="Informações adicionais relevantes…"></textarea>
+              </div>
+            </div>
+
+            <!-- Fase 2 (roadmap) — Seção 5: Detalhes do Medicamento -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-pills text-teal-500"></i> 5. Detalhes do Medicamento
+                <span class="text-[10px] font-normal text-gray-400">(opcional — enriquece a exportação VIGIMED)</span>
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Ação Adotada</label>
+                  <!-- F2-01: populado via _aplicarConfig() (config.listas.acao_adotada) -->
+                  <select id="invAcaoAdotada"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Relação Medicamento × Evento</label>
+                  <!-- F2-11: populado via _aplicarConfig() (config.listas.relacao_medicamento_evento) -->
+                  <select id="invRelacaoMedicamentoEvento"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Forma Farmacêutica</label>
+                  <input type="text" id="invFormaFarmaceutica"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: Comprimido, Solução injetável…"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Indicação de Uso</label>
+                  <input type="text" id="invIndicacaoUso"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: Hipertensão arterial…"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Data Fim da Administração</label>
+                  <input type="datetime-local" id="invDataFimAdministracao"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Nº de Doses no Intervalo</label>
+                  <input type="number" min="0" step="1" id="invNumeroDosesIntervalo"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         placeholder="Ex: 8"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Unidade do Intervalo</label>
+                  <!-- F2-08: populado via _aplicarConfig() (config.listas.unidade_intervalo) -->
+                  <select id="invUnidadeIntervalo"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Problemas Adicionais do Medicamento</label>
+                <!-- F2-12: populado via _aplicarConfig() (config.listas.problemas_adicionais) -->
+                <div id="invProblemasAdicionais" class="flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-700 p-3 bg-gray-50 rounded-lg border border-gray-200"></div>
+              </div>
+            </div>
+
+            <!-- Fase 2 (roadmap) — Seção 6: Dados Complementares do Paciente -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-user-injured text-teal-500"></i> 6. Dados Complementares do Paciente
+                <span class="text-[10px] font-normal text-gray-400">(opcional)</span>
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Peso (kg)</label>
+                  <input type="number" min="0" step="0.1" id="invPesoKg"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Altura (cm)</label>
+                  <input type="number" min="0" step="1" id="invAlturaCm"
+                         oninput="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Data Fim da Reação</label>
+                  <input type="datetime-local" id="invDataFimReacao"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                </div>
+              </div>
+
+              <!-- F2-13 — visibilidade controlada por _preencherFormularioInvestigacao
+                   (js_investigacao.html), com base em caso.sexo === 'F'. Não há
+                   seletor de sexo editável neste modal (vem do ETL). -->
+              <div id="invBlocoGestante" class="hidden grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 p-3 bg-pink-50 border border-pink-200 rounded-lg">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">DUM (Última Menstruação)</label>
+                  <input type="date" id="invDum"
+                         onchange="agendarAutosave(); atualizarProgresso()"
+                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-pink-400 transition">
+                </div>
+                <div class="flex items-center gap-2 mt-5">
+                  <input type="checkbox" id="invGestante" onchange="agendarAutosave()" class="w-4 h-4">
+                  <label for="invGestante" class="text-xs font-bold text-gray-600">Gestante</label>
+                </div>
+                <div class="flex items-center gap-2 mt-5">
+                  <input type="checkbox" id="invLactante" onchange="agendarAutosave()" class="w-4 h-4">
+                  <label for="invLactante" class="text-xs font-bold text-gray-600">Lactante</label>
+                </div>
+              </div>
+
+              <!-- F2-10 — visibilidade controlada por _preencherFormularioInvestigacao
+                   e pelo onchange de invDesfecho (ver toggleBlocoObito em js_investigacao.html) -->
+              <div id="invBlocoObito" class="hidden p-3 bg-gray-100 border border-gray-300 rounded-lg">
+                <label class="block text-xs font-bold text-gray-600 mb-1">Data do Óbito</label>
+                <input type="date" id="invDataObito"
+                       onchange="agendarAutosave(); atualizarProgresso()"
+                       class="w-full md:w-1/3 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-gray-400 transition">
+              </div>
+            </div>
+
+            <!-- Fase 2 (roadmap) — Seção 7: Exames Estruturados (F2-09, subtabela repetível) -->
+            <div class="bg-white p-5 border border-gray-200 rounded-xl shadow-sm">
+              <h3 class="text-sm font-bold text-gray-700 mb-4 border-b pb-2 flex items-center gap-2">
+                <i class="fas fa-vial text-teal-500"></i> 7. Exames Estruturados
+                <span class="text-[10px] font-normal text-gray-400">(opcional — além do campo livre da Seção 1)</span>
+              </h3>
+              <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                  <thead>
+                    <tr class="text-left text-gray-400 uppercase text-[10px] border-b border-gray-200">
+                      <th class="py-1.5 px-2">Nome</th>
+                      <th class="py-1.5 px-2">Data</th>
+                      <th class="py-1.5 px-2">Valor</th>
+                      <th class="py-1.5 px-2">Unidade</th>
+                      <th class="py-1.5 px-2">Ref. Mín</th>
+                      <th class="py-1.5 px-2">Ref. Máx</th>
+                      <th class="py-1.5 px-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="corpoExamesEstruturados"></tbody>
+                </table>
+              </div>
+              <button type="button" onclick="adicionarLinhaExameEstruturado()"
+                      class="mt-3 px-3 py-1.5 bg-teal-50 text-teal-700 border border-teal-200 rounded-lg text-xs font-bold hover:bg-teal-100 transition flex items-center gap-1.5">
+                <i class="fas fa-plus"></i> Adicionar Exame
+              </button>
+            </div>
+
+          </form>
+        </div>
+
+        <!-- Footer do modal -->
+        <div class="bg-white px-5 py-4 border-t flex justify-between items-center flex-shrink-0 rounded-b-xl">
+          <button type="button" onclick="fecharModalInvestigacao()"
+                  class="px-5 py-2.5 bg-white border border-gray-300 rounded-lg font-bold text-sm hover:bg-gray-50 transition">
+            Cancelar
+          </button>
+          <div class="flex items-center gap-3">
+            <button type="button" onclick="reabrirCaso()" id="btnReabrir"
+                    class="hidden px-5 py-2.5 bg-amber-500 text-white rounded-lg font-bold text-sm hover:bg-amber-600 transition flex items-center gap-2"
+                    title="Destrava os campos e retorna o caso para Em Investigação">
+              <i class="fas fa-undo"></i> Retornar para Investigação
+            </button>
+            <button type="button" onclick="exportarE2B()" id="btnExportarE2B"
+                    class="hidden px-5 py-2.5 bg-emerald-600 text-white rounded-lg font-bold text-sm hover:bg-emerald-700 transition flex items-center gap-2"
+                    title="Gerar XML E2B(R3) para importação no VigiMed">
+              <i class="fas fa-file-export"></i> Exportar VIGIMED
+            </button>
+            <button type="button" onclick="enviarInvestigacao(false)" id="btnRascunho"
+                    class="px-5 py-2.5 bg-gray-600 text-white rounded-lg font-bold text-sm hover:bg-gray-700 transition flex items-center gap-2">
+              <i class="fas fa-save"></i> Salvar Rascunho
+            </button>
+            <button type="button" onclick="enviarInvestigacao(true)" id="btnFinalizar"
+                    class="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 transition flex items-center gap-2">
+              <i class="fas fa-check-double"></i> Finalizar Caso
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- =====================================================
+         MODAL NOTIFICAÇÃO INTERNA (Fase C)
+         Acessível ao farmacêutico autenticado no Kanban.
+         Casos entram diretamente em "Em Investigação" (DE).
+    ===================================================== -->
+    <div id="modalNotificacaoInterna"
+         class="fixed inset-0 bg-black bg-opacity-60 hidden items-center justify-center z-50 fade-in">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+
+        <!-- Header roxo — diferencia visualmente do modal de triagem (laranja) e investigação (azul) -->
+        <div class="bg-purple-700 p-5 text-white flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <i class="fas fa-user-md text-purple-200 text-lg"></i>
+            <div>
+              <h2 class="text-lg font-bold">Notificação de RAM — Farmácia Clínica</h2>
+              <p class="text-purple-200 text-xs">Caso inserido diretamente em investigação (DE)</p>
+            </div>
+          </div>
+          <button onclick="fecharNotificacaoInterna()" class="text-purple-200 hover:text-white transition">
+            <i class="fas fa-times text-lg"></i>
+          </button>
+        </div>
+
+        <form id="formNotificacaoInterna" onsubmit="enviarNotificacaoInterna(event)" class="p-6 space-y-6">
+
+          <!-- Erro -->
+          <div id="niAreaErro"
+               class="hidden bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg"></div>
+
+          <!-- Dados do Paciente -->
+          <div class="border border-gray-200 rounded-xl overflow-hidden">
+            <div class="bg-teal-50 border-b border-gray-200 px-4 py-2.5 flex items-center gap-2">
+              <i class="fas fa-user-injured text-teal-700"></i>
+              <h3 class="text-xs font-bold text-teal-800 uppercase tracking-wide">1. Dados do Paciente</h3>
+            </div>
+            <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Prontuário *</label>
+                <input type="tel" id="niProntuario" required pattern="[0-9]*"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition"
+                       placeholder="123456">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Iniciais *</label>
+                <input type="text" id="niIniciais" required maxlength="10"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition uppercase"
+                       placeholder="G.C.A.N">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Data Nascimento</label>
+                <input type="date" id="niNascimento"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition">
+              </div>
+            </div>
+          </div>
+
+          <!-- Dados do Evento -->
+          <div class="border border-gray-200 rounded-xl overflow-hidden">
+            <div class="bg-orange-50 border-b border-gray-200 px-4 py-2.5 flex items-center gap-2">
+              <i class="fas fa-exclamation-triangle text-orange-600"></i>
+              <h3 class="text-xs font-bold text-orange-800 uppercase tracking-wide">2. Dados do Evento</h3>
+            </div>
+            <div class="p-4 space-y-4">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Setor / Clínica *</label>
+                  <!-- Populado por abrirNotificacaoInterna() via configGlobal.setores -->
+                  <select id="niSetor" required
+                          onchange="_niAtualizarFarmaceutico(this.value)"
+                          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition">
+                    <option value="">Carregando…</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-600 mb-1">Data do Evento</label>
+                  <input type="datetime-local" id="niDataEvento"
+                         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition">
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Medicamento Suspeito *</label>
+                <input type="text" id="niMedicamento" required
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition uppercase"
+                       placeholder="Ex: VANCOMICINA">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Descrição do Evento *</label>
+                <textarea id="niDescricao" required rows="2"
+                          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition resize-none"
+                          placeholder="Descreva a reação adversa observada…"
+                          oninput="this.style.height=''; this.style.height=this.scrollHeight+'px'"></textarea>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-gray-600 mb-1">Condutas realizadas</label>
+                <textarea id="niCondutas" rows="1"
+                          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition resize-none"
+                          placeholder="Ex: medicamento suspenso, hidratação iniciada…"
+                          oninput="this.style.height=''; this.style.height=this.scrollHeight+'px'"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- Farmacêutico responsável -->
+          <div class="border border-gray-200 rounded-xl overflow-hidden">
+            <div class="bg-blue-50 border-b border-gray-200 px-4 py-2.5 flex items-center gap-2">
+              <i class="fas fa-user-md text-blue-700"></i>
+              <h3 class="text-xs font-bold text-blue-800 uppercase tracking-wide">3. Farmacêutico Responsável</h3>
+            </div>
+            <div class="p-4">
+              <label class="block text-xs font-bold text-gray-600 mb-1">Nome / CRF</label>
+              <input type="text" id="niFarmaceutico"
+                     class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-purple-500 outline-none transition uppercase"
+                     placeholder="Preenchido automaticamente pelo setor">
+              <p class="text-[10px] text-gray-400 mt-1">Pré-preenchido pelo setor ou pelo usuário logado. Edite se necessário.</p>
+            </div>
+          </div>
+
+          <!-- Botões -->
+          <div class="flex justify-end gap-3 pt-2">
+            <button type="button" onclick="fecharNotificacaoInterna()"
+                    class="px-5 py-2.5 bg-white border border-gray-300 rounded-lg font-bold text-sm hover:bg-gray-50 transition">
+              Cancelar
+            </button>
+            <button type="submit" id="btnEnviarNI"
+                    class="px-6 py-2.5 bg-purple-600 text-white rounded-lg font-bold text-sm hover:bg-purple-700 transition flex items-center gap-2 shadow">
+              <i class="fas fa-paper-plane"></i> Registrar RAM
+            </button>
+          </div>
+
+        </form>
+      </div>
+    </div>
+
+  </div><!-- /app-container -->
+
+ <div id="modalSobre" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50 p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg transform transition-all">
+
+    <div class="bg-gradient-to-br from-teal-700 to-teal-900 rounded-t-2xl px-6 py-4 text-white relative">
+      <button onclick="document.getElementById('modalSobre').classList.replace('flex','hidden')"
+              class="absolute top-4 right-4 text-teal-200 hover:text-white transition-colors p-1"
+              aria-label="Fechar">
+        <i class="fas fa-times text-base"></i>
+      </button>
+
+      <div class="flex items-center gap-3">
+        <div class="bg-white/10 rounded-xl w-11 h-11 flex items-center justify-center shadow-inner">
+          <i class="fas fa-shield-virus text-teal-100 text-lg"></i>
+        </div>
+        <div>
+          <h2 class="text-lg font-bold leading-tight tracking-wide">VigiRAM HRN</h2>
+          <p class="text-teal-200 text-[11px] font-medium uppercase tracking-widest mt-0.5">Farmacovigilância Hospitalar</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="p-6 space-y-4">
+
+      <p class="text-xs text-gray-600 leading-relaxed">
+        Gestão de casos de Reação Adversa a Medicamento (RAM), da captação por
+        <strong class="text-gray-800">Busca Ativa</strong> ou
+        <strong class="text-gray-800">Demanda Espontânea</strong> até a conclusão e notificação regulatória.
+      </p>
+
+      <div class="grid grid-cols-2 gap-3">
+
+        <div class="bg-white border border-gray-100 shadow-sm rounded-xl p-3 hover:shadow-md hover:border-teal-100 transition-all">
+          <div class="flex items-center gap-2 mb-1.5">
+            <div class="bg-teal-50 w-6 h-6 rounded-md flex items-center justify-center shrink-0">
+              <i class="fas fa-magnifying-glass-chart text-[10px] text-teal-600"></i>
+            </div>
+            <p class="text-[11px] font-bold text-gray-800 uppercase tracking-wide leading-tight">Busca Ativa</p>
+          </div>
+          <p class="text-[11px] text-gray-500 leading-snug">Triagem de gatilhos clínicos com priorização e prazos de resposta.</p>
+        </div>
+
+        <div class="bg-white border border-gray-100 shadow-sm rounded-xl p-3 hover:shadow-md hover:border-blue-100 transition-all">
+          <div class="flex items-center gap-2 mb-1.5">
+            <div class="bg-blue-50 w-6 h-6 rounded-md flex items-center justify-center shrink-0">
+              <i class="fas fa-stethoscope text-[10px] text-blue-600"></i>
+            </div>
+            <p class="text-[11px] font-bold text-gray-800 uppercase tracking-wide leading-tight">Investigação</p>
+          </div>
+          <p class="text-[11px] text-gray-500 leading-snug">Fluxo por status (Kanban) e avaliação de causalidade por Naranjo.</p>
+        </div>
+
+        <div class="bg-white border border-gray-100 shadow-sm rounded-xl p-3 hover:shadow-md hover:border-purple-100 transition-all">
+          <div class="flex items-center gap-2 mb-1.5">
+            <div class="bg-purple-50 w-6 h-6 rounded-md flex items-center justify-center shrink-0">
+              <i class="fas fa-file-medical text-[10px] text-purple-600"></i>
+            </div>
+            <p class="text-[11px] font-bold text-gray-800 uppercase tracking-wide leading-tight">Notificação VigiMed</p>
+          </div>
+          <p class="text-[11px] text-gray-500 leading-snug">Envio de casos concluídos à ANVISA com status de importação por caso.</p>
+        </div>
+
+        <div class="bg-white border border-gray-100 shadow-sm rounded-xl p-3 hover:shadow-md hover:border-amber-100 transition-all">
+          <div class="flex items-center gap-2 mb-1.5">
+            <div class="bg-amber-50 w-6 h-6 rounded-md flex items-center justify-center shrink-0">
+              <i class="fas fa-chart-pie text-[10px] text-amber-600"></i>
+            </div>
+            <p class="text-[11px] font-bold text-gray-800 uppercase tracking-wide leading-tight">Indicadores</p>
+          </div>
+          <p class="text-[11px] text-gray-500 leading-snug">Produção por setor/farmacêutico, prazos e severidade das reações.</p>
+        </div>
+      </div>
+
+      <div class="border-t border-gray-100 pt-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="bg-gray-100 text-gray-500 rounded-full w-5 h-5 flex items-center justify-center text-[9px] shrink-0">
+             <i class="fas fa-mortar-pestle"></i>
+          </div>
+          <div class="flex flex-col leading-tight">
+             <span class="text-[10px] text-gray-400 font-medium">Idealização e Desenvolvimento</span>
+             <span class="text-[11px] text-gray-700 font-semibold">Gisele Cristine · Farmácia · HRN</span>
+          </div>
+        </div>
+        <span class="text-[10px] font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-full border border-teal-100 shadow-sm">v3.0</span>
+      </div>
+
+    </div>
+  </div>
+</div>
+<!-- =====================================================
+     RODAPÉ GLOBAL
+===================================================== -->
+<footer class="bg-teal-900 text-teal-300 text-[11px] px-6 py-2.5 flex justify-between items-center flex-shrink-0">
+  <span>VigiRAM HRN © <?= new Date().getFullYear() ?> · Gisele Cristine · Hospital Regional Norte</span>
+  <button onclick="document.getElementById('modalSobre').classList.replace('hidden','flex')"
+          class="text-teal-300 hover:text-white transition flex items-center gap-1.5">
+    <i class="fas fa-info-circle text-[10px]"></i> Sobre o sistema
+  </button>
+</footer>
+
+<!-- Tooltip do avatar — position:fixed, coordenadas calculadas via JS -->
+<div id="tooltipUsuario"
+     class="hidden fixed whitespace-nowrap bg-gray-900 text-white text-xs font-semibold
+            px-3 py-1.5 rounded-lg shadow-xl z-[9999] pointer-events-none"></div>
+
+  <!-- =====================================================
+       PARCIAIS JAVASCRIPT (injetados pelo GAS via include)
+  ===================================================== -->
+  <?!= include('js_core'); ?>
+  <?!= include('js_kanban'); ?>
+  <?!= include('js_triagem'); ?>
+  <?!= include('js_investigacao'); ?>
+  <?!= include('js_dashboard'); ?>
+  <?!= include('js_notificacao_interna'); ?>
+  <?!= include('js_admin'); ?>
+</body>
+</html>

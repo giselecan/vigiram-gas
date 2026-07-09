@@ -1,0 +1,413 @@
+<script>
+/**
+ * @fileoverview js_dashboard.html
+ * Responsabilidade: EXCLUSIVAMENTE o dashboard de gestão.
+ *
+ * ATUALIZAÇÃO (Produtividade e Filtros Globais):
+ * - O dashboard consome `obterDadosFiltradosDash()` que respeita os inputs
+ *   de Setor, Farmacêutico, Data De e Data Até da barra principal.
+ * - O gráfico de setores compara "Total Rastreado" com "Casos Concluídos".
+ *
+ * REVISÃO 07/2026 — Rankings e métricas de SLA de triagem:
+ *   FIX  — "Top Medicamentos Suspeitos" agora exclui STATUS.TRIAGEM. Antes
+ *          da triagem farmacêutica, c.medicamento ainda é o gatilho bruto
+ *          do ETL (DB_Antidotos), não o medicamento suspeito clinicamente
+ *          avaliado (só é sobrescrito em registrarTriagem() → Cases.gs).
+ *   NOVO — Ranking de produção por setor e por farmacêutico (tabelas).
+ *   NOVO — Gráfico de conversão Gatilho → RAM, restrito a tipo === 'BA'
+ *          (Busca Ativa); Demanda Espontânea já nasce pré-suspeita, não
+ *          se aplica o conceito de "conversão de gatilho".
+ *   NOVO — Gravidade das notificações de RAM (conclusao CONFIRMADO/
+ *          PROVÁVEL) segmentada por setor, barras empilhadas.
+ *   NOVO — Tempo médio de análise (triagem) e contagem de atrasados,
+ *          calculados a partir de c.dataTriagem (timestamp dedicado,
+ *          carimbado 1x em registrarTriagem() — ver Cases.gs/Schema.gs).
+ *          Restrito a tipo === 'BA' e já triados (status !== TRIAGEM),
+ *          já que só a fase Triagem tem prazo regulatório (SLA_PADRAO_HORAS).
+ *
+ * Depende de: js_core (casosGlobais, STATUS, escapeHtml,
+ *   getFarmaceuticoPorSetor, SLA_PADRAO_HORAS, formatarTempoSLA)
+ */
+
+// Instâncias dos gráficos (necessárias para destruir antes de redesenhar)
+let _grafDesfechos = null;
+let _grafGravidade = null;
+let _grafSetores = null;
+let _grafMedicamentos = null;
+let _grafGatilhoRam = null;
+let _grafGravidadeSetor = null;
+
+// Lógica de filtro combinada, herdando as regras idênticas ao js_kanban
+function obterDadosFiltradosDash() {
+  const setor = document.getElementById('filtroSetor').value;
+  const farmaceut = document.getElementById('filtroFarmaceutico').value;
+  const dataDe = document.getElementById('filtroDe').value;
+  const dataAte = document.getElementById('filtroAte').value;
+
+  return casosGlobais.filter(c => {
+    // 1. Filtro de Setor
+    if (setor !== 'TODOS' && c.setor !== setor) return false;
+
+    // 2. Filtro de Farmacêutico (Usa o responsável canônico DO SETOR ou o digitado)
+    if (farmaceut !== 'TODOS') {
+      const canonico = getFarmaceuticoPorSetor(c.setor); // vem do js_core
+      const doCaso = (c.farmaceutico || "").trim();
+      const bate = (canonico === farmaceut) || (doCaso === farmaceut);
+      if (!bate) return false;
+    }
+
+    // 3. Filtro de Período (Mês/Data)
+    if (dataDe || dataAte) {
+      const p = (c.data_evento || "").match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (p) {
+        const dEv = new Date(parseInt(p[3]), parseInt(p[2]) - 1, parseInt(p[1]));
+        if (dataDe && dEv < new Date(dataDe)) return false;
+        if (dataAte && dEv > new Date(dataAte)) return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+// ---------------------------------------------------------
+// HELPERS DE DATA — parsing tolerante para métricas de SLA
+// ---------------------------------------------------------
+
+/** Parseia "dd/MM/yyyy HH:mm" (data_evento) → Date | null */
+function _parseDataEventoBR(str) {
+  if (!str) return null;
+  const m = String(str).match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
+  if (m) {
+    return new Date(
+      parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]),
+      parseInt(m[4] || 0), parseInt(m[5] || 0)
+    );
+  }
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+/** Parseia o ISO retornado por _mapearCasoResumo_ para dataTriagem → Date | null */
+function _parseDataTriagemISO(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+/** RAM efetivamente confirmada — mesma regra usada no cálculo de calc.ram */
+function _ehRamConfirmada(c) {
+  return c.status === STATUS.CONCLUIDO &&
+    (c.conclusao === 'CONFIRMADO' || c.conclusao === 'PROVÁVEL');
+}
+
+// ---------------------------------------------------------
+// DESENHAR / ATUALIZAR GRÁFICOS
+// ---------------------------------------------------------
+function desenharGraficos() {
+  const dados = obterDadosFiltradosDash();
+
+  // Acumuladores
+  const calc = {
+    ram: 0, descarte: 0, analise: 0,
+    gravidade: { LEVE: 0, MODERADA: 0, GRAVE: 0, FATAL: 0 },
+    setores: {},
+    produtividadeSetor: {},   // Conta apenas STATUS.CONCLUIDO para medir produtividade por setor
+    meds: {},
+    farmaceuticos: {},        // NOVO — produção (casos concluídos) por farmacêutico
+    gatilho: { total: 0, viraramRam: 0, descartados: 0, emAnalise: 0 }, // NOVO — só tipo 'BA'
+    gravidadeSetor: {},       // NOVO — setor → {LEVE,MODERADA,GRAVE,FATAL}, só RAM confirmada
+    slaAnalise: { somaHoras: 0, qtd: 0, atrasados: 0 } // NOVO — só tipo 'BA', já triados
+  };
+
+  dados.forEach(c => {
+    // Desfecho Global
+    if (c.status === STATUS.DESCARTADO || c.conclusao === 'NÃO RELACIONADO AO MEDICAMENTO') {
+      calc.descarte++;
+    } else if (_ehRamConfirmada(c)) {
+      calc.ram++;
+    } else {
+      calc.analise++;
+    }
+
+    // Setores (Todos exceto descartados)
+    if (c.setor && c.status !== STATUS.DESCARTADO && c.conclusao !== 'NÃO RELACIONADO AO MEDICAMENTO') {
+      calc.setores[c.setor] = (calc.setores[c.setor] || 0) + 1;
+    }
+
+    // Produtividade: Mede o que a equipe do setor de fato conseguiu concluir
+    if (c.setor && c.status === STATUS.CONCLUIDO) {
+      calc.produtividadeSetor[c.setor] = (calc.produtividadeSetor[c.setor] || 0) + 1;
+    }
+
+    // NOVO — Produtividade por farmacêutico (atribuição real do caso concluído)
+    if (c.status === STATUS.CONCLUIDO) {
+      const f = (c.farmaceutico || '').trim();
+      if (f) calc.farmaceuticos[f] = (calc.farmaceuticos[f] || 0) + 1;
+    }
+
+    // Gravidade global (apenas concluídos)
+    if (c.status === STATUS.CONCLUIDO) {
+      const g = (c.gravidade || "").toUpperCase().trim();
+      if (calc.gravidade[g] !== undefined) calc.gravidade[g]++;
+    }
+
+    // NOVO — Gravidade por setor, restrito a notificações de RAM confirmadas
+    if (_ehRamConfirmada(c) && c.setor) {
+      const g = (c.gravidade || "").toUpperCase().trim();
+      if (!calc.gravidadeSetor[c.setor]) {
+        calc.gravidadeSetor[c.setor] = { LEVE: 0, MODERADA: 0, GRAVE: 0, FATAL: 0 };
+      }
+      if (calc.gravidadeSetor[c.setor][g] !== undefined) calc.gravidadeSetor[c.setor][g]++;
+    }
+
+    // FIX — Medicamento suspeito: só conta após a triagem farmacêutica.
+    // Em STATUS.TRIAGEM, c.medicamento ainda é o gatilho bruto do ETL, não
+    // o medicamento suspeito clinicamente avaliado (ver header do arquivo).
+    if (c.medicamento && c.medicamento !== "N/I" &&
+        c.status !== STATUS.TRIAGEM && c.status !== STATUS.DESCARTADO) {
+      calc.meds[c.medicamento] = (calc.meds[c.medicamento] || 0) + 1;
+    }
+
+    // NOVO — Conversão Gatilho → RAM (só Busca Ativa)
+    if (c.tipo === 'BA') {
+      calc.gatilho.total++;
+      if (_ehRamConfirmada(c)) {
+        calc.gatilho.viraramRam++;
+      } else if (c.status === STATUS.DESCARTADO) {
+        calc.gatilho.descartados++;
+      } else {
+        calc.gatilho.emAnalise++;
+      }
+    }
+
+    // NOVO — Tempo de análise (triagem) e atraso, só Busca Ativa já triada
+    if (c.tipo === 'BA' && c.dataTriagem && c.status !== STATUS.TRIAGEM) {
+      const dEvento = _parseDataEventoBR(c.data_evento);
+      const dTriagem = _parseDataTriagemISO(c.dataTriagem);
+      if (dEvento && dTriagem) {
+        const horas = (dTriagem.getTime() - dEvento.getTime()) / 3600000;
+        if (horas >= 0) {
+          calc.slaAnalise.somaHoras += horas;
+          calc.slaAnalise.qtd++;
+          if (horas > SLA_PADRAO_HORAS) calc.slaAnalise.atrasados++;
+        }
+      }
+    }
+  });
+
+  // Atualizar KPI cards existentes
+  document.getElementById('dashCardTotal').innerText = dados.length;
+  document.getElementById('dashCardRAMs').innerText = calc.ram;
+  document.getElementById('dashCardDescartes').innerText = calc.descarte;
+  document.getElementById('dashCardPendentes').innerText = calc.analise;
+
+  // NOVO — KPI de tempo médio de análise e atrasados
+  const tempoMedioH = calc.slaAnalise.qtd ? (calc.slaAnalise.somaHoras / calc.slaAnalise.qtd) : null;
+  const elTempoMedio = document.getElementById('dashCardTempoMedio');
+  if (elTempoMedio) elTempoMedio.innerText = tempoMedioH === null ? '—' : formatarTempoSLA(tempoMedioH);
+  const elAtrasados = document.getElementById('dashCardAtrasados');
+  if (elAtrasados) elAtrasados.innerText = calc.slaAnalise.atrasados;
+  const elAtrasadosSub = document.getElementById('dashCardAtrasadosSub');
+  if (elAtrasadosSub) {
+    elAtrasadosSub.innerText = calc.slaAnalise.qtd
+      ? `${calc.slaAnalise.atrasados} de ${calc.slaAnalise.qtd} gatilho(s) triado(s) no período`
+      : 'Sem gatilhos triados no período';
+  }
+
+  // Destruir gráficos anteriores para evitar memory leak
+  [_grafDesfechos, _grafGravidade, _grafSetores, _grafMedicamentos, _grafGatilhoRam, _grafGravidadeSetor]
+    .forEach(g => { if (g) g.destroy(); });
+  _grafDesfechos = _grafGravidade = _grafSetores = _grafMedicamentos = _grafGatilhoRam = _grafGravidadeSetor = null;
+
+  Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+
+  // Gráfico 1 - Desfecho dos gatilhos (rosca)
+  _grafDesfechos = new Chart(document.getElementById('graficoDesfechos').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['RAM Confirmada', 'Falso Positivo', 'Em Análise'],
+      datasets: [{
+        data: [calc.ram, calc.descarte, calc.analise],
+        backgroundColor: ['#ef4444', '#9ca3af', '#f97316'],
+        borderWidth: 0
+      }]
+    },
+    options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+  });
+
+  // Gráfico 2 - Distribuição de gravidade (pizza)
+  _grafGravidade = new Chart(document.getElementById('graficoGravidade').getContext('2d'), {
+    type: 'pie',
+    data: {
+      labels: ['Leve', 'Moderada', 'Grave', 'Fatal'],
+      datasets: [{
+        data: [calc.gravidade.LEVE, calc.gravidade.MODERADA, calc.gravidade.GRAVE, calc.gravidade.FATAL],
+        backgroundColor: ['#fcd34d', '#f97316', '#dc2626', '#112937'],
+        borderWidth: 0
+      }]
+    },
+    options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+  });
+
+  // Gráfico 3 - Produtividade e Eventos por Setor (barras agrupadas, top 5)
+  const topSetores = Object.keys(calc.setores)
+    .sort((a, b) => calc.setores[b] - calc.setores[a])
+    .slice(0, 5);
+
+  _grafSetores = new Chart(document.getElementById('graficoSetores').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: topSetores,
+      datasets: [
+        {
+          label: 'Total Rastreado',
+          data: topSetores.map(s => calc.setores[s]),
+          backgroundColor: '#e5e7eb'
+        },
+        {
+          label: 'Casos Concluídos',
+          data: topSetores.map(s => calc.produtividadeSetor[s] || 0),
+          backgroundColor: '#0ea5e9'
+        }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+
+  // Gráfico 4 - Top medicamentos suspeitos (barras horizontais, top 5)
+  // Agora só considera casos já triados (fix — ver header do arquivo)
+  const topMeds = Object.keys(calc.meds)
+    .sort((a, b) => calc.meds[b] - calc.meds[a])
+    .slice(0, 5);
+
+  _grafMedicamentos = new Chart(document.getElementById('graficoMedicamentos').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: topMeds,
+      datasets: [{
+        label: 'Suspeitas (confirmadas na triagem)',
+        data: topMeds.map(m => calc.meds[m]),
+        backgroundColor: '#8b5cf6'
+      }]
+    },
+    options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+
+  // NOVO — Gráfico 5: Conversão Gatilho → RAM (só Busca Ativa)
+  _grafGatilhoRam = new Chart(document.getElementById('graficoGatilhoRam').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Viraram RAM', 'Falso Positivo', 'Em Análise'],
+      datasets: [{
+        data: [calc.gatilho.viraramRam, calc.gatilho.descartados, calc.gatilho.emAnalise],
+        backgroundColor: ['#dc2626', '#9ca3af', '#f97316'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        title: {
+          display: true,
+          text: `${calc.gatilho.total} gatilho(s) rastreado(s) no período`,
+          font: { size: 11, weight: 'normal' },
+          color: '#6b7280',
+          padding: { top: 4 }
+        }
+      }
+    }
+  });
+
+  // NOVO — Gráfico 6: Notificações de RAM por setor × gravidade (barras empilhadas, top 8)
+  const setoresRam = Object.keys(calc.gravidadeSetor)
+    .sort((a, b) => {
+      const totA = Object.values(calc.gravidadeSetor[a]).reduce((s, v) => s + v, 0);
+      const totB = Object.values(calc.gravidadeSetor[b]).reduce((s, v) => s + v, 0);
+      return totB - totA;
+    })
+    .slice(0, 8);
+
+  _grafGravidadeSetor = new Chart(document.getElementById('graficoGravidadeSetor').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: setoresRam,
+      datasets: [
+        { label: 'Leve',     data: setoresRam.map(s => calc.gravidadeSetor[s].LEVE),     backgroundColor: '#fcd34d' },
+        { label: 'Moderada', data: setoresRam.map(s => calc.gravidadeSetor[s].MODERADA), backgroundColor: '#f97316' },
+        { label: 'Grave',    data: setoresRam.map(s => calc.gravidadeSetor[s].GRAVE),    backgroundColor: '#dc2626' },
+        { label: 'Fatal',    data: setoresRam.map(s => calc.gravidadeSetor[s].FATAL),    backgroundColor: '#112937' }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }
+      },
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+
+  // NOVO — Rankings em tabela
+  _renderizarRankingSetores(calc.setores, calc.produtividadeSetor);
+  _renderizarRankingFarmaceuticos(calc.farmaceuticos);
+}
+
+// ---------------------------------------------------------
+// NOVO — Ranking de produção por setor (tabela, top 10)
+// ---------------------------------------------------------
+function _renderizarRankingSetores(setores, produtividade) {
+  const corpo = document.getElementById('rankingSetoresBody');
+  if (!corpo) return;
+
+  const linhas = Object.keys(setores)
+    .map(s => ({ setor: s, total: setores[s], concluidos: produtividade[s] || 0 }))
+    .sort((a, b) => b.concluidos - a.concluidos)
+    .slice(0, 10);
+
+  corpo.innerHTML = linhas.length === 0
+    ? '<tr><td colspan="5" class="text-center text-gray-400 py-3">Sem dados no período.</td></tr>'
+    : linhas.map((l, i) => {
+        const pct = l.total ? Math.round((l.concluidos / l.total) * 100) : 0;
+        const corPct = pct >= 70 ? 'text-teal-600' : (pct >= 40 ? 'text-orange-500' : 'text-red-500');
+        return `<tr class="border-b border-gray-100">
+          <td class="py-1.5 px-2 text-gray-400 font-bold">${i + 1}º</td>
+          <td class="py-1.5 px-2 font-semibold text-gray-700">${escapeHtml(l.setor)}</td>
+          <td class="py-1.5 px-2 text-center">${l.concluidos}</td>
+          <td class="py-1.5 px-2 text-center text-gray-400">${l.total}</td>
+          <td class="py-1.5 px-2 text-right font-bold ${corPct}">${pct}%</td>
+        </tr>`;
+      }).join('');
+}
+
+// ---------------------------------------------------------
+// NOVO — Ranking de produção por farmacêutico (tabela, top 10)
+// ---------------------------------------------------------
+function _renderizarRankingFarmaceuticos(farmaceuticos) {
+  const corpo = document.getElementById('rankingFarmaceuticosBody');
+  if (!corpo) return;
+
+  const total = Object.values(farmaceuticos).reduce((s, v) => s + v, 0);
+  const linhas = Object.keys(farmaceuticos)
+    .map(f => ({ nome: f, concluidos: farmaceuticos[f] }))
+    .sort((a, b) => b.concluidos - a.concluidos)
+    .slice(0, 10);
+
+  corpo.innerHTML = linhas.length === 0
+    ? '<tr><td colspan="4" class="text-center text-gray-400 py-3">Sem casos concluídos no período.</td></tr>'
+    : linhas.map((l, i) => {
+        const pct = total ? Math.round((l.concluidos / total) * 100) : 0;
+        return `<tr class="border-b border-gray-100">
+          <td class="py-1.5 px-2 text-gray-400 font-bold">${i + 1}º</td>
+          <td class="py-1.5 px-2 font-semibold text-gray-700">${escapeHtml(l.nome)}</td>
+          <td class="py-1.5 px-2 text-center">${l.concluidos}</td>
+          <td class="py-1.5 px-2 text-right text-gray-400">${pct}%</td>
+        </tr>`;
+      }).join('');
+}
+</script>

@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Notificação de RAM · VigiRAM</title>
+  <?!= include('Favicon'); ?>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <style>
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    #barraProgresso { transition: width .35s ease; }
+    .cat-pill.ativo {
+      background-color: #0f766e;
+      color: #ffffff;
+      border-color: #0f766e;
+    }
+    textarea.auto { overflow: hidden; }
+    select:focus { outline: none; }
+    .painel { animation: fadeUp .2s ease both; }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    #bannerErro { animation: fadeUp .2s ease both; }
+  </style>
+</head>
+
+<body class="bg-slate-100 font-sans min-h-screen flex flex-col items-center justify-start py-6 px-4"
+      onload="inicializar()">
+
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+
+    <!-- CABEÇALHO -->
+    <div class="bg-teal-700 px-6 py-5 text-white">
+      <div class="flex items-center gap-3 mb-1">
+        <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow flex-shrink-0">
+          <i class="fas fa-notes-medical text-teal-700 text-lg"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold leading-tight tracking-tight">VigiRAM · HRN</h1>
+          <p class="text-teal-200 text-xs">Notificação de Reação Adversa a Medicamentos</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- BARRA DE PROGRESSO + ETAPAS -->
+    <div class="bg-teal-800 px-5 pb-3 pt-2">
+      <div class="flex justify-between items-center mb-1.5">
+        <span id="lblEtapa" class="text-xs font-semibold text-teal-200">Etapa 1 de 3 · Paciente</span>
+        <span id="lblPct" class="text-xs text-teal-300">0%</span>
+      </div>
+      <div class="w-full bg-teal-900 rounded-full h-1.5 overflow-hidden">
+        <div id="barraProgresso" class="h-1.5 rounded-full bg-orange-400" style="width:0%"></div>
+      </div>
+      <div class="flex justify-around mt-2.5">
+        <button type="button" onclick="irParaEtapa(1)"
+                class="flex flex-col items-center gap-0.5 group" aria-label="Etapa 1: Paciente">
+          <span id="dot1" class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold
+                                  bg-white text-teal-700 shadow">1</span>
+          <span class="text-[9px] text-white font-medium">Paciente</span>
+        </button>
+        <button type="button" onclick="irParaEtapa(2)"
+                class="flex flex-col items-center gap-0.5 group" aria-label="Etapa 2: Evento">
+          <span id="dot2" class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold
+                                  bg-teal-600 text-teal-200">2</span>
+          <span class="text-[9px] text-teal-300 font-medium">Evento</span>
+        </button>
+        <button type="button" onclick="irParaEtapa(3)"
+                class="flex flex-col items-center gap-0.5 group" aria-label="Etapa 3: Você">
+          <span id="dot3" class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold
+                                  bg-teal-600 text-teal-200">3</span>
+          <span class="text-[9px] text-teal-300 font-medium">Você</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══ ÁREA DO FORMULÁRIO ═══ -->
+    <div id="areaFormulario" class="px-5 py-5">
+
+      <!-- ─── ETAPA 1: PACIENTE ─────────────────── -->
+      <div id="etapa1" class="painel space-y-4">
+
+        <div class="bg-teal-50 border border-teal-200 rounded-xl px-4 py-3 flex items-start gap-2 text-xs text-teal-800">
+          <i class="fas fa-info-circle mt-0.5 text-teal-500 flex-shrink-0"></i>
+          <span>Preencha rapidamente — a Farmácia Clínica realiza o detalhamento da investigação.</span>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+            Prontuário <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <i class="fas fa-id-card absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+            <input type="tel" id="iptProntuario" inputmode="numeric" pattern="[0-9]*"
+                   required autocomplete="off"
+                   placeholder="Ex: 123456"
+                   oninput="this.value=this.value.replace(/\D/g,''); validarProntuario(); _salvarRascunho();"
+                   class="w-full pl-9 pr-4 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                          focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                          outline-none transition-all text-gray-800">
+          </div>
+          <p id="hintProntuario" aria-live="polite" class="text-xs text-gray-400 mt-1">Apenas números</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+              Iniciais do paciente <span class="text-red-500">*</span>
+            </label>
+            <input type="text" id="iptIniciais" required maxlength="12"
+                   placeholder="A.B.C.D"
+                   oninput="this.value=this.value.toUpperCase(); _salvarRascunho();"
+                   class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                          focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                          outline-none transition-all text-gray-800 tracking-widest">
+            <p class="text-[10px] text-gray-400 mt-1"></p>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+              Nascimento
+            </label>
+            <input type="date" id="iptNascimento"
+                   oninput="validarNascimento(); _salvarRascunho();"
+                   class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                          focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                          outline-none transition-all text-gray-800">
+            <p id="hintNascimento" aria-live="polite" class="text-[10px] text-gray-400 mt-1"></p>
+          </div>
+        </div>
+
+        <button type="button" onclick="avancar(1)"
+                class="w-full bg-teal-600 hover:bg-teal-700 text-white font-bold py-3.5 rounded-xl
+                       shadow transition-all text-sm flex items-center justify-center gap-2 mt-2">
+          Próximo <i class="fas fa-arrow-right text-xs"></i>
+        </button>
+
+      </div><!-- /etapa1 -->
+
+      <!-- ─── ETAPA 2: EVENTO ────────────────────── -->
+      <div id="etapa2" class="painel hidden space-y-4">
+
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+            Setor / Clínica <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <i class="fas fa-hospital absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
+            <select id="iptSetor" required onchange="_salvarRascunho()"
+                    class="w-full pl-9 pr-8 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                           focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                           outline-none transition-all text-gray-800 appearance-none cursor-pointer">
+              <option value="">Carregando setores…</option>
+            </select>
+            <i class="fas fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+          </div>
+          <p id="hintSetor" aria-live="polite" class="hidden text-xs text-red-500 mt-1 flex items-center gap-2">
+            Erro ao carregar setores.
+            <button type="button" onclick="carregarSetores()" class="underline font-semibold text-red-600">Tentar novamente</button>
+          </p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+            Início do evento <span class="text-red-500">*</span>
+          </label>
+          <input type="datetime-local" id="iptDataEvento" required onchange="_salvarRascunho()"
+                 class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                        focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                        outline-none transition-all text-gray-800">
+          <p class="text-[10px] text-teal-600 mt-1 flex items-center gap-1">
+            <i class="fas fa-clock"></i> Pré-preenchido com agora — ajuste data e hora se necessário
+          </p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+            Medicamento suspeito <span class="text-red-500">*</span>
+          </label>
+          <input type="text" id="iptMedicamento" required
+                 placeholder="Ex: MEDICAMENTO QUE PODE TER CAUSADO A REAÇÃO"
+                 oninput="this.value=this.value.toUpperCase(); _salvarRascunho();"
+                 class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                        focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                        outline-none transition-all text-gray-800">
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+            O que aconteceu? <span class="text-red-500">*</span>
+          </label>
+          <textarea id="iptDescricao" required rows="3" maxlength="500"
+                    placeholder="Descreva brevemente a reação observada no paciente…"
+                    oninput="autoCresce(this); _atualizarContador(); _salvarRascunho();"
+                    class="auto w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                           focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                           outline-none transition-all text-gray-800 resize-none"></textarea>
+          <div class="flex justify-between mt-1">
+            <p class="text-[10px] text-gray-400">Seja breve — a Farmácia complementa na investigação</p>
+            <p id="contadorDescricao" class="text-[10px] text-gray-400">0/500</p>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+            Conduta realizada após a RAM <span class="text-red-500">*</span>
+          </label>
+          <div class="relative">
+            <i class="fas fa-hand-holding-medical absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm pointer-events-none"></i>
+            <select id="iptCondutas" required
+                    onchange="toggleOutraConduta(); _salvarRascunho();"
+                    class="w-full pl-9 pr-8 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                           focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                           outline-none transition-all text-gray-800 appearance-none cursor-pointer">
+              <option value="">Selecione a conduta…</option>
+              <option value="Alterado diluição">Alterado diluição</option>
+              <option value="Alterado posologia">Alterado posologia</option>
+              <option value="Alterado velocidade de infusão">Alterado velocidade de infusão</option>
+              <option value="Medicamento mantido">Medicamento mantido</option>
+              <option value="Medicamento mantido com uso de antagonista ou sintomático">Medicamento mantido com uso de antagonista ou sintomático</option>
+              <option value="Medicamento suspenso">Medicamento suspenso</option>
+              <option value="__outro__">Outro…</option>
+            </select>
+            <i class="fas fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+          </div>
+
+          <div id="areaOutraConduta" class="hidden mt-2">
+            <input type="text" id="iptOutraConduta"
+                   oninput="_salvarRascunho()"
+                   placeholder="Descreva a conduta realizada…"
+                   class="w-full px-4 py-3 border border-orange-300 rounded-xl text-sm bg-orange-50
+                          focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400
+                          outline-none transition-all text-gray-800">
+          </div>
+        </div>
+
+        <div class="flex gap-3 mt-2">
+          <button type="button" onclick="voltar(2)"
+                  class="flex-none px-5 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold
+                         rounded-xl text-sm transition-all">
+            <i class="fas fa-arrow-left text-xs mr-1"></i> Voltar
+          </button>
+          <button type="button" onclick="avancar(2)"
+                  class="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3.5 rounded-xl
+                         shadow transition-all text-sm flex items-center justify-center gap-2">
+            Próximo <i class="fas fa-arrow-right text-xs"></i>
+          </button>
+        </div>
+
+      </div><!-- /etapa2 -->
+
+      <!-- ─── ETAPA 3: NOTIFICADOR ──────────────── -->
+      <div id="etapa3" class="painel hidden space-y-4">
+
+        <div id="blocoMemoria" class="hidden bg-teal-50 border border-teal-200 rounded-xl px-4 py-3
+                                       flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2 text-sm text-teal-800 font-medium min-w-0">
+            <i class="fas fa-user-check text-teal-600 flex-shrink-0"></i>
+            <span id="lblMemoria" class="truncate"></span>
+          </div>
+          <button type="button" onclick="limparMemoria()"
+                  class="text-xs text-teal-600 hover:text-teal-800 underline flex-shrink-0 font-semibold">
+            Alterar
+          </button>
+        </div>
+
+        <div id="camposNotificador" class="space-y-4">
+
+          <div>
+            <label class="block text-xs font-bold text-gray-600 mb-2 uppercase tracking-wider">
+              Categoria profissional <span class="text-red-500">*</span>
+            </label>
+            <div class="flex flex-wrap gap-2" id="pillsCategoria">
+              <button type="button" data-cat="Enfermeiro(a)"
+                      onclick="selecionarCategoria(this)"
+                      class="cat-pill px-3 py-2 text-xs font-semibold border border-gray-300 rounded-full
+                             text-gray-600 bg-white transition-all">
+                <i class="fas fa-user-nurse mr-1"></i> Enfermeiro(a)
+              </button>
+              <button type="button" data-cat="Técnico(a) de Enfermagem"
+                      onclick="selecionarCategoria(this)"
+                      class="cat-pill px-3 py-2 text-xs font-semibold border border-gray-300 rounded-full
+                             text-gray-600 bg-white transition-all">
+                <i class="fas fa-stethoscope mr-1"></i> Técnico(a) Enf.
+              </button>
+              <button type="button" data-cat="Farmacêutico(a)"
+                      onclick="selecionarCategoria(this)"
+                      class="cat-pill px-3 py-2 text-xs font-semibold border border-gray-300 rounded-full
+                             text-gray-600 bg-white transition-all">
+                <i class="fas fa-pills mr-1"></i> Farmacêutico(a)
+              </button>
+              <button type="button" data-cat="Médico(a)"
+                      onclick="selecionarCategoria(this)"
+                      class="cat-pill px-3 py-2 text-xs font-semibold border border-gray-300 rounded-full
+                             text-gray-600 bg-white transition-all">
+                <i class="fas fa-user-md mr-1"></i> Médico(a)
+              </button>
+              <button type="button" data-cat="Outro"
+                      onclick="selecionarCategoria(this)"
+                      class="cat-pill px-3 py-2 text-xs font-semibold border border-gray-300 rounded-full
+                             text-gray-600 bg-white transition-all">
+                Outro
+              </button>
+            </div>
+            <input type="hidden" id="iptCategoria" required>
+            <p id="errCategoria" aria-live="polite" class="hidden text-xs text-red-500 mt-1">Selecione sua categoria.</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+              Seu nome <span class="text-red-500">*</span>
+            </label>
+            <div class="relative">
+              <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              <input type="text" id="iptNotificador" required
+                     placeholder="Nome completo"
+                     autocomplete="name"
+                     class="w-full pl-9 pr-4 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                            focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                            outline-none transition-all text-gray-800 capitalize">
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
+              E-mail para receber o resultado
+            </label>
+            <div class="relative">
+              <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              <input type="email" id="iptEmail"
+                     placeholder="seu@email.com"
+                     autocomplete="email"
+                     class="w-full pl-9 pr-4 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
+                            focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
+                            outline-none transition-all text-gray-800">
+            </div>
+            <p class="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+              <i class="fas fa-shield-alt"></i>
+            </p>
+          </div>
+
+        </div><!-- /camposNotificador -->
+
+        <!-- Banner de erro de envio -->
+        <div id="bannerErro" class="hidden bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700
+                                     flex items-start justify-between gap-3" role="alert" aria-live="assertive">
+          <div class="flex items-start gap-2 min-w-0">
+            <i class="fas fa-exclamation-triangle mt-0.5 flex-shrink-0"></i>
+            <span id="lblBannerErro">Falha ao enviar. Verifique a conexão.</span>
+          </div>
+          <button type="button" onclick="enviarNotificacao()"
+                  class="text-xs font-bold underline flex-shrink-0">Tentar novamente</button>
+        </div>
+
+        <div class="flex gap-3 mt-2">
+          <button type="button" onclick="voltar(3)"
+                  class="flex-none px-5 py-3.5 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold
+                         rounded-xl text-sm transition-all">
+            <i class="fas fa-arrow-left text-xs mr-1"></i> Voltar
+          </button>
+          <button type="button" id="btnEnviar" onclick="enviarNotificacao()"
+                  class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3.5 rounded-xl
+                         shadow-lg transition-all text-sm flex items-center justify-center gap-2
+                         border-b-4 border-orange-700 active:border-b-0 active:translate-y-px">
+            <i class="fas fa-paper-plane"></i> Enviar notificação
+          </button>
+        </div>
+
+      </div><!-- /etapa3 -->
+
+    </div><!-- /areaFormulario -->
+
+    <!-- ═══ TELA DE SUCESSO ═══ -->
+    <div id="areaSucesso" class="hidden px-6 py-10 text-center">
+      <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-5">
+        <i class="fas fa-check-circle text-4xl text-green-500"></i>
+      </div>
+      <h2 class="text-xl font-bold text-gray-800 mb-1">Notificação registrada!</h2>
+      <p class="text-gray-500 text-sm mb-4">
+        Prontuário <strong id="lblSucessoPront" class="text-teal-700 font-bold"></strong>
+        enviado à Farmácia Clínica.
+      </p>
+
+      <div id="boxFarma" class="bg-teal-50 border border-teal-200 rounded-xl p-4 mb-3 text-sm text-teal-800 text-left">
+        <div class="flex items-start gap-2">
+          <i class="fas fa-user-md text-teal-600 mt-0.5 flex-shrink-0"></i>
+          <span id="lblFarma">O farmacêutico responsável foi notificado e iniciará a investigação.</span>
+        </div>
+      </div>
+
+      <div id="boxEmail" class="hidden bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5 text-sm text-blue-800 text-left">
+        <div class="flex items-start gap-2">
+          <i class="fas fa-envelope text-blue-500 mt-0.5 flex-shrink-0"></i>
+          <span>Você receberá um e-mail com o resultado da investigação quando ela for concluída.</span>
+        </div>
+      </div>
+
+      <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6 text-xs text-gray-500">
+        Obrigado por zelar pela segurança do paciente!
+      </div>
+
+      <button type="button" onclick="novaNotificacao()"
+              class="w-full bg-white border-2 border-teal-600 text-teal-700 font-bold py-3
+                     rounded-xl hover:bg-teal-50 transition-all shadow-sm text-sm">
+        <i class="fas fa-plus mr-2"></i> Registrar outra RAM
+      </button>
+    </div>
+
+  </div><!-- /cartão -->
+
+  <script>
+    // ──────────────────────────────────────────
+    // ESTADO
+    // ──────────────────────────────────────────
+    let etapaAtual = 1;
+    let categoriaEscolhida = '';
+    let idempotencyKeyAtual = null;
+    const TOTAL_ETAPAS = 3;
+
+    const SS_NOME     = 'vigi_notif_nome';
+    const SS_CAT      = 'vigi_notif_cat';
+    const SS_EMAIL    = 'vigi_notif_email';
+    const SS_RASCUNHO = 'vigi_notif_rascunho'; // etapas 1-2, limpo só no sucesso
+
+    let _timeoutRascunho = null;
+
+    /** Agora local em "yyyy-MM-ddTHH:mm" para datetime-local. */
+    function _agoraDateTimeLocal() {
+      const d = new Date();
+      const p = n => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+             'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
+
+    // ──────────────────────────────────────────
+    // INICIALIZAÇÃO
+    // ──────────────────────────────────────────
+    function inicializar() {
+      // Local (UTC-3), com hora — toISOString é UTC e virava o dia às 21h.
+      document.getElementById('iptDataEvento').value = _agoraDateTimeLocal();
+
+      carregarSetores();
+      _restaurarMemoria();
+      _restaurarRascunho();
+
+      // Foco imediato no primeiro campo — reduz 1 toque no fluxo mobile
+      document.getElementById('iptProntuario').focus();
+
+      window.addEventListener('beforeunload', _guardarSaida);
+    }
+
+    function carregarSetores() {
+      const sel = document.getElementById('iptSetor');
+      const hint = document.getElementById('hintSetor');
+      hint.classList.add('hidden');
+      sel.innerHTML = '<option value="">Carregando setores…</option>';
+
+      // [M8 — LGPD] antes: getConfig() completo (expunha e-mails/nomes de
+      // farmacêuticos por setor + config geral a qualquer anônimo). Agora:
+      // getSetoresPublico() — só nomes de setor, zero PII.
+      google.script.run
+        .withSuccessHandler(res => {
+          sel.innerHTML = '<option value="">Selecione o setor…</option>';
+          const setores = (res && res.setores) || [];
+          if (setores.length) {
+            setores.forEach(nome => {
+              const opt = document.createElement('option');
+              opt.value       = nome;
+              opt.textContent = nome;
+              sel.appendChild(opt);
+            });
+            // Restaura seleção salva no rascunho, se houver
+            const r = _lerRascunho();
+            if (r && r.setor) sel.value = r.setor;
+          } else {
+            sel.innerHTML = '<option value="">Nenhum setor disponível</option>';
+          }
+        })
+        .withFailureHandler(() => {
+          sel.innerHTML = '<option value="">Falha ao carregar</option>';
+          hint.classList.remove('hidden');
+        })
+        .getSetoresPublico();
+    }
+
+    // ──────────────────────────────────────────
+    // RASCUNHO — persiste etapas 1-2 entre reloads
+    // acidentais. Nunca persiste dado do notificador
+    // aqui (isso já é tratado por _salvarMemoria).
+    // ──────────────────────────────────────────
+    function _salvarRascunho() {
+      clearTimeout(_timeoutRascunho);
+      _timeoutRascunho = setTimeout(() => {
+        const r = {
+          prontuario:  document.getElementById('iptProntuario').value,
+          iniciais:    document.getElementById('iptIniciais').value,
+          nascimento:  document.getElementById('iptNascimento').value,
+          setor:       document.getElementById('iptSetor').value,
+          dataEvento:  document.getElementById('iptDataEvento').value,
+          medicamento: document.getElementById('iptMedicamento').value,
+          descricao:   document.getElementById('iptDescricao').value,
+          condutas:    document.getElementById('iptCondutas').value,
+          outraConduta: document.getElementById('iptOutraConduta').value
+        };
+        try { sessionStorage.setItem(SS_RASCUNHO, JSON.stringify(r)); } catch (e) { /* storage indisponível — degrada sem quebrar fluxo */ }
+      }, 300);
+    }
+
+    function _lerRascunho() {
+      try {
+        const raw = sessionStorage.getItem(SS_RASCUNHO);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    }
+
+    function _restaurarRascunho() {
+      const r = _lerRascunho();
+      if (!r) return;
+      if (r.prontuario)  document.getElementById('iptProntuario').value = r.prontuario;
+      if (r.iniciais)    document.getElementById('iptIniciais').value   = r.iniciais;
+      if (r.nascimento)  document.getElementById('iptNascimento').value = r.nascimento;
+      if (r.dataEvento)  document.getElementById('iptDataEvento').value = r.dataEvento;
+      if (r.medicamento) document.getElementById('iptMedicamento').value = r.medicamento;
+      if (r.descricao) {
+        document.getElementById('iptDescricao').value = r.descricao;
+        autoCresce(document.getElementById('iptDescricao'));
+        _atualizarContador();
+      }
+      if (r.condutas) {
+        document.getElementById('iptCondutas').value = r.condutas;
+        toggleOutraConduta();
+        if (r.outraConduta) document.getElementById('iptOutraConduta').value = r.outraConduta;
+      }
+      validarProntuario();
+      validarNascimento();
+      // setor é restaurado em carregarSetores(), pois depende do dropdown já populado
+    }
+
+    function _limparRascunho() {
+      try { sessionStorage.removeItem(SS_RASCUNHO); } catch (e) {}
+    }
+
+    function _guardarSaida(e) {
+      const pront = document.getElementById('iptProntuario').value.trim();
+      const desc  = document.getElementById('iptDescricao').value.trim();
+      const sucessoVisivel = !document.getElementById('areaSucesso').classList.contains('hidden');
+      if (!sucessoVisivel && (pront || desc)) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    }
+
+    // ──────────────────────────────────────────
+    // MEMÓRIA DE SESSÃO DO NOTIFICADOR
+    // ──────────────────────────────────────────
+    function _restaurarMemoria() {
+      const nome  = sessionStorage.getItem(SS_NOME);
+      const cat   = sessionStorage.getItem(SS_CAT);
+      const email = sessionStorage.getItem(SS_EMAIL);
+      if (!nome || !cat) return;
+
+      document.getElementById('lblMemoria').textContent = `${cat} · ${nome}`;
+      document.getElementById('blocoMemoria').classList.remove('hidden');
+      document.getElementById('camposNotificador').classList.add('hidden');
+
+      document.getElementById('iptNotificador').value = nome;
+      document.getElementById('iptCategoria').value   = cat;
+      if (email) document.getElementById('iptEmail').value = email;
+      categoriaEscolhida = cat;
+    }
+
+    function limparMemoria() {
+      sessionStorage.removeItem(SS_NOME);
+      sessionStorage.removeItem(SS_CAT);
+      sessionStorage.removeItem(SS_EMAIL);
+      categoriaEscolhida = '';
+      document.getElementById('blocoMemoria').classList.add('hidden');
+      document.getElementById('camposNotificador').classList.remove('hidden');
+      document.getElementById('iptNotificador').value = '';
+      document.getElementById('iptCategoria').value   = '';
+      document.getElementById('iptEmail').value       = '';
+      document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('ativo'));
+    }
+
+    function _salvarMemoria() {
+      const nome  = document.getElementById('iptNotificador').value.trim();
+      const cat   = document.getElementById('iptCategoria').value.trim();
+      const email = document.getElementById('iptEmail').value.trim();
+      if (nome && cat) {
+        sessionStorage.setItem(SS_NOME, nome);
+        sessionStorage.setItem(SS_CAT, cat);
+        if (email) sessionStorage.setItem(SS_EMAIL, email);
+      }
+    }
+
+    // ──────────────────────────────────────────
+    // STEPPER
+    // ──────────────────────────────────────────
+    function _mostrarEtapa(n) {
+      for (let i = 1; i <= TOTAL_ETAPAS; i++) {
+        const p = document.getElementById('etapa' + i);
+        if (i === n) p.classList.remove('hidden');
+        else p.classList.add('hidden');
+      }
+      etapaAtual = n;
+
+      for (let i = 1; i <= TOTAL_ETAPAS; i++) {
+        const dot = document.getElementById('dot' + i);
+        dot.className = 'w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ';
+        if (i < n)        dot.className += 'bg-green-500 text-white';
+        else if (i === n) dot.className += 'bg-orange-500 text-white shadow-md ring-2 ring-orange-300';
+        else              dot.className += 'bg-gray-200 text-gray-400';
+      }
+
+      const pct = Math.round((n / TOTAL_ETAPAS) * 100);
+      const barra = document.getElementById('barraProgresso');
+      barra.style.width = pct + '%';
+      barra.className = 'h-1.5 rounded-full transition-all duration-500 ' +
+        (pct < 50 ? 'bg-orange-400' : pct < 100 ? 'bg-yellow-400' : 'bg-green-500');
+      document.getElementById('lblPct').textContent = pct + '%';
+
+      const nomes = ['', 'Paciente', 'Evento', 'Você'];
+      document.getElementById('lblEtapa').textContent =
+        `Etapa ${n} de ${TOTAL_ETAPAS} · ${nomes[n]}`;
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      _focarPrimeiroCampo(n);
+    }
+
+    function _focarPrimeiroCampo(n) {
+      // Pequeno delay — evita roubar foco durante o scroll suave
+      setTimeout(() => {
+        if (n === 1) document.getElementById('iptProntuario').focus();
+        if (n === 2) document.getElementById('iptSetor').focus();
+        if (n === 3) {
+          const memoriaAberta = !document.getElementById('blocoMemoria').classList.contains('hidden');
+          if (!memoriaAberta) document.getElementById('iptNotificador').focus();
+        }
+      }, 320);
+    }
+
+    function irParaEtapa(n) {
+      if (n > etapaAtual) return;
+      _mostrarEtapa(n);
+    }
+
+    // ──────────────────────────────────────────
+    // VALIDAÇÕES INLINE
+    // ──────────────────────────────────────────
+    function validarProntuario() {
+      const v    = document.getElementById('iptProntuario').value;
+      const hint = document.getElementById('hintProntuario');
+      if (v.length === 0) {
+        hint.textContent  = 'Apenas números';
+        hint.className    = 'text-xs text-gray-400 mt-1';
+      } else if (v.length < 3) {
+        hint.textContent  = 'Número muito curto';
+        hint.className    = 'text-xs text-red-500 mt-1';
+      } else {
+        hint.textContent  = '✓ OK';
+        hint.className    = 'text-xs text-teal-600 mt-1';
+      }
+    }
+
+    function validarNascimento() {
+      const el   = document.getElementById('iptNascimento');
+      const hint = document.getElementById('hintNascimento');
+      if (!el.value) { hint.textContent = ''; return; }
+
+      const hoje = new Date();
+      const data = new Date(el.value + 'T00:00:00');
+      const idadeMaxima = new Date();
+      idadeMaxima.setFullYear(hoje.getFullYear() - 120);
+
+      if (data > hoje) {
+        hint.textContent = 'Data no futuro';
+        hint.className   = 'text-[10px] text-red-500 mt-1';
+        el.classList.add('border-red-400');
+      } else if (data < idadeMaxima) {
+        hint.textContent = 'Verifique o ano';
+        hint.className   = 'text-[10px] text-red-500 mt-1';
+        el.classList.add('border-red-400');
+      } else {
+        hint.textContent = '';
+        el.classList.remove('border-red-400');
+      }
+    }
+
+    function autoCresce(el) {
+      el.style.height = '';
+      el.style.height = el.scrollHeight + 'px';
+    }
+
+    function _atualizarContador() {
+      const desc = document.getElementById('iptDescricao');
+      document.getElementById('contadorDescricao').textContent = desc.value.length + '/500';
+    }
+
+    // ──────────────────────────────────────────
+    // CONDUTAS — revelar campo "Outro"
+    // ──────────────────────────────────────────
+    function toggleOutraConduta() {
+      const sel  = document.getElementById('iptCondutas').value;
+      const area = document.getElementById('areaOutraConduta');
+      const inp  = document.getElementById('iptOutraConduta');
+      if (sel === '__outro__') {
+        area.classList.remove('hidden');
+        inp.required = true;
+        inp.focus();
+      } else {
+        area.classList.add('hidden');
+        inp.required = false;
+        inp.value    = '';
+      }
+    }
+
+    function _valorConduta() {
+      const sel = document.getElementById('iptCondutas').value;
+      if (sel === '__outro__') {
+        return document.getElementById('iptOutraConduta').value.trim();
+      }
+      return sel;
+    }
+
+    // ──────────────────────────────────────────
+    // PILLS DE CATEGORIA
+    // ──────────────────────────────────────────
+    function selecionarCategoria(el) {
+      document.querySelectorAll('.cat-pill').forEach(p => p.classList.remove('ativo'));
+      el.classList.add('ativo');
+      categoriaEscolhida = el.getAttribute('data-cat');
+      document.getElementById('iptCategoria').value = categoriaEscolhida;
+      document.getElementById('errCategoria').classList.add('hidden');
+    }
+
+    // ──────────────────────────────────────────
+    // NAVEGAÇÃO COM VALIDAÇÃO POR ETAPA
+    // ──────────────────────────────────────────
+    function avancar(etapa) {
+      if (etapa === 1) {
+        const pront  = document.getElementById('iptProntuario').value.trim();
+        const inic   = document.getElementById('iptIniciais').value.trim();
+        if (!pront || pront.length < 3) {
+          _focarComErro('iptProntuario', 'Informe o número do prontuário.');
+          return;
+        }
+        if (!inic) {
+          _focarComErro('iptIniciais', 'Informe as iniciais do paciente.');
+          return;
+        }
+      }
+
+      if (etapa === 2) {
+        const setor = document.getElementById('iptSetor').value;
+        const data  = document.getElementById('iptDataEvento').value;
+        const med   = document.getElementById('iptMedicamento').value.trim();
+        const desc  = document.getElementById('iptDescricao').value.trim();
+        const cond  = document.getElementById('iptCondutas').value;
+        const outro = document.getElementById('iptOutraConduta').value.trim();
+
+        if (!setor)  { _focarComErro('iptSetor',      'Selecione o setor.');          return; }
+        if (!data)   { _focarComErro('iptDataEvento', 'Informe a data do evento.');    return; }
+        if (!med)    { _focarComErro('iptMedicamento','Informe o medicamento.');       return; }
+        if (!desc)   { _focarComErro('iptDescricao',  'Descreva o evento.');           return; }
+        if (!cond)   { _focarComErro('iptCondutas',   'Selecione a conduta.');         return; }
+        if (cond === '__outro__' && !outro) {
+          _focarComErro('iptOutraConduta', 'Descreva a conduta realizada.');
+          return;
+        }
+      }
+
+      _mostrarEtapa(etapa + 1);
+    }
+
+    function voltar(etapa) {
+      _mostrarEtapa(etapa - 1);
+    }
+
+    function _focarComErro(id, msg) {
+      const el = document.getElementById(id);
+      el.classList.add('border-red-400', 'ring-2', 'ring-red-100');
+      el.focus();
+      el.addEventListener('input',  () => el.classList.remove('border-red-400','ring-2','ring-red-100'), { once: true });
+      el.addEventListener('change', () => el.classList.remove('border-red-400','ring-2','ring-red-100'), { once: true });
+    }
+
+    // ──────────────────────────────────────────
+    // ENVIO FINAL
+    // ──────────────────────────────────────────
+    function enviarNotificacao() {
+      document.getElementById('bannerErro').classList.add('hidden');
+
+      const cat   = document.getElementById('iptCategoria').value.trim();
+      const nome  = document.getElementById('iptNotificador').value.trim();
+      const email = document.getElementById('iptEmail').value.trim();
+
+      if (!cat) {
+        document.getElementById('errCategoria').classList.remove('hidden');
+        return;
+      }
+      if (!nome) {
+        _focarComErro('iptNotificador', 'Informe seu nome.');
+        return;
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        _focarComErro('iptEmail', 'E-mail inválido.');
+        return;
+      }
+
+      const btn = document.getElementById('btnEnviar');
+      btn.innerHTML  = '<i class="fas fa-circle-notch fa-spin mr-2"></i> Enviando…';
+      btn.disabled   = true;
+
+      const conduta = _valorConduta();
+
+      // Idempotency key gerada uma única vez por tentativa de submissão;
+      // reenvio (retry) usa a MESMA chave — evita duplicar RAM em timeout de rede.
+      // Backend (Cases.gs/salvarDemandaEspontanea) deve checar chave já processada
+      // antes de gravar, dentro do comTrava_() existente.
+      if (!idempotencyKeyAtual) {
+        idempotencyKeyAtual = (crypto && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : ('id_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+      }
+
+      const dados = {
+        prontuario:            document.getElementById('iptProntuario').value.trim(),
+        iniciais:              document.getElementById('iptIniciais').value.trim(),
+        nascimento:            document.getElementById('iptNascimento').value,
+        setor:                 document.getElementById('iptSetor').value,
+        dataEvento:            document.getElementById('iptDataEvento').value,
+        medicamento:           document.getElementById('iptMedicamento').value.trim(),
+        descricao:             document.getElementById('iptDescricao').value.trim(),
+        condutas:              conduta,
+        categoriaProfissional: cat,
+        notificador:           nome,
+        emailNotificador:      email,
+        idempotencyKey:        idempotencyKeyAtual
+      };
+
+      google.script.run
+        .withSuccessHandler(resultado => {
+          _salvarMemoria();
+          _limparRascunho();
+          idempotencyKeyAtual = null;
+          _exibirSucesso(dados, resultado);
+        })
+        .withFailureHandler(err => {
+          btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar notificação';
+          btn.disabled  = false;
+          document.getElementById('lblBannerErro').textContent =
+            'Falha ao enviar: ' + (err.message || 'verifique a conexão e tente novamente.');
+          document.getElementById('bannerErro').classList.remove('hidden');
+          // idempotencyKeyAtual É MANTIDA — retry reenvia com a mesma chave
+        })
+        .salvarDemandaEspontanea(dados);
+    }
+
+    // ──────────────────────────────────────────
+    // TELA DE SUCESSO personalizada
+    // ──────────────────────────────────────────
+    function _exibirSucesso(dados, resultado) {
+      document.getElementById('areaFormulario').classList.add('hidden');
+      document.getElementById('areaSucesso').classList.remove('hidden');
+
+      document.getElementById('lblSucessoPront').textContent = dados.prontuario;
+
+      const farmaLabel = document.getElementById('lblFarma');
+      if (resultado && resultado.farmaceuticoResponsavel) {
+        farmaLabel.textContent =
+          `${resultado.farmaceuticoResponsavel} foi notificado(a) e iniciará a investigação.`;
+      } else {
+        farmaLabel.textContent =
+          'A Farmácia Clínica foi notificada e iniciará a investigação em breve.';
+      }
+
+      if (dados.emailNotificador) {
+        document.getElementById('boxEmail').classList.remove('hidden');
+      }
+
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ──────────────────────────────────────────
+    // NOVA NOTIFICAÇÃO
+    // ──────────────────────────────────────────
+    function novaNotificacao() {
+      document.getElementById('iptProntuario').value  = '';
+      document.getElementById('iptIniciais').value    = '';
+      document.getElementById('iptNascimento').value  = '';
+      document.getElementById('iptSetor').value       = '';
+      document.getElementById('iptMedicamento').value = '';
+      document.getElementById('iptDescricao').value   = '';
+      document.getElementById('iptCondutas').value    = '';
+      document.getElementById('iptOutraConduta').value = '';
+      document.getElementById('areaOutraConduta').classList.add('hidden');
+      document.getElementById('bannerErro').classList.add('hidden');
+      document.getElementById('hintNascimento').textContent = '';
+      _atualizarContador();
+
+      document.getElementById('iptDataEvento').value = _agoraDateTimeLocal();
+
+      const btn = document.getElementById('btnEnviar');
+      btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar notificação';
+      btn.disabled  = false;
+
+      const hint = document.getElementById('hintProntuario');
+      hint.textContent = 'Apenas números';
+      hint.className   = 'text-xs text-gray-400 mt-1';
+
+      document.getElementById('areaSucesso').classList.add('hidden');
+      document.getElementById('boxEmail').classList.add('hidden');
+      document.getElementById('areaFormulario').classList.remove('hidden');
+
+      idempotencyKeyAtual = null;
+      _mostrarEtapa(1);
+      _restaurarMemoria();
+    }
+  </script>
+
+</body>
+</html>

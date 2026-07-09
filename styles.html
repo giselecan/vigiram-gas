@@ -1,0 +1,112 @@
+<style>
+  /* =====================================================
+     ANIMAÇÕES E TRANSITIONS GLOBAIS
+  ===================================================== */
+  .fade-in { animation: fadeIn 0.25s ease-in; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* =====================================================
+     SAAS POLISH — navbar, badges, cards
+  ===================================================== */
+  .aba-ativa   { background-color: #0d9488; color: white; box-shadow: inset 0 -3px 0 #f97316; border-radius: 10px 10px 0 0; }
+  .aba-inativa { background-color: transparent; color: #99f6e4; border-radius: 10px 10px 0 0; }
+  .aba-inativa:hover { background-color: rgba(255,255,255,0.08); color: white; }
+
+  .navbar-divider {
+    width: 1px;
+    align-self: stretch;
+    background: rgba(255,255,255,0.12);
+    margin: 0 4px;
+  }
+
+  .pill-action {
+    transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease;
+  }
+  .pill-action:hover { transform: translateY(-1px); }
+  .pill-action:active { transform: translateY(0); }
+
+  .card-elevated {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+  }
+
+  .badge-soft {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .02em;
+  }
+
+  /* =====================================================
+     SKELETON LOADERS
+  ===================================================== */
+  .skeleton {
+    background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+    border-radius: 8px;
+  }
+  @keyframes shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .skeleton-card { height: 110px; margin-bottom: 12px; }
+
+  /* =====================================================
+     BADGES DE SLA
+  ===================================================== */
+  .badge-sla-ok    { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+  .badge-sla-warn  { background: #fef9c3; color: #92400e; border: 1px solid #fde68a; }
+  .badge-sla-late  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+  .badge-sla-sem   { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+
+  /* =====================================================
+     CARD KANBAN
+  ===================================================== */
+  .kanban-card {
+    transition: box-shadow 0.2s, transform 0.15s;
+  }
+  .kanban-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+    transform: translateY(-1px);
+  }
+
+  /* =====================================================
+     TOOLTIP CUSTOMIZADO (Naranjo)
+  ===================================================== */
+  [data-tooltip] { position: relative; cursor: help; }
+  [data-tooltip]::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 50%; top: calc(100% + 6px);
+    transform: translateX(-50%);
+    background: #1f2937;
+    color: #fff;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 6px 10px;
+    border-radius: 6px;
+    white-space: pre-wrap;
+    min-width: 200px;
+    max-width: 280px;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  [data-tooltip]:hover::after { opacity: 1; }
+
+  /* =====================================================
+     NARANJO — HOVER NAS LINHAS
+  ===================================================== */
+  .naranjo-row { transition: background 0.15s; }
+  .naranjo-row:hover { background: #f0f9ff; }
+
+  /* =====================================================
+     SCROLLBAR FINA NAS COLUNAS KANBAN
+  ===================================================== */
+  .kanban-col::-webkit-scrollbar { width: 4px; }
+  .kanban-col::-webkit-scrollbar-track { background: transparent; }
+  .kanban-col::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+</style>

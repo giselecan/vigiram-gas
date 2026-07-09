@@ -1,0 +1,626 @@
+<script>
+// =========================================================
+// js_admin.html — v2.0
+//
+// Modal de Configurações do Sistema (perfil ADMIN).
+// Acessado via ícone de engrenagem na navbar.
+// Seções: Usuários, E-mails, SLA, Setores, Listas, Gatilhos
+//
+// Depende de: tokenSessao, mostrarToast, escapeHtml (js_core)
+// Backend: Admin.gs, Config_Write.gs
+// =========================================================
+
+// ─────────────────────────────────────────────────────────
+// ABERTURA / FECHAMENTO DO MODAL PRINCIPAL
+// ─────────────────────────────────────────────────────────
+function abrirConfiguracoes() {
+  let modal = document.getElementById('modalConfig');
+  if (!modal) { _criarModalConfig(); modal = document.getElementById('modalConfig'); }
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  _abrirSecaoConfig('usuarios');
+}
+
+function fecharConfiguracoes() {
+  const modal = document.getElementById('modalConfig');
+  if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+}
+
+// ─────────────────────────────────────────────────────────
+// CRIAÇÃO DO MODAL (injetado uma vez no DOM)
+// ─────────────────────────────────────────────────────────
+function _criarModalConfig() {
+  const modal = document.createElement('div');
+  modal.id = 'modalConfig';
+  modal.className = 'fixed inset-0 bg-black/60 hidden items-center justify-center z-50 p-4';
+  modal.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex overflow-hidden">
+
+      <!-- SIDEBAR DE NAVEGAÇÃO -->
+      <div class="w-52 bg-gray-900 flex flex-col flex-shrink-0">
+        <div class="p-5 border-b border-gray-700">
+          <div class="flex items-center gap-2">
+            <i class="fas fa-cog text-teal-400"></i>
+            <span class="text-white font-bold text-sm">Configurações</span>
+          </div>
+          <p class="text-gray-400 text-[10px] mt-0.5">VigiRAM · Admin</p>
+        </div>
+        <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
+          ${_menuItem('usuarios',  'fa-users',         'Usuários')}
+          ${_menuItem('emails',    'fa-envelope',      'E-mails de Alerta')}
+          ${_menuItem('sla',       'fa-clock',         'SLA')}
+          ${_menuItem('setores',   'fa-hospital',      'Setores')}
+          ${_menuItem('listas',    'fa-list',          'Listas / Dropdowns')}
+          ${_menuItem('gatilhos',  'fa-pills',         'Gatilhos')}
+        </nav>
+        <div class="p-3 border-t border-gray-700">
+          <button onclick="fecharConfiguracoes()"
+                  class="w-full text-xs text-gray-400 hover:text-white flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition">
+            <i class="fas fa-times-circle"></i> Fechar
+          </button>
+        </div>
+      </div>
+
+      <!-- ÁREA DE CONTEÚDO -->
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <div id="cfgConteudo" class="flex-1 overflow-y-auto p-6 bg-gray-50"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function _menuItem(id, icon, label) {
+  return `<button id="cfgMenu_${id}" onclick="_abrirSecaoConfig('${id}')"
+    class="cfg-menu-item w-full text-left text-xs text-gray-400 hover:text-white flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-700 transition font-medium">
+    <i class="fas ${icon} w-4 text-center"></i> ${label}
+  </button>`;
+}
+
+function _abrirSecaoConfig(secao) {
+  // Destaca item ativo no menu
+  document.querySelectorAll('.cfg-menu-item').forEach(b => {
+    b.classList.remove('bg-teal-600', 'text-white');
+    b.classList.add('text-gray-400');
+  });
+  const btn = document.getElementById('cfgMenu_' + secao);
+  if (btn) { btn.classList.add('bg-teal-600', 'text-white'); btn.classList.remove('text-gray-400'); }
+
+  const area = document.getElementById('cfgConteudo');
+  area.innerHTML = `<div class="flex items-center justify-center h-40 text-gray-400">
+    <i class="fas fa-spinner fa-spin mr-2"></i> Carregando…</div>`;
+
+  const renderizadores = {
+    usuarios: _renderSecaoUsuarios,
+    emails:   _renderSecaoEmails,
+    sla:      _renderSecaoSLA,
+    setores:  _renderSecaoSetores,
+    listas:   _renderSecaoListas,
+    gatilhos: _renderSecaoGatilhos
+  };
+  if (renderizadores[secao]) renderizadores[secao](area);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO 1 — USUÁRIOS
+// ─────────────────────────────────────────────────────────
+function _renderSecaoUsuarios(area) {
+  google.script.run
+    .withSuccessHandler(usuarios => {
+      const linhas = (usuarios || []).map(u => {
+        const ativo = u.ativo === 'SIM';
+        return `<tr class="border-b border-gray-100 hover:bg-gray-50 text-sm">
+          <td class="px-4 py-3">
+            <p class="font-semibold text-gray-800">${escapeHtml(u.nome)}</p>
+            <p class="text-xs text-gray-400">${escapeHtml(u.email)}</p>
+          </td>
+          <td class="px-4 py-3">
+            <span class="${u.perfil === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} text-[10px] font-bold px-2 py-0.5 rounded-full">
+              ${escapeHtml(u.perfil)}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            <span class="${ativo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'} text-[10px] font-bold px-2 py-0.5 rounded-full">
+              ${ativo ? 'ATIVO' : 'INATIVO'}
+            </span>
+          </td>
+          <td class="px-4 py-3">
+            <div class="flex gap-2">
+              <button onclick="_cfgResetSenha('${escapeHtml(u.email)}')"
+                      class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
+                <i class="fas fa-key mr-1"></i>Senha
+              </button>
+              <button onclick="_cfgAlterarStatus('${escapeHtml(u.email)}', ${!ativo})"
+                      class="text-xs ${ativo ? 'bg-red-50 hover:bg-red-100 text-red-600' : 'bg-green-50 hover:bg-green-100 text-green-700'} font-semibold px-2.5 py-1.5 rounded-lg transition">
+                <i class="fas ${ativo ? 'fa-user-slash' : 'fa-user-check'} mr-1"></i>${ativo ? 'Desativar' : 'Ativar'}
+              </button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+
+      area.innerHTML = `
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <i class="fas fa-users text-teal-600"></i> Usuários do Sistema
+          </h2>
+          <button onclick="_cfgNovoUsuario()"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+            <i class="fas fa-user-plus"></i> Novo Usuário
+          </button>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+          <table class="w-full text-left">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Usuário</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Perfil</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Status</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Ações</th>
+              </tr>
+            </thead>
+            <tbody>${linhas || '<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400 text-sm">Nenhum usuário cadastrado.</td></tr>'}</tbody>
+          </table>
+        </div>`;
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .listarUsuarios(tokenSessao);
+}
+
+function _cfgNovoUsuario() {
+  _cfgAbrirSubModal('Novo Usuário', `
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1">E-mail *</label>
+        <input type="email" id="cfgNuEmail" placeholder="usuario@hrn.com"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1">Nome completo *</label>
+        <input type="text" id="cfgNuNome"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1">Senha (mín. 8 caracteres) *</label>
+        <input type="password" id="cfgNuSenha"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1">Perfil *</label>
+        <select id="cfgNuPerfil" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none">
+          <option value="FARMACEUTICO">Farmacêutico</option>
+          <option value="ADMIN">Administrador</option>
+        </select>
+      </div>
+    </div>`,
+    'Criar Usuário', () => {
+      const dados = {
+        email:  document.getElementById('cfgNuEmail').value.trim(),
+        nome:   document.getElementById('cfgNuNome').value.trim(),
+        senha:  document.getElementById('cfgNuSenha').value.trim(),
+        perfil: document.getElementById('cfgNuPerfil').value
+      };
+      if (!dados.email || !dados.nome || !dados.senha) { mostrarToast('Preencha todos os campos.', 'erro'); return; }
+      if (dados.senha.length < 8) { mostrarToast('Senha deve ter ao menos 8 caracteres.', 'erro'); return; }
+      google.script.run
+        .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) { _fecharSubModal(); _abrirSecaoConfig('usuarios'); } })
+        .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+        .criarUsuario(dados, tokenSessao);
+    });
+}
+
+function _cfgResetSenha(email) {
+  _cfgAbrirSubModal('Redefinir Senha', `
+    <p class="text-xs text-gray-400 mb-4">${escapeHtml(email)}</p>
+    <div>
+      <label class="block text-xs font-bold text-gray-600 mb-1">Nova senha (mín. 8 caracteres) *</label>
+      <input type="password" id="cfgRsSenha"
+             class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+    </div>`,
+    'Salvar', () => {
+      const senha = document.getElementById('cfgRsSenha').value.trim();
+      if (senha.length < 8) { mostrarToast('Senha deve ter ao menos 8 caracteres.', 'erro'); return; }
+      google.script.run
+        .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) _fecharSubModal(); })
+        .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+        .trocarSenhaUsuario(email, senha, tokenSessao);
+    });
+}
+
+function _cfgAlterarStatus(email, novoAtivo) {
+  if (!confirm(`Confirma ${novoAtivo ? 'ativar' : 'desativar'} o usuário ${email}?`)) return;
+  google.script.run
+    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) _abrirSecaoConfig('usuarios'); })
+    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .alterarStatusUsuario(email, novoAtivo, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO 2 — E-MAILS
+// ─────────────────────────────────────────────────────────
+function _renderSecaoEmails(area) {
+  google.script.run
+    .withSuccessHandler(cfg => {
+      const geral = cfg.geral || {};
+      area.innerHTML = `
+        <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-5">
+          <i class="fas fa-envelope text-teal-600"></i> E-mails de Alerta
+        </h2>
+        <div class="space-y-4 max-w-xl">
+          <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <label class="block text-xs font-bold text-gray-600 mb-1">E-mail da Coordenação</label>
+            <p class="text-[10px] text-gray-400 mb-2">Destinatário dos alertas de SLA vencido e notificações críticas.</p>
+            <input type="email" id="cfgEmailCoord" value="${escapeHtml(geral.EMAIL_COORDENACAO || '')}"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+          </div>
+          <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <label class="block text-xs font-bold text-gray-600 mb-1">Alertas Ativos</label>
+            <p class="text-[10px] text-gray-400 mb-2">Ativar/desativar o envio de todos os e-mails automáticos.</p>
+            <select id="cfgAlertasAtivos" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none">
+              <option value="SIM" ${geral.ALERTAS_ATIVOS === 'SIM' ? 'selected' : ''}>Ativados</option>
+              <option value="NAO" ${geral.ALERTAS_ATIVOS === 'NAO' ? 'selected' : ''}>Desativados</option>
+            </select>
+          </div>
+          <button onclick="_cfgSalvarEmails()"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
+            <i class="fas fa-save"></i> Salvar Configurações de E-mail
+          </button>
+        </div>`;
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .getConfig();
+}
+
+function _cfgSalvarEmails() {
+  const dados = {
+    EMAIL_COORDENACAO: document.getElementById('cfgEmailCoord').value.trim(),
+    ALERTAS_ATIVOS:    document.getElementById('cfgAlertasAtivos').value
+  };
+  google.script.run
+    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
+    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .salvarConfigGeral(dados, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO 3 — SLA
+// ─────────────────────────────────────────────────────────
+function _renderSecaoSLA(area) {
+  google.script.run
+    .withSuccessHandler(cfg => {
+      const sla = (cfg.geral || {}).SLA_PADRAO_HORAS || '48';
+      area.innerHTML = `
+        <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-5">
+          <i class="fas fa-clock text-teal-600"></i> Configuração de SLA
+        </h2>
+        <div class="max-w-sm space-y-4">
+          <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <label class="block text-xs font-bold text-gray-600 mb-1">Prazo padrão (horas)</label>
+            <p class="text-[10px] text-gray-400 mb-3">Tempo máximo para investigação após o evento. Padrão: 48h.</p>
+            <div class="flex items-center gap-3">
+              <input type="number" id="cfgSlaHoras" value="${escapeHtml(sla)}" min="1" max="720"
+                     class="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm text-center font-bold focus:ring-2 focus:ring-teal-500 outline-none">
+              <span class="text-sm text-gray-500">horas</span>
+            </div>
+            <div class="mt-3 flex gap-2 flex-wrap">
+              ${[24, 48, 72, 120].map(h => `<button onclick="document.getElementById('cfgSlaHoras').value=${h}"
+                class="text-xs bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-600 font-semibold px-3 py-1.5 rounded-lg transition">${h}h</button>`).join('')}
+            </div>
+          </div>
+          <button onclick="_cfgSalvarSLA()"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
+            <i class="fas fa-save"></i> Salvar SLA
+          </button>
+        </div>`;
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .getConfig();
+}
+
+function _cfgSalvarSLA() {
+  const horas = parseInt(document.getElementById('cfgSlaHoras').value || '48', 10);
+  if (isNaN(horas) || horas < 1) { mostrarToast('Informe um valor válido em horas.', 'erro'); return; }
+  google.script.run
+    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) { SLA_PADRAO_HORAS = horas; invalidarConfigCache(); } })
+    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .salvarConfigGeral({ SLA_PADRAO_HORAS: String(horas) }, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO 4 — SETORES
+// ─────────────────────────────────────────────────────────
+function _renderSecaoSetores(area) {
+  google.script.run
+    .withSuccessHandler(cfg => {
+      const setores = (cfg.setores || []).sort((a, b) => a.setor.localeCompare(b.setor));
+      const linhas = setores.map((s, i) => `
+        <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm" id="setorLinha_${i}">
+          <td class="px-4 py-2.5">
+            <input type="text" value="${escapeHtml(s.setor)}" data-campo="setor" data-idx="${i}"
+                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
+          </td>
+          <td class="px-4 py-2.5">
+            <input type="text" value="${escapeHtml(s.farmaceutico)}" data-campo="farmaceutico" data-idx="${i}"
+                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
+          </td>
+          <td class="px-4 py-2.5">
+            <input type="email" value="${escapeHtml(s.email)}" data-campo="email" data-idx="${i}"
+                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
+          </td>
+          <td class="px-4 py-2.5 text-center">
+            <button onclick="_cfgRemoverSetor(${i})"
+                    class="text-red-400 hover:text-red-600 transition text-xs">
+              <i class="fas fa-trash"></i>
+            </button>
+          </td>
+        </tr>`).join('');
+
+      area.innerHTML = `
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <i class="fas fa-hospital text-teal-600"></i> Setores e Responsáveis
+          </h2>
+          <button onclick="_cfgAdicionarSetor()"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+            <i class="fas fa-plus"></i> Adicionar Setor
+          </button>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
+          <table class="w-full text-left" id="tabelaSetores">
+            <thead class="bg-gray-50 border-b">
+              <tr>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Setor</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Farmacêutico Responsável</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">E-mail</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase w-10"></th>
+              </tr>
+            </thead>
+            <tbody id="setoresBody">${linhas}</tbody>
+          </table>
+        </div>
+        <button onclick="_cfgSalvarSetores()"
+                class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
+          <i class="fas fa-save"></i> Salvar Setores
+        </button>`;
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .getConfig();
+}
+
+function _cfgAdicionarSetor() {
+  const tbody = document.getElementById('setoresBody');
+  if (!tbody) return;
+  const i = tbody.rows.length;
+  const tr = document.createElement('tr');
+  tr.className = 'border-b border-gray-100 hover:bg-gray-50 text-sm';
+  tr.id = 'setorLinha_' + i;
+  tr.innerHTML = `
+    <td class="px-4 py-2.5"><input type="text" data-campo="setor" data-idx="${i}" placeholder="NOME DO SETOR"
+       class="w-full border border-teal-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-teal-50"></td>
+    <td class="px-4 py-2.5"><input type="text" data-campo="farmaceutico" data-idx="${i}" placeholder="Nome do Farmacêutico"
+       class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white"></td>
+    <td class="px-4 py-2.5"><input type="email" data-campo="email" data-idx="${i}" placeholder="email@hrn.com"
+       class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white"></td>
+    <td class="px-4 py-2.5 text-center"><button onclick="this.closest('tr').remove()" class="text-red-400 hover:text-red-600 text-xs"><i class="fas fa-trash"></i></button></td>`;
+  tbody.appendChild(tr);
+  tr.querySelector('input').focus();
+}
+
+function _cfgRemoverSetor(idx) {
+  const linha = document.getElementById('setorLinha_' + idx);
+  if (linha) linha.remove();
+}
+
+function _cfgSalvarSetores() {
+  const tbody = document.getElementById('setoresBody');
+  if (!tbody) return;
+  const setores = [];
+  tbody.querySelectorAll('tr').forEach(tr => {
+    const campos = {};
+    tr.querySelectorAll('input[data-campo]').forEach(inp => { campos[inp.dataset.campo] = inp.value.trim(); });
+    if (campos.setor) setores.push(campos);
+  });
+  if (!setores.length) { mostrarToast('Adicione ao menos um setor.', 'erro'); return; }
+  google.script.run
+    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
+    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .salvarSetores(setores, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO 5 — LISTAS / DROPDOWNS
+// ─────────────────────────────────────────────────────────
+const _CAMPOS_LISTA = {
+  gravidade:       'Gravidade',
+  desfecho:        'Desfecho',
+  conclusao:       'Conclusão',
+  motivo_descarte: 'Motivo de Descarte',
+  readministrado:  'Readministrado?',
+  evolucao:        'Evolução Pós Condutas'
+};
+
+function _renderSecaoListas(area) {
+  google.script.run
+    .withSuccessHandler(cfg => {
+      const listas = cfg.listas || {};
+      const blocos = Object.entries(_CAMPOS_LISTA).map(([campo, label]) => {
+        const itens = (listas[campo] || []).map((op, i) =>
+          `<div class="flex items-center gap-2 mb-1.5" id="listaItem_${campo}_${i}">
+            <input type="text" value="${escapeHtml(op)}" data-lista="${campo}" data-idx="${i}"
+                   class="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-teal-400 outline-none">
+            <button onclick="document.getElementById('listaItem_${campo}_${i}').remove()"
+                    class="text-red-400 hover:text-red-600 transition flex-shrink-0">
+              <i class="fas fa-times text-xs"></i>
+            </button>
+          </div>`).join('');
+        return `
+          <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4" id="blocoLista_${campo}">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-bold text-gray-700">${label}</h3>
+              <button onclick="_cfgAdicionarItemLista('${campo}')"
+                      class="text-xs text-teal-600 hover:text-teal-800 font-semibold flex items-center gap-1">
+                <i class="fas fa-plus"></i> Adicionar
+              </button>
+            </div>
+            <div id="listaItens_${campo}">${itens}</div>
+          </div>`;
+      }).join('');
+
+      area.innerHTML = `
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <i class="fas fa-list text-teal-600"></i> Listas e Dropdowns
+          </h2>
+          <button onclick="_cfgSalvarListas()"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+            <i class="fas fa-save"></i> Salvar Todas
+          </button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${blocos}</div>`;
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .getConfig();
+}
+
+function _cfgAdicionarItemLista(campo) {
+  const container = document.getElementById('listaItens_' + campo);
+  if (!container) return;
+  const idx = container.querySelectorAll('[data-lista]').length;
+  const div = document.createElement('div');
+  div.className = 'flex items-center gap-2 mb-1.5';
+  div.innerHTML = `
+    <input type="text" data-lista="${campo}" data-idx="${idx}" placeholder="Nova opção…"
+           class="flex-1 border border-teal-300 rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-teal-50">
+    <button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 flex-shrink-0">
+      <i class="fas fa-times text-xs"></i>
+    </button>`;
+  container.appendChild(div);
+  div.querySelector('input').focus();
+}
+
+function _cfgSalvarListas() {
+  const listas = {};
+  Object.keys(_CAMPOS_LISTA).forEach(campo => {
+    const container = document.getElementById('listaItens_' + campo);
+    if (!container) return;
+    listas[campo] = Array.from(container.querySelectorAll('input[data-lista]'))
+      .map(inp => inp.value.trim()).filter(Boolean);
+  });
+  google.script.run
+    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
+    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .salvarListas(listas, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO 6 — GATILHOS
+// ─────────────────────────────────────────────────────────
+function _renderSecaoGatilhos(area) {
+  google.script.run
+    .withSuccessHandler(gatilhos => {
+      const itens = (gatilhos || []).map((g, i) => `
+        <div class="flex items-center gap-2 mb-2" id="gatilhoItem_${i}">
+          <input type="text" value="${escapeHtml(g.medicamento || g)}" data-idx="${i}"
+                 class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase focus:ring-1 focus:ring-teal-400 outline-none">
+          <button onclick="document.getElementById('gatilhoItem_${i}').remove()"
+                  class="text-red-400 hover:text-red-600 transition flex-shrink-0">
+            <i class="fas fa-trash text-sm"></i>
+          </button>
+        </div>`).join('');
+
+      area.innerHTML = `
+        <div class="flex items-center justify-between mb-5">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <i class="fas fa-pills text-teal-600"></i> Medicamentos Gatilho (Trigger Tools)
+          </h2>
+          <button onclick="_cfgAdicionarGatilho()"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+            <i class="fas fa-plus"></i> Adicionar
+          </button>
+        </div>
+        <p class="text-xs text-gray-400 mb-4">Medicamentos monitorados pelo ETL. Alterações refletem na próxima execução do pipeline.</p>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
+          <div id="gatilhosContainer">${itens || '<p class="text-sm text-gray-400 text-center py-4">Nenhum gatilho cadastrado.</p>'}</div>
+        </div>
+        <button onclick="_cfgSalvarGatilhos()"
+                class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
+          <i class="fas fa-save"></i> Salvar Gatilhos
+        </button>`;
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .listarGatilhos(tokenSessao);
+}
+
+function _cfgAdicionarGatilho() {
+  const container = document.getElementById('gatilhosContainer');
+  if (!container) return;
+  const idx = container.querySelectorAll('[data-idx]').length;
+  const div = document.createElement('div');
+  div.className = 'flex items-center gap-2 mb-2';
+  div.innerHTML = `
+    <input type="text" data-idx="${idx}" placeholder="NOME DO MEDICAMENTO" style="text-transform:uppercase"
+           class="flex-1 border border-teal-300 rounded-lg px-3 py-2 text-sm uppercase focus:ring-1 focus:ring-teal-400 outline-none bg-teal-50">
+    <button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 flex-shrink-0">
+      <i class="fas fa-trash text-sm"></i>
+    </button>`;
+  container.appendChild(div);
+  div.querySelector('input').focus();
+}
+
+function _cfgSalvarGatilhos() {
+  const container = document.getElementById('gatilhosContainer');
+  if (!container) return;
+  const gatilhos = Array.from(container.querySelectorAll('input[data-idx]'))
+    .map(inp => inp.value.trim().toUpperCase()).filter(Boolean);
+  google.script.run
+    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); })
+    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .salvarGatilhos(gatilhos, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────
+function _erroHtml(msg) {
+  return `<div class="flex flex-col items-center justify-center h-40 text-red-400">
+    <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
+    <p class="text-sm">${escapeHtml(msg)}</p>
+  </div>`;
+}
+
+/** Invalida o cache de config no servidor para refletir edições imediatamente. */
+function invalidarConfigCache() {
+  google.script.run.invalidarConfig();
+}
+
+/** Sub-modal reutilizável para formulários pequenos dentro do modal de config. */
+function _cfgAbrirSubModal(titulo, conteudo, labelBtn, onConfirmar) {
+  const anterior = document.getElementById('cfgSubModal');
+  if (anterior) anterior.remove();
+  const div = document.createElement('div');
+  div.id = 'cfgSubModal';
+  div.className = 'absolute inset-0 bg-black/50 flex items-center justify-center z-10 rounded-2xl';
+  div.innerHTML = `
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
+      <h3 class="text-base font-bold text-gray-800 mb-4 border-b pb-3">${escapeHtml(titulo)}</h3>
+      <div class="mb-5">${conteudo}</div>
+      <div class="flex justify-end gap-3">
+        <button onclick="_fecharSubModal()"
+                class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-200 transition">
+          Cancelar
+        </button>
+        <button id="cfgSubModalBtn"
+                class="px-4 py-2 bg-teal-600 text-white rounded-lg font-semibold text-sm hover:bg-teal-700 transition">
+          ${escapeHtml(labelBtn)}
+        </button>
+      </div>
+    </div>`;
+  document.getElementById('modalConfig').querySelector('.rounded-2xl').style.position = 'relative';
+  document.getElementById('modalConfig').querySelector('.rounded-2xl').appendChild(div);
+  document.getElementById('cfgSubModalBtn').onclick = onConfirmar;
+}
+
+function _fecharSubModal() {
+  const sub = document.getElementById('cfgSubModal');
+  if (sub) sub.remove();
+}
+</script>
