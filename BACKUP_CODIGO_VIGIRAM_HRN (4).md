@@ -1541,6 +1541,21 @@ function salvarGatilhos(gatilhos, token) {
  *   NÃO testado contra novo AckLog ainda — gerar XML de teste e reimportar
  *   como "Não validado" antes de assumir produção.
  *
+ * FASE 1 (roadmap — investigação do Naranjo não importando no VigiMed,
+ * Rodada A das hipóteses H2/H3) — EXPERIMENTAL, PENDENTE DE CONFIRMAÇÃO:
+ *   - G.k.9.i.2.r.2 (methodCode): "NARANJO ALGORITHM (score: N)" ->
+ *     "Naranjo" (literal). O score migrou para a narrativa (H.1), marcador
+ *     "NARANJO: ESCORE N" — ver _montarNarrativa_.
+ *   - G.k.9.i.2.r.3 (value ST): "PROVÁVEL" (maiúsculas) -> "Provável"
+ *     (Title Case) — ver _titleCasePt_.
+ *   - G.k.9.i.2.r.1 (author): texto livre "SENDER" -> código CL21
+ *     (ich-role-code) "1" = sender.
+ *   Gere um XML de teste, importe em "Não validado" no VigiFlow e confira
+ *   se a matriz de causalidade aparece. Se sim: hipótese confirmada, fica
+ *   definitivo. Se não: a hipótese muda para H1 (referência órfã por falta
+ *   de código MedDRA em E.i.2.1b — nesse caso o próximo passo é colar um
+ *   código LLT manualmente em E.i.2.1b, ver roadmap "Rodada B").
+ *
  * AJUSTES ANTERIORES (ciclo pós-AckLog v6, ver PDF ICH ICSR IG v5.03):
  *   - D.5 Sexo lido de caso.sexo (SEXO_MAP), fallback nullFlavor="UNK".
  *   - G.k.4.r.10 Via de Administração em <routeCode> (não <formCode>).
@@ -1785,6 +1800,17 @@ function _calcularScoreNaranjo_(naranjoRespostas) {
     .reduce(function (soma, v) { return soma + (parseInt(v, 10) || 0); }, 0);
 }
 
+/**
+ * FASE 1 (roadmap, Rodada A) — "PROVÁVEL" -> "Provável". Só a primeira letra
+ * maiúscula; funciona para os 4 rótulos de uma palavra do Naranjo
+ * (DUVIDOSA/POSSÍVEL/PROVÁVEL/DEFINIDA). Não é title-case genérico de frase.
+ */
+function _titleCasePt_(palavra) {
+  const s = String(palavra || '').trim();
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
 /** Busca nome do usuário autenticado (para assinatura C.3.3.3/C.3.3.5). */
 function _buscarUsuarioAtualParaAssinatura_() {
   const email = usuarioAtual_();
@@ -1802,7 +1828,7 @@ function _buscarUsuarioAtualParaAssinatura_() {
  * todos os campos descritivos da investigação com marcadores em CAIXA ALTA.
  * Campos vazios são omitidos. Escapado 1x no final (não escapar por partes).
  */
-function _montarNarrativa_(caso) {
+function _montarNarrativa_(caso, naranjoScore) {
   const base = String(
     caso.relato || caso.relatoNotificador || caso.reacaoTermo || ''
   ).trim();
@@ -1813,7 +1839,12 @@ function _montarNarrativa_(caso) {
     { rotulo: 'EVOLUCAO POS CONDUTAS',          valor: caso.evolucao },
     { rotulo: 'CONCLUSAO DO FARMACEUTICO',      valor: caso.conclusao },
     { rotulo: 'HISTORIA CLINICA RELEVANTE',     valor: caso.historiaClinica },
-    { rotulo: 'OBSERVACOES',                    valor: caso.observacoes }
+    { rotulo: 'OBSERVACOES',                    valor: caso.observacoes },
+    // FASE 1 (roadmap, Rodada A) — o escore numérico do Naranjo saiu do
+    // methodCode de G.k.9.i.2.r (agora "Naranjo" literal, ver
+    // causalityAssessment em _montarXmlE2B_) e não tem mais elemento
+    // dedicado no bloco de causalidade; preservado aqui na narrativa.
+    { rotulo: 'NARANJO',                        valor: naranjoScore ? ('ESCORE ' + naranjoScore) : '' }
   ];
 
   const partes = [base];
@@ -1897,8 +1928,12 @@ function _montarXmlE2B_(caso, usuario, config) {
   // F0-03 — F.r.2.1 (nome do teste, texto livre) + F.r.3.4 (resultado não estruturado).
   const examesE2B = escaparHtml_(String(caso.exames || '').trim().toUpperCase());
 
+  // FASE 1 (roadmap, Rodada A) — score sai do methodCode (agora valor literal
+  // fixo "Naranjo", ver causalityAssessment abaixo) e migra para a narrativa,
+  // já que G.k.9.i.2.r.1 (fonte) também deixou de ser texto livre.
+  const naranjoScore  = _calcularScoreNaranjo_(caso.naranjoRespostas);
   // H.1/D.14 Narrativa — todos os campos descritivos da investigação.
-  const narrativa = _montarNarrativa_(caso);
+  const narrativa = _montarNarrativa_(caso, naranjoScore);
 
   const reacaoTermo   = escaparHtml_(String(caso.reacaoTermo).toUpperCase());
   const medicamento   = escaparHtml_(String(caso.medicamento).toUpperCase());
@@ -1915,8 +1950,13 @@ function _montarXmlE2B_(caso, usuario, config) {
   // F0-09 — G.k.3.3 Nome do detentor/fabricante.
   const laboratorioE2B = escaparHtml_(String(caso.laboratorio || '').toUpperCase());
 
-  const naranjoScore    = _calcularScoreNaranjo_(caso.naranjoRespostas);
-  const naranjoClasse   = escaparHtml_(String(caso.naranjo || 'DUVIDOSA').toUpperCase());
+  // FASE 1 (roadmap, Rodada A / hipótese H2): testar se o VigiMed espera
+  // "Provável" (Title Case, como no rótulo da própria tela) em vez de
+  // "PROVÁVEL" (maiúsculas, como todo o resto do XML). PENDENTE DE
+  // CONFIRMAÇÃO — gerar XML de teste, importar em "Não validado" no
+  // VigiFlow e conferir se a matriz de causalidade aparece antes de
+  // considerar isto definitivo.
+  const naranjoClasse = escaparHtml_(_titleCasePt_(String(caso.naranjo || 'DUVIDOSA')));
 
   const criteriosGravidade = [
     { comentario: 'E.i.3.2a: Results in Death',                       codigo: '34', valor: gravidadeCriterios.morte },
@@ -2246,18 +2286,22 @@ blocoReexposicao +
 '              </component>\n' +
 '\n' +
 '              <!-- Avaliacao de causalidade — Algoritmo de Naranjo -->\n' +
+'              <!-- FASE 1 (roadmap, Rodada A / hipoteses H2+H3): methodCode\n' +
+'                   literal "Naranjo" e author codificado via CL21 em vez de\n' +
+'                   texto livre. PENDENTE DE CONFIRMACAO no AckLog do\n' +
+'                   VigiFlow — se a matriz de causalidade continuar vazia\n' +
+'                   apos este XML, a hipotese muda para H1 (referencia\n' +
+'                   orfa por falta de codigo MedDRA em E.i.2.1b). -->\n' +
 '              <component typeCode="COMP">\n' +
 '                <causalityAssessment classCode="OBS" moodCode="EVN">\n' +
 '                  <code code="39" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
 '                  <value xsi:type="ST">' + naranjoClasse + '</value>\n' +
 '                  <methodCode>\n' +
-'                    <originalText>NARANJO ALGORITHM (score: ' + naranjoScore + ')</originalText>\n' +
+'                    <originalText>Naranjo</originalText>\n' +
 '                  </methodCode>\n' +
 '                  <author typeCode="AUT">\n' +
 '                    <assignedEntity classCode="ASSIGNED">\n' +
-'                      <code>\n' +
-'                        <originalText>SENDER</originalText>\n' +
-'                      </code>\n' +
+'                      <code code="1" codeSystem="' + SCHEMA.E2B.CODESYS.AUTOR_COMENTARIO + '" displayName="sender"/>\n' +
 '                    </assignedEntity>\n' +
 '                  </author>\n' +
 '                  <subject1 typeCode="SUBJ">\n' +
