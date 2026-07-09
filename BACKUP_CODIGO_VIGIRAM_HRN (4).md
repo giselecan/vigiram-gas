@@ -1751,6 +1751,25 @@ function _agoraE2B_() {
   return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMddHHmmss');
 }
 
+/**
+ * F0-06 — D.2.2a/b Idade no início da reação, em anos completos. Recebe duas
+ * datas já em 'YYYYMMDD' (saída de _formatarDataE2B_) para evitar reanalisar
+ * o valor bruto do Firestore. Retorna null se faltar alguma data ou o
+ * resultado for implausível (paciente "nascido depois" por erro de digitação).
+ */
+function _calcularIdadeAnosE2B_(nascimentoYYYYMMDD, referenciaYYYYMMDD) {
+  if (!nascimentoYYYYMMDD || !referenciaYYYYMMDD) return null;
+  const anoNasc = parseInt(nascimentoYYYYMMDD.substring(0, 4), 10);
+  const mesNasc = parseInt(nascimentoYYYYMMDD.substring(4, 6), 10);
+  const diaNasc = parseInt(nascimentoYYYYMMDD.substring(6, 8), 10);
+  const anoRef  = parseInt(referenciaYYYYMMDD.substring(0, 4), 10);
+  const mesRef  = parseInt(referenciaYYYYMMDD.substring(4, 6), 10);
+  const diaRef  = parseInt(referenciaYYYYMMDD.substring(6, 8), 10);
+  let idade = anoRef - anoNasc;
+  if (mesRef < mesNasc || (mesRef === mesNasc && diaRef < diaNasc)) idade--;
+  return (idade >= 0 && idade < 130) ? idade : null;
+}
+
 /** Divide um nome completo em { given, family } — heurística: última palavra = sobrenome. */
 function _dividirNome_(nomeCompleto) {
   const partes = String(nomeCompleto || '').trim().split(/\s+/).filter(Boolean);
@@ -1839,6 +1858,10 @@ function _montarXmlE2B_(caso, usuario, config) {
   );
   const dataNascimento   = _formatarDataE2B_(caso.nascimento);
 
+  // F0-06 — D.2.2a/b Idade no início da reação (0..1: omitido se faltar nascimento
+  // ou data de início da reação, ou o resultado for implausível).
+  const idadeReacaoAnos = _calcularIdadeAnosE2B_(dataNascimento, dataInicioReacao);
+
   // D.5 Sexo — mapeia valor livre vindo do ETL; sem match cai em nullFlavor="UNK" (ver abaixo).
   const codigoSexo = SCHEMA.E2B.SEXO_MAP[String(caso.sexo || '').toUpperCase()] || null;
 
@@ -1869,6 +1892,11 @@ function _montarXmlE2B_(caso, usuario, config) {
   // H.4 Sender's Comments = conclusão do farmacêutico (remetente).
   const comentarioSender = escaparHtml_(String(caso.conclusao || '').trim().toUpperCase());
 
+  // F0-02 — D.7.1.r.5 (comentário de história médica, texto livre, sem MedDRA).
+  const historiaClinicaE2B = escaparHtml_(String(caso.historiaClinica || '').trim().toUpperCase());
+  // F0-03 — F.r.2.1 (nome do teste, texto livre) + F.r.3.4 (resultado não estruturado).
+  const examesE2B = escaparHtml_(String(caso.exames || '').trim().toUpperCase());
+
   // H.1/D.14 Narrativa — todos os campos descritivos da investigação.
   const narrativa = _montarNarrativa_(caso);
 
@@ -1884,6 +1912,8 @@ function _montarXmlE2B_(caso, usuario, config) {
                           .replace(/[^0-9.]/g, '');
   const doseUnidade   = escaparHtml_(String(caso.doseUnidade || '').toLowerCase()) || 'mg';
   const lote          = escaparHtml_(String(caso.lote || '').toUpperCase());
+  // F0-09 — G.k.3.3 Nome do detentor/fabricante.
+  const laboratorioE2B = escaparHtml_(String(caso.laboratorio || '').toUpperCase());
 
   const naranjoScore    = _calcularScoreNaranjo_(caso.naranjoRespostas);
   const naranjoClasse   = escaparHtml_(String(caso.naranjo || 'DUVIDOSA').toUpperCase());
@@ -1944,6 +1974,114 @@ function _montarXmlE2B_(caso, usuario, config) {
       '                            </observation>\n' +
       '                          </outboundRelationship2>\n'
     : '';
+
+  // F0-09 — G.k.3.3 Nome do detentor/fabricante, dentro de
+  // asManufacturedProduct > subjectOf > approval > holder > role >
+  // playingOrganization > name. <id> (G.k.3.1) e <author> (G.k.3.2) do
+  // <approval> são minOccurs="0" no schema (POCP_MT050100UV.xsd) — como não
+  // temos nº de autorização nem país de registro, o bloco sai só com
+  // <holder>, estrutura ainda assim válida. Ordem de <asManufacturedProduct>
+  // dentro de kindOfProduct (após <name>, antes de <ingredient>) confirmada
+  // em POCP_MT010200UV.xsd (POCP_MT010200UV.Product) e no exemplo oficial.
+  const blocoFabricante = laboratorioE2B
+    ? '                                <asManufacturedProduct classCode="MANU">\n' +
+      '                                  <subjectOf typeCode="SBJ">\n' +
+      '                                    <approval classCode="CNTRCT" moodCode="EVN">\n' +
+      '                                      <holder typeCode="HLD">\n' +
+      '                                        <role classCode="HLD">\n' +
+      '                                          <playingOrganization classCode="ORG" determinerCode="INSTANCE">\n' +
+      '                                            <name>' + laboratorioE2B + '</name>\n' +
+      '                                            <!-- G.k.3.3: Name of Holder / Applicant -->\n' +
+      '                                          </playingOrganization>\n' +
+      '                                        </role>\n' +
+      '                                      </holder>\n' +
+      '                                    </approval>\n' +
+      '                                  </subjectOf>\n' +
+      '                                </asManufacturedProduct>\n'
+    : '';
+
+  // F0-06 — D.2.2a/b, sibling de player1 dentro de primaryRole (padrão
+  // confirmado em 6_Example Instances/1-1_ExampleCase_literature_initial_v1_0.xml,
+  // linhas 78-85 do IG_Complete_Package_v1_11_1).
+  const blocoIdade = (idadeReacaoAnos !== null)
+    ? '                  <subjectOf2 typeCode="SBJ">\n' +
+      '                    <observation classCode="OBS" moodCode="EVN">\n' +
+      '                      <code code="3" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+      '                      <value xsi:type="PQ" value="' + idadeReacaoAnos + '" unit="a"/>\n' +
+      '                      <!-- D.2.2a/b: Age at Time of Onset of Reaction / Event -->\n' +
+      '                    </observation>\n' +
+      '                  </subjectOf2>\n'
+    : '';
+
+  // F0-02 — D.7.1.r.5, dentro de organizer classCode="CATEGORY" code="1"
+  // (relevantMedicalHistoryAndConcurrentConditions). O <code> do item de
+  // história é 1..1 no schema (PORR_MT049023UV.Observation) mesmo sem
+  // MedDRA — sai nullFlavor="NI", mesmo padrão já usado em E.i.2.1b. O
+  // comentário livre entra em outboundRelationship2/observation code="10",
+  // confirmado em 5_Reference Instances/00_ICH_ICSR_Reference_Instance_variation_v3_1.xml
+  // (linhas 406-412).
+  const blocoHistoriaMedica = historiaClinicaE2B
+    ? '                  <subjectOf2 typeCode="SBJ">\n' +
+      '                    <organizer classCode="CATEGORY" moodCode="EVN">\n' +
+      '                      <code code="1" codeSystem="' + SCHEMA.E2B.CODESYS.CATEGORIA_GK + '"/>\n' +
+      '                      <component typeCode="COMP">\n' +
+      '                        <observation classCode="OBS" moodCode="EVN">\n' +
+      '                          <code nullFlavor="NI" codeSystem="2.16.840.1.113883.6.163"/>\n' +
+      '                          <!-- D.7.1.r.1b: sem licenca MedDRA ativa -->\n' +
+      '                          <outboundRelationship2 typeCode="COMP">\n' +
+      '                            <observation classCode="OBS" moodCode="EVN">\n' +
+      '                              <code code="10" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+      '                              <value xsi:type="ED">' + historiaClinicaE2B + '</value>\n' +
+      '                              <!-- D.7.1.r.5: Comments -->\n' +
+      '                            </observation>\n' +
+      '                          </outboundRelationship2>\n' +
+      '                        </observation>\n' +
+      '                      </component>\n' +
+      '                    </organizer>\n' +
+      '                  </subjectOf2>\n'
+    : '';
+
+  // F0-03 — F.r.2.1 (nome do teste, texto livre, sem atributo code) +
+  // F.r.3.4 (resultado não estruturado). Padrão do "teste #2" confirmado em
+  // 6_Example Instances/1-1_ExampleCase_literature_initial_v1_0.xml
+  // (linhas 259-270 do IG_Complete_Package_v1_11_1) — mesmo organizer
+  // classCode="CATEGORY" code="3" (testResults) usado com MedDRA no "teste #1".
+  const blocoExames = examesE2B
+    ? '                  <subjectOf2 typeCode="SBJ">\n' +
+      '                    <organizer classCode="CATEGORY" moodCode="EVN">\n' +
+      '                      <code code="3" codeSystem="' + SCHEMA.E2B.CODESYS.CATEGORIA_GK + '"/>\n' +
+      '                      <component typeCode="COMP">\n' +
+      '                        <observation classCode="OBS" moodCode="EVN">\n' +
+      '                          <code codeSystem="2.16.840.1.113883.6.163">\n' +
+      '                            <originalText>EXAME COMPLEMENTAR</originalText>\n' +
+      '                            <!-- F.r.2.1: Test Name (free text) -->\n' +
+      '                          </code>\n' +
+      '                          <value xsi:type="ED">' + examesE2B + '</value>\n' +
+      '                          <!-- F.r.3.4: Result Unstructured Data (free text) -->\n' +
+      '                        </observation>\n' +
+      '                      </component>\n' +
+      '                    </organizer>\n' +
+      '                  </subjectOf2>\n'
+    : '';
+
+  // F0-08 — H.5.r.1a/b, mesma narrativa de H.1 com idioma nativo. Padrão
+  // confirmado em 6_Example Instances/1-1_ExampleCase_literature_initial_v1_0.xml
+  // (linhas 504-516). Autor = sender (farmacêutico/remetente), coerente com
+  // H.4 (mesma decisão de identidade já usada ali).
+  const blocoResumoNativo =
+    '              <!-- H.5.r: Case Summary and Reporter\'s Comments in Native Language -->\n' +
+    '              <component1 typeCode="COMP">\n' +
+    '                <observationEvent classCode="OBS" moodCode="EVN">\n' +
+    '                  <code code="36" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+    '                  <value xsi:type="ED" language="por">' + narrativa + '</value>\n' +
+    '                  <author typeCode="AUT">\n' +
+    '                    <assignedEntity classCode="ASSIGNED">\n' +
+    '                      <code code="1" codeSystem="' + SCHEMA.E2B.CODESYS.AUTOR_COMENTARIO + '" displayName="sender"/>\n' +
+    '                    </assignedEntity>\n' +
+    '                  </author>\n' +
+    '                </observationEvent>\n' +
+    '              </component1>\n' +
+    '\n';
 
   return (
 '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -2012,6 +2150,8 @@ function _montarXmlE2B_(caso, usuario, config) {
 ) +
 '                  </player1>\n' +
 '\n' +
+blocoIdade +
+blocoHistoriaMedica +
 '                  <!-- E.i Reacao -->\n' +
 '                  <subjectOf2 typeCode="SBJ">\n' +
 '                    <observation classCode="OBS" moodCode="EVN">\n' +
@@ -2038,6 +2178,7 @@ blocoTermoDestacado + '\n' +
 '                    </observation>\n' +
 '                  </subjectOf2>\n' +
 '\n' +
+blocoExames +
 '                  <!-- G.k Medicamento -->\n' +
 '                  <subjectOf2 typeCode="SBJ">\n' +
 '                    <organizer classCode="CATEGORY" moodCode="EVN">\n' +
@@ -2049,6 +2190,7 @@ blocoTermoDestacado + '\n' +
 '                            <instanceOfKind classCode="INST">\n' +
 '                              <kindOfProduct classCode="MMAT" determinerCode="KIND">\n' +
 '                                <name>' + medicamento + '</name>\n' +
+blocoFabricante +
 '                                <ingredient classCode="ACTI">\n' +
 '                                  <ingredientSubstance classCode="MMAT" determinerCode="KIND">\n' +
 '                                    <name>' + medicamento + '</name>\n' +
@@ -2163,6 +2305,7 @@ blocoReexposicao +
     '\n'
   : ''
 ) +
+blocoResumoNativo +
 '            </adverseEventAssessment>\n' +
 '          </component>\n' +
 '\n' +
@@ -9733,6 +9876,13 @@ const SCHEMA = {
       DESFECHO:             '2.16.840.1.113883.3.989.2.1.1.11',
       REEXPOSICAO:          '2.16.840.1.113883.3.989.2.1.1.16',  // CL16 — G.k.9.i.4
       TERMO_DESTACADO:      '2.16.840.1.113883.3.989.2.1.1.10',  // CL10 — E.i.3.1
+      // BUGFIX (09/07/2026, IG_Complete_Package_v1_11_1): estas duas chaves
+      // já eram referenciadas em E2B.gs (asIdentifiedEntity do prontuário e
+      // author dos comentários H.2/H.4/H.5) mas nunca existiram aqui — saíam
+      // como codeSystem="undefined" no XML. Confirmadas contra as code lists
+      // oficiais CL4 (ich-medical-record-number-source-type) e CL21 (ich-role-code).
+      FONTE_PRONTUARIO:     '2.16.840.1.113883.3.989.2.1.1.4',   // CL4 — D.1.1.3 (código "3" = Hospital Record)
+      AUTOR_COMENTARIO:     '2.16.840.1.113883.3.989.2.1.1.21',  // CL21 — H.2/H.4/H.5 (1=sender, 2=reporter, 3=sourceReporter)
       PAIS:                 '1.0.3166.1.2.2',
       SEXO:                 '1.0.5218'   // D.5 administrativeGenderCode — [1] Masculino [2] Feminino
     },

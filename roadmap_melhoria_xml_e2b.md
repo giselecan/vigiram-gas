@@ -62,16 +62,20 @@ Todos os XPaths **confirmados** contra o exemplo oficial ICH.
 | ID | Elemento E2B | Fonte do dado | XPath / padrão | Card. | Exige MedDRA? | Status |
 |---|---|---|---|---|---|---|
 | F0-01 | `G.k.9.i.4` Reexposição | `caso.readministrado` | `outboundRelationship2 > observation code="31"` + `value CE` (CL16) | 0..1 | não | ✅ implementado 09/07/2026 — o dropdown `readministrado` já tem 4 opções ("Não" / "Sim" / "Sim. Sintomas reapareceram" / "Sim. Sintomas não reapareceram") que mapeiam 1:1 pros 4 códigos da CL16 via `SCHEMA.E2B.REEXPOSICAO_MAP`; resolve de brinde a lacuna do F2-02 |
-| F0-02 | `D.7.1.r.5` Comentários de história médica | `caso.historiaClinica` | free text 2000AN | 0..1 | **não** | pendente — sem o XPath/snippet exato do exemplo oficial ICH neste repo, não implementado (regra do projeto: XPath não confirmado não entra no XML) |
-| F0-03 | `F.r.2.1` + `F.r.3.4` Exames (nome + resultado livre) | `caso.exames` | padrão do "teste #2" do exemplo oficial | 0..1 | **não** | pendente — mesmo motivo do F0-02 |
+| F0-02 | `D.7.1.r.5` Comentários de história médica | `caso.historiaClinica` | free text 2000AN | 0..1 | **não** | ✅ implementado 09/07/2026 — confirmado contra `5_Reference Instances/00_ICH_ICSR_Reference_Instance_variation_v3_1.xml` (linhas 406-412 do `IG_Complete_Package_v1_11_1`) e contra o XSD (`PORR_MT049023UV.Observation`: `<code>` é 1..1 mesmo sem MedDRA → sai `nullFlavor="NI"`, comentário livre em `outboundRelationship2/observation code="10"`) |
+| F0-03 | `F.r.2.1` + `F.r.3.4` Exames (nome + resultado livre) | `caso.exames` | padrão do "teste #2" do exemplo oficial | 0..1 | **não** | ✅ implementado 09/07/2026 — confirmado no próprio `1-1_ExampleCase_literature_initial_v1_0.xml` (linhas 259-270), o "teste #2" (DLST) já mostra exatamente esse padrão sem MedDRA |
 | F0-04 | `E.i.3.1` Termo destacado | derivado de `caso.gravidade` | `code="37"` + CL10 → grave=`3`, não grave=`2` | 0..1 | não | ✅ implementado 09/07/2026 — `SCHEMA.E2B.TERMO_DESTACADO_MAP` (FATAL/GRAVE=3, MODERADA/LEVE=2) |
 | F0-05 | `E.i.9` País da reação | constante `BR` | `location > locatedEntity > locatedPlace` | 0..1 | não | ✅ já estava implementado no código (bloco dentro da `observation` da reação) |
-| F0-06 | `D.2.2a/b` Idade no início da reação | `nascimento` + `dataInicioReacao` | `code="3"` + `PQ unit="a"` | 0..1 | não | pendente — wrapper HL7 exato não confirmado neste repo |
+| F0-06 | `D.2.2a/b` Idade no início da reação | `nascimento` + `dataInicioReacao` | `code="3"` + `PQ unit="a"` | 0..1 | não | ✅ implementado 09/07/2026 — padrão confirmado linha a linha no `1-1_ExampleCase_literature_initial_v1_0.xml` (linhas 78-85) |
 | F0-07 | `C.2.r.2.4 / C.2.r.2.5` Cidade/UF do notificador | constantes `Sobral` / `CE` | `addr/city`, `addr/state` | 0..1 | não | ✅ já estava implementado no código (bloco C.2.r) |
-| F0-08 | `H.5.r.1a/b` Resumo em idioma nativo | mesma narrativa + `language="por"` | `code="36"` | 0..1 | não | pendente — wrapper HL7 exato não confirmado neste repo |
-| F0-09 | `G.k.3.3` Detentor / fabricante | `caso.laboratorio` | `holder > role > playingOrganization > name` | 0..1 | não | pendente — roadmap só dá os nomes dos elementos, não os atributos RIM (`classCode`/`typeCode`); arriscado implementar sem o exemplo oficial |
+| F0-08 | `H.5.r.1a/b` Resumo em idioma nativo | mesma narrativa + `language="por"` | `code="36"` | 0..1 | não | ✅ implementado 09/07/2026 — confirmado no `1-1_ExampleCase_literature_initial_v1_0.xml` (linhas 504-516); autor fixado em "sender" (mesma identidade de H.4) |
+| F0-09 | `G.k.3.3` Detentor / fabricante | `caso.laboratorio` | `holder > role > playingOrganization > name` | 0..1 | não | ✅ implementado 09/07/2026 — estrutura real é mais aninhada que o roadmap sugeria (`asManufacturedProduct > subjectOf > approval > holder > role > playingOrganization > name`, confirmada no exemplo oficial linhas 289-312); `id` (G.k.3.1) e `author` (G.k.3.2) do `<approval>` são opcionais no XSD (`POCP_MT050100UV.xsd`), por isso o bloco sai só com `<holder>` |
 
-> **Itens pendentes (F0-02, F0-03, F0-06, F0-08, F0-09):** para destravar, compartilhar o `1-1_ExampleCase_literature_initial_v1_0.xml` (ou o `IG_Complete_Package_v1_11_1`) citado nas fontes normativas — com o XPath exato, a implementação é rápida e seguindo o mesmo padrão dos itens já feitos.
+> **Fase 0 completa.** Todos os 9 itens confirmados contra o `IG_Complete_Package_v1_11_1` (exemplos oficiais + XSD) e validados formalmente com `xmllint --schema` contra `MCCI_IN200100UV01.xsd`.
+
+### Bug adicional encontrado e corrigido nesta passada
+
+`SCHEMA.E2B.CODESYS.FONTE_PRONTUARIO` e `SCHEMA.E2B.CODESYS.AUTOR_COMENTARIO` eram referenciados em `E2B.gs` (D.1.1.3 prontuário e autor de H.2/H.4) mas **nunca foram definidos** em `Schema.gs` — saíam como `codeSystem="undefined"` no XML gerado, silenciosamente, desde que esses blocos existem. Corrigido com os OIDs confirmados nas code lists oficiais: CL4 (`ich-medical-record-number-source-type`, `2.16.840.1.113883.3.989.2.1.1.4`) e CL21 (`ich-role-code`, `2.16.840.1.113883.3.989.2.1.1.21`).
 
 ### Destaque
 
