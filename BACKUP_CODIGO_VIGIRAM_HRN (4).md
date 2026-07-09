@@ -1671,7 +1671,7 @@ function _validarCasoParaE2B_(caso) {
   if (!caso.sexo || !SCHEMA.E2B.SEXO_MAP[String(caso.sexo).toUpperCase()]) {
     avisos.push('Sexo do paciente ausente ou não mapeado — D.5 sairá como nullFlavor="UNK".');
   }
-  if (!caso.loteLaboratorio) avisos.push('Lote/laboratório não preenchido — G.k.4.r.7 sairá em branco.');
+  if (!caso.lote) avisos.push('Lote não preenchido — G.k.4.r.7 sairá em branco.');
   // E.i.7 é 1..1 no padrão — sem desfecho mapeado, sai '6' (Unknown), não trava.
   if (!caso.desfecho || !SCHEMA.E2B.DESFECHO_MAP[String(caso.desfecho).toUpperCase()]) {
     avisos.push('Desfecho ausente ou sem mapeamento (SCHEMA.E2B.DESFECHO_MAP) — E.i.7 sairá como "6" (Desconhecido).');
@@ -1848,6 +1848,15 @@ function _montarXmlE2B_(caso, usuario, config) {
   // NÃO existe '6' na CL11, confirmado no IG_Complete_Package).
   const codigoDesfecho = SCHEMA.E2B.DESFECHO_MAP[String(caso.desfecho || '').toUpperCase()] || '0';
 
+  // F0-01 — G.k.9.i.4 Reexposição. 0..1: sem match (campo vazio ou "Sim"/"Não"
+  // fora do vocabulário do dropdown), o bloco correspondente é omitido no XML.
+  const codigoReexposicao = SCHEMA.E2B.REEXPOSICAO_MAP[String(caso.readministrado || '').toUpperCase()] || null;
+
+  // F0-04 — E.i.3.1 Termo destacado. caso.gravidade já foi validado contra
+  // GRAVIDADE_MAP em _validarCasoParaE2B_ (mesmas chaves), então sempre resolve;
+  // fallback '2' só por defesa extra.
+  const codigoTermoDestacado = SCHEMA.E2B.TERMO_DESTACADO_MAP[String(caso.gravidade).toUpperCase()] || '2';
+
   // ── Lote A (XPath confirmado na instância de referência IG v1.11.1) ────────
   // D.1.1.3 Prontuário (nº registro hospitalar). Omitido se vazio ou 'N/I'
   // (default do getter em Firestore.gs). Envio ao VigiMed/ANVISA é finalidade
@@ -1874,7 +1883,7 @@ function _montarXmlE2B_(caso, usuario, config) {
                           .replace(/,/g, '.')
                           .replace(/[^0-9.]/g, '');
   const doseUnidade   = escaparHtml_(String(caso.doseUnidade || '').toLowerCase()) || 'mg';
-  const lote          = escaparHtml_(String(caso.loteLaboratorio || '').toUpperCase());
+  const lote          = escaparHtml_(String(caso.lote || '').toUpperCase());
 
   const naranjoScore    = _calcularScoreNaranjo_(caso.naranjoRespostas);
   const naranjoClasse   = escaparHtml_(String(caso.naranjo || 'DUVIDOSA').toUpperCase());
@@ -1910,6 +1919,31 @@ function _montarXmlE2B_(caso, usuario, config) {
     '                          <!-- E.i.7: Outcome of Reaction at Time of Last Observation -->\n' +
     '                        </observation>\n' +
     '                      </outboundRelationship2>';
+
+  // F0-04 — mesmo padrão estrutural de blocosGravidade/blocoDesfecho
+  // (outboundRelationship2 > observation dentro da observation da reação).
+  const blocoTermoDestacado =
+    '                      <outboundRelationship2 typeCode="PERT">\n' +
+    '                        <observation classCode="OBS" moodCode="EVN">\n' +
+    '                          <code code="37" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+    '                          <value xsi:type="CE" code="' + codigoTermoDestacado + '" codeSystem="' + SCHEMA.E2B.CODESYS.TERMO_DESTACADO + '"/>\n' +
+    '                          <!-- E.i.3.1: Term Highlighted by the Reporter -->\n' +
+    '                        </observation>\n' +
+    '                      </outboundRelationship2>';
+
+  // F0-01 — G.k.9.i.4. Estruturalmente análogo aos blocos acima, mas fica no
+  // substanceAdministration do medicamento (G.k), não na observation da
+  // reação (E.i) — ver ponto de inserção mais abaixo. 0..1: string vazia
+  // quando não há reexposição mapeada.
+  const blocoReexposicao = codigoReexposicao
+    ? '                          <outboundRelationship2 typeCode="PERT">\n' +
+      '                            <observation classCode="OBS" moodCode="EVN">\n' +
+      '                              <code code="31" codeSystem="' + SCHEMA.E2B.CODESYS.OBSERVACOES + '"/>\n' +
+      '                              <value xsi:type="CE" code="' + codigoReexposicao + '" codeSystem="' + SCHEMA.E2B.CODESYS.REEXPOSICAO + '"/>\n' +
+      '                              <!-- G.k.9.i.4: Did Reaction Recur on Readministration -->\n' +
+      '                            </observation>\n' +
+      '                          </outboundRelationship2>\n'
+    : '';
 
   return (
 '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -2000,6 +2034,7 @@ function _montarXmlE2B_(caso, usuario, config) {
 '                      </location>\n' +
 blocosGravidade + '\n' +
 blocoDesfecho + '\n' +
+blocoTermoDestacado + '\n' +
 '                    </observation>\n' +
 '                  </subjectOf2>\n' +
 '\n' +
@@ -2046,6 +2081,7 @@ blocoDesfecho + '\n' +
 '                              </consumable>\n' +
 '                            </substanceAdministration>\n' +
 '                          </outboundRelationship2>\n' +
+blocoReexposicao +
 '                        </substanceAdministration>\n' +
 '                      </component>\n' +
 '                    </organizer>\n' +
@@ -9695,6 +9731,8 @@ const SCHEMA = {
       ACAO_MEDICAMENTO:     '2.16.840.1.113883.3.989.2.1.1.15',
       CARACTERIZACAO_DROGA: '2.16.840.1.113883.3.989.2.1.1.13',
       DESFECHO:             '2.16.840.1.113883.3.989.2.1.1.11',
+      REEXPOSICAO:          '2.16.840.1.113883.3.989.2.1.1.16',  // CL16 — G.k.9.i.4
+      TERMO_DESTACADO:      '2.16.840.1.113883.3.989.2.1.1.10',  // CL10 — E.i.3.1
       PAIS:                 '1.0.3166.1.2.2',
       SEXO:                 '1.0.5218'   // D.5 administrativeGenderCode — [1] Masculino [2] Feminino
     },
@@ -9739,6 +9777,26 @@ const SCHEMA = {
       'TRANSFERÊNCIA EXTERNA':    '3',
       'ÓBITO':                    '5'  // Fatal
       // fallback '6' Unknown se valor não mapeado — ver validação em E2B.gs
+    },
+
+    // F0-01 (G.k.9.i.4 Reexposição, CL16) — espelha os 4 valores do dropdown
+    // DEFAULT_LISTAS.readministrado (Config.gs). Elemento 0..1: se
+    // caso.readministrado estiver vazio ou sem match, o bloco é omitido no XML
+    // (ver E2B.gs) em vez de forçar um código.
+    REEXPOSICAO_MAP: {
+      'NÃO':                                '4', // Não–N/A (sem reexposição)
+      'SIM':                                '3', // Sim–Desconhecido (reexposição feita, desfecho não detalhado)
+      'SIM. SINTOMAS REAPARECERAM':         '1', // Sim–Sim (reexposição feita, reação recorreu)
+      'SIM. SINTOMAS NÃO REAPARECERAM':     '2'  // Sim–Não (reexposição feita, reação não recorreu)
+    },
+
+    // F0-04 (E.i.3.1 Termo destacado pelo notificador, CL10) — derivado de
+    // caso.gravidade, mesmas chaves de GRAVIDADE_MAP. FATAL/GRAVE = destacado.
+    TERMO_DESTACADO_MAP: {
+      'FATAL':    '3',
+      'GRAVE':    '3',
+      'MODERADA': '2',
+      'LEVE':     '2'
     },
 
     // Espelha NARANJO_FAIXAS (js_investigacao.html) — replicado aqui pro

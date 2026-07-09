@@ -36,7 +36,7 @@ De **9 abas** do formulário do VigiMed, **4 chegam vazias ou incompletas** pela
 
 Não é melhoria; é conserto.
 
-### B-01 · `G.k.4.r.7` (Lote) nunca é emitido
+### B-01 · `G.k.4.r.7` (Lote) nunca é emitido ✅ CORRIGIDO (09/07/2026)
 
 - **Onde:** `E2b.gs`, `_montarXmlE2B_` e `_validarCasoParaE2B_`
 - **Sintoma:** o aviso *"Lote/laboratório não preenchido"* dispara em 100% dos casos, mesmo com o lote preenchido.
@@ -59,17 +59,19 @@ Não é melhoria; é conserto.
 Todos os dados **já existem** no VigiRAM ou são constantes/derivados. Só código.
 Todos os XPaths **confirmados** contra o exemplo oficial ICH.
 
-| ID | Elemento E2B | Fonte do dado | XPath / padrão | Card. | Exige MedDRA? |
-|---|---|---|---|---|---|
-| F0-01 | `G.k.9.i.4` Reexposição | `caso.readministrado` | `outboundRelationship2 > observation code="31"` + `value CE` (CL16) | 0..1 | não |
-| F0-02 | `D.7.1.r.5` Comentários de história médica | `caso.historiaClinica` | free text 2000AN | 0..1 | **não** |
-| F0-03 | `F.r.2.1` + `F.r.3.4` Exames (nome + resultado livre) | `caso.exames` | padrão do "teste #2" do exemplo oficial | 0..1 | **não** |
-| F0-04 | `E.i.3.1` Termo destacado | derivado de `caso.gravidade` | `code="37"` + CL10 → grave=`3`, não grave=`2` | 0..1 | não |
-| F0-05 | `E.i.9` País da reação | constante `BR` | `location > locatedEntity > locatedPlace` | 0..1 | não |
-| F0-06 | `D.2.2a/b` Idade no início da reação | `nascimento` + `dataInicioReacao` | `code="3"` + `PQ unit="a"` | 0..1 | não |
-| F0-07 | `C.2.r.2.4 / C.2.r.2.5` Cidade/UF do notificador | constantes `Sobral` / `CE` | `addr/city`, `addr/state` | 0..1 | não |
-| F0-08 | `H.5.r.1a/b` Resumo em idioma nativo | mesma narrativa + `language="por"` | `code="36"` | 0..1 | não |
-| F0-09 | `G.k.3.3` Detentor / fabricante | `caso.laboratorio` | `holder > role > playingOrganization > name` | 0..1 | não |
+| ID | Elemento E2B | Fonte do dado | XPath / padrão | Card. | Exige MedDRA? | Status |
+|---|---|---|---|---|---|---|
+| F0-01 | `G.k.9.i.4` Reexposição | `caso.readministrado` | `outboundRelationship2 > observation code="31"` + `value CE` (CL16) | 0..1 | não | ✅ implementado 09/07/2026 — o dropdown `readministrado` já tem 4 opções ("Não" / "Sim" / "Sim. Sintomas reapareceram" / "Sim. Sintomas não reapareceram") que mapeiam 1:1 pros 4 códigos da CL16 via `SCHEMA.E2B.REEXPOSICAO_MAP`; resolve de brinde a lacuna do F2-02 |
+| F0-02 | `D.7.1.r.5` Comentários de história médica | `caso.historiaClinica` | free text 2000AN | 0..1 | **não** | pendente — sem o XPath/snippet exato do exemplo oficial ICH neste repo, não implementado (regra do projeto: XPath não confirmado não entra no XML) |
+| F0-03 | `F.r.2.1` + `F.r.3.4` Exames (nome + resultado livre) | `caso.exames` | padrão do "teste #2" do exemplo oficial | 0..1 | **não** | pendente — mesmo motivo do F0-02 |
+| F0-04 | `E.i.3.1` Termo destacado | derivado de `caso.gravidade` | `code="37"` + CL10 → grave=`3`, não grave=`2` | 0..1 | não | ✅ implementado 09/07/2026 — `SCHEMA.E2B.TERMO_DESTACADO_MAP` (FATAL/GRAVE=3, MODERADA/LEVE=2) |
+| F0-05 | `E.i.9` País da reação | constante `BR` | `location > locatedEntity > locatedPlace` | 0..1 | não | ✅ já estava implementado no código (bloco dentro da `observation` da reação) |
+| F0-06 | `D.2.2a/b` Idade no início da reação | `nascimento` + `dataInicioReacao` | `code="3"` + `PQ unit="a"` | 0..1 | não | pendente — wrapper HL7 exato não confirmado neste repo |
+| F0-07 | `C.2.r.2.4 / C.2.r.2.5` Cidade/UF do notificador | constantes `Sobral` / `CE` | `addr/city`, `addr/state` | 0..1 | não | ✅ já estava implementado no código (bloco C.2.r) |
+| F0-08 | `H.5.r.1a/b` Resumo em idioma nativo | mesma narrativa + `language="por"` | `code="36"` | 0..1 | não | pendente — wrapper HL7 exato não confirmado neste repo |
+| F0-09 | `G.k.3.3` Detentor / fabricante | `caso.laboratorio` | `holder > role > playingOrganization > name` | 0..1 | não | pendente — roadmap só dá os nomes dos elementos, não os atributos RIM (`classCode`/`typeCode`); arriscado implementar sem o exemplo oficial |
+
+> **Itens pendentes (F0-02, F0-03, F0-06, F0-08, F0-09):** para destravar, compartilhar o `1-1_ExampleCase_literature_initial_v1_0.xml` (ou o `IG_Complete_Package_v1_11_1`) citado nas fontes normativas — com o XPath exato, a implementação é rápida e seguindo o mesmo padrão dos itens já feitos.
 
 ### Destaque
 
