@@ -30,11 +30,12 @@ const _SESSAO_TTL_SEG  = 21600; // 6h (máximo do GAS) — inalterado
 // LOGIN
 // ─────────────────────────────────────────────────────────────────────────────
 function autenticarUsuario(email, senha) {
+  const emailNormalizado = String(email || '').trim().toLowerCase();
   try {
-    const emailNormalizado = String(email || '').trim().toLowerCase();
     const usuario = fsGetDoc_(SCHEMA.FS.USUARIOS, emailNormalizado);
 
     if (!usuario) {
+      _registrarLogin_(emailNormalizado, false, 'Usuário não encontrado');
       return { sucesso: false, erro: 'Credenciais inválidas.' };
     }
 
@@ -42,9 +43,13 @@ function autenticarUsuario(email, senha) {
     const ativo   = String(usuario.ativo || '').trim().toUpperCase();
 
     const res = verificarSenha_(senha, senhaDb);
-    if (!res.ok) return { sucesso: false, erro: 'Credenciais inválidas.' };
+    if (!res.ok) {
+      _registrarLogin_(emailNormalizado, false, 'Senha incorreta');
+      return { sucesso: false, erro: 'Credenciais inválidas.' };
+    }
 
     if (ativo === 'NÃO' || ativo === 'NAO') {
+      _registrarLogin_(emailNormalizado, false, 'Usuário inativo');
       return { sucesso: false, erro: 'Usuário inativo. Contate o administrador.' };
     }
 
@@ -65,11 +70,17 @@ function autenticarUsuario(email, senha) {
     const perfil = String(usuario.perfil || 'FARMACEUTICO').trim().toUpperCase();
 
     CacheService.getScriptCache().put(_SESSAO_PREFIXO + token, emailNormalizado, _SESSAO_TTL_SEG);
+
+    // Log de login feito por ÚLTIMO, com o payload de sucesso já pronto para
+    // retorno — fsRegistrarLog_ é best-effort (try/catch próprio + fila de
+    // retry no Mirror.gs), então nunca atrasa/bloqueia a resposta do login.
+    _registrarLogin_(emailNormalizado, true, 'Login bem-sucedido');
     return { sucesso: true, token: token, nome: nome, perfil: perfil };
 
 } catch (erro) {
     const msg = String(erro && erro.message || erro);
     console.error('autenticarUsuario falhou:', msg, 'Stack:', erro && erro.stack);
+    _registrarLogin_(emailNormalizado, false, 'Erro: ' + msg);
 
     // Distingue falha de infraestrutura (Firestore/Service Account/config
     // ausente) de erro de negócio comum — evita expor stack cru ao usuário
@@ -81,6 +92,20 @@ function autenticarUsuario(email, senha) {
       };
     }
     return { sucesso: false, erro: 'Erro interno: ' + msg };
+  }
+}
+
+/**
+ * Log de tentativa de login (sucesso ou falha) — Firestore (fonte da
+ * verdade) + appendRow best-effort em Sheets (ver fsRegistrarLog_/Mirror.gs).
+ * Nunca lança: uma falha ao registrar o log não pode derrubar o login.
+ */
+function _registrarLogin_(email, sucesso, detalhe) {
+  try {
+    fsRegistrarLog_(sucesso ? 'LOGIN_SUCESSO' : 'LOGIN_FALHA', 'N/A',
+      (email || 'e-mail não informado') + ' — ' + detalhe);
+  } catch (e) {
+    console.error('_registrarLogin_: falha ao registrar log de login — ' + e.message);
   }
 }
 

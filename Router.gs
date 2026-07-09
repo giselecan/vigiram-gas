@@ -24,7 +24,14 @@ function doPost(e) {
         throw new Error(`Ação POST não reconhecida ou ausente: ${acao}`);
     }
   } catch (erro) {
-    return createJsonResponse({ status: 'erro', mensagem: erro.toString() });
+    // Resposta montada ANTES do log — se o log (Firestore/Sheets) demorar
+    // ou falhar, o payload de erro para o robô PowerShell já está pronto.
+    const resposta = createJsonResponse({ status: 'erro', mensagem: erro.toString() });
+    try {
+      fsRegistrarLog_('ERRO_DOPOST', 'N/A',
+        String(e && e.parameter && e.parameter.action) + ' — ' + erro.toString());
+    } catch (e2) { /* best-effort — nunca bloqueia a resposta */ }
+    return resposta;
   }
 }
 
@@ -58,6 +65,11 @@ function doGet(e) {
     return htmlIndex;
 
   } catch (erro) {
-    return createJsonResponse({ erro: erro.toString() });
+    const resposta = createJsonResponse({ erro: erro.toString() });
+    try {
+      fsRegistrarLog_('ERRO_DOGET', 'N/A',
+        String(e && e.parameter && (e.parameter.action || e.parameter.page)) + ' — ' + erro.toString());
+    } catch (e2) { /* best-effort — nunca bloqueia a resposta */ }
+    return resposta;
   }
 }

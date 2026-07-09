@@ -7,7 +7,8 @@
  *   3. migrarListasParaFirestore(dryRun)
  *   4. migrarNaranjoParaFirestore(dryRun)
  *   5. migrarUsuariosParaFirestore(dryRun)
- *   6. migrarCasosParaFirestore(dryRun)   ← NÚCLEO, rodar por último
+ *   6. migrarGatilhosParaFirestore(dryRun) — OPCIONAL (Fase 9), DB_Antidotos → gatilhos
+ *   7. migrarCasosParaFirestore(dryRun)   ← NÚCLEO, rodar por último
  *
  * PADRÃO (idêntico ao já usado em migrarSenhasParaHash / migrarSchemaNotificador_v1):
  *   - dryRun=true (default): NÃO grava nada, só relata no Logger o que faria.
@@ -347,6 +348,50 @@ function migrarCasosParaFirestore(dryRun, continuarDe) {
   );
 
   return { migrados: migrados, pulados: pulados, simulado: simular, concluido: concluido, proximaLinha: concluido ? null : fimLinha + 1 };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6) DB_Antidotos → coleção gatilhos (Fase 9 — Firestore como Single Source
+//    of Truth). MIGRAÇÃO OPCIONAL, standalone (não entra em
+//    migrarTudoBaixoRisco): rode UMA VEZ antes ou logo depois do deploy da
+//    Fase 9, para que listarGatilhos()/handleGetTriggers() (agora só-Firestore)
+//    já encontrem os medicamentos-gatilho que estavam em DB_Antidotos.
+//    Idempotente — fsSetDoc_ faz upsert, rodar de novo não duplica.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function migrarGatilhosParaFirestore(dryRun) {
+  const simular = dryRun !== false;
+  const plan = getSheet_(SCHEMA.ABAS.ANTIDOTOS);
+  if (!plan) {
+    Logger.log('migrarGatilhosParaFirestore: aba DB_Antidotos não existe, nada a migrar.');
+    return { migrados: 0, simulado: simular };
+  }
+
+  const dados = plan.getDataRange().getValues();
+  let migrados = 0;
+
+  for (let i = 1; i < dados.length; i++) {
+    const medicamento = String(dados[i][0] || '').trim().toUpperCase();
+    if (!medicamento) continue;
+    // Mesma regra de "ativo" do handleGetTriggers original: coluna D ausente == ativo.
+    const ativo = dados[i][3] != null ? !!dados[i][3] : true;
+    const id = medicamento.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+    if (!id) continue;
+
+    if (simular) {
+      Logger.log('Migraria gatilhos/%s → { medicamento: "%s", ativo: %s }', id, medicamento, ativo);
+    } else {
+      fsSetDoc_(SCHEMA.FS.GATILHOS, id, { medicamento: medicamento, ativo: ativo });
+    }
+    migrados++;
+  }
+
+  Logger.log('%s — DB_Antidotos: %s gatilho(s) migrado(s)', simular ? 'DRY-RUN' : 'APLICADO', migrados);
+  return { migrados: migrados, simulado: simular };
+}
+
+function _aplicarMigracaoGatilhos() {
+  migrarGatilhosParaFirestore(false);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

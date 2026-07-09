@@ -354,7 +354,7 @@ function salvarDemandaEspontanea(formDados) {
     };
 
     fsSetDoc_(SCHEMA.FS.CASOS, idCaso, objetoCaso);
-    espelharCasoNoSheets_(idCaso, objetoCaso, 'INSERT');
+    espelharCasoNoSheets_(idCaso, objetoCaso, 'CRIACAO');
     fsRegistrarLog_('NOTIFICACAO_ESPONTANEA', idCaso, `${setor} / ${medicamento}`);
     invalidarCasosCache_(); // P1.1 — novo caso precisa aparecer na próxima leitura
 
@@ -412,7 +412,11 @@ function registrarTriagem(dados, token) {
         return true;
       });
 
-      espelharCasoNoSheets_(dados.idCaso, null, 'UPDATE');
+      // FASE 9: triagem é rascunho/estado intermediário — só o Firestore
+      // (fonte única) é tocado aqui. O Sheets (append-only) só recebe uma
+      // linha de backup na CRIAÇÃO do caso (Ingest.gs/salvarDemandaEspontanea)
+      // e no FECHAMENTO da investigação (registrarInvestigacao), nunca em
+      // passos intermediários — ver Mirror.gs.
       invalidarCasosCache_(); // P1.1
 
       // Bug corrigido: a versão anterior chamava fsRegistrarLog_ DUAS vezes
@@ -521,7 +525,6 @@ function registrarInvestigacao(dados, token) {
         return true;
       });
 
-      espelharCasoNoSheets_(dados.idCaso, null, 'UPDATE');
       invalidarCasosCache_(); // P1.1
       fsRegistrarLog_(
         dados.encerrar ? 'INVESTIGACAO_FINALIZADA' : 'INVESTIGACAO_RASCUNHO',
@@ -530,7 +533,20 @@ function registrarInvestigacao(dados, token) {
       );
 
       const docAtualizado = fsGetDoc_(SCHEMA.FS.CASOS, dados.idCaso);
-      return _mapearCasoResumo_(docAtualizado);
+      const resultado      = _mapearCasoResumo_(docAtualizado);
+
+      // FASE 9 — Sheets é append-only, "backup histórico de casos
+      // investigados": só grava uma linha NOVA (nunca sobrescreve) quando a
+      // investigação é de fato FINALIZADA (encerrar=true), nunca em
+      // rascunho. Feito por ÚLTIMO, com o payload de retorno já pronto em
+      // `resultado` — espelharCasoNoSheets_ tem seu próprio try/catch e, se
+      // o Sheets falhar/demorar, cai na fila de retry (Mirror.gs) em vez de
+      // atrasar ou quebrar o retorno ao frontend.
+      if (novoStatus === SCHEMA.STATUS.CONCLUIDO) {
+        espelharCasoNoSheets_(dados.idCaso, docAtualizado, 'FECHAMENTO');
+      }
+
+      return resultado;
 
     } catch (erro) {
       throw new Error(`Erro ao salvar investigação: ${erro.message}`);
@@ -562,7 +578,10 @@ function reabrirInvestigacao(idCaso, token) {
         return true;
       });
 
-      espelharCasoNoSheets_(idLimpo, null, 'UPDATE');
+      // FASE 9: reabertura é uma correção de estado no Firestore (fonte
+      // única) — não gera nova linha de backup no Sheets (append-only só
+      // registra criação e fechamento). A auditoria da reabertura já fica
+      // registrada via fsRegistrarLog_ abaixo.
       invalidarCasosCache_();
       fsRegistrarLog_('CASO_REABERTO', idLimpo, 'Retornado para investigação pelo farmacêutico');
 
@@ -600,7 +619,9 @@ function registrarImportacaoVigimed(dados, token) {
         return true;
       });
 
-      espelharCasoNoSheets_(idLimpo, null, 'UPDATE');
+      // FASE 9: registro do nº/data VigiMed é um complemento pós-fechamento
+      // no Firestore — não gera nova linha de backup no Sheets (o carimbo
+      // definitivo do fechamento já foi gravado por registrarInvestigacao).
       invalidarCasosCache_();
       fsRegistrarLog_('VIGIMED_IMPORTADO', idLimpo, dados.numVigimed || '');
 

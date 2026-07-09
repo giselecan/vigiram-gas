@@ -243,7 +243,11 @@ function _prepararIdsE2B_(idCaso, caso) {
     return true;
   });
 
-  espelharCasoNoSheets_(idCaso, null, 'UPDATE');
+  // FASE 9: atribuição de IDs E2B é um detalhe técnico interno no Firestore
+  // (fonte única) — o caso já foi CONCLUÍDO antes de chegar aqui e já tem
+  // sua linha de backup no Sheets (registrarInvestigacao). Não gera nova
+  // linha; a exportação em si já é auditada via fsRegistrarLog_('E2B_EXPORTADO', ...)
+  // logo abaixo, em gerarXmlE2B.
   invalidarCasosCache_();
 
   return novo;
