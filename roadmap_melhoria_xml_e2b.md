@@ -90,6 +90,18 @@ com custo zero de licenciamento.
 
 ## 🧪 Fase 1 — Investigação da causalidade (Naranjo não está importando)
 
+> **Status (09/07/2026): Rodada A implementada em código, aguardando teste real no VigiFlow.**
+> `E2B.gs` já gera o XML com `methodCode`="Naranjo" (literal), `value ST` em Title Case
+> ("Provável") e `author` codificado via CL21 (`code="1"`) — mudança marcada como
+> **EXPERIMENTAL** no docstring do arquivo. O score do Naranjo migrou para a narrativa
+> (`H.1`/`H.5`, marcador "NARANJO: ESCORE N"). Validado formalmente com `xmllint --schema`
+> contra o XSD oficial do ICH — estruturalmente correto, mas isso **não** confirma que o
+> VigiMed vai aceitar; só o AckLog real decide. **Próximo passo é seu**: gerar o XML de um
+> caso real (ou de teste) pelo VigiRAM, importar em "Não validado" no VigiFlow, e checar se
+> a matriz de causalidade aparece. Reporte o resultado para decidirmos entre confirmar H2/H3
+> (fica definitivo) ou partir para a Rodada B (H1 — colar 1 código LLT manualmente em
+> `E.i.2.1b` para testar se a reação órfã é a causa raiz).
+
 > **Fato confirmado pelo usuário:** as linhas de causalidade que aparecem no PDF do
 > VigiFlow foram **todas preenchidas manualmente**. O bloco `G.k.9.i.2.r` do XML
 > **não está sendo importado**.
