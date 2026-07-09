@@ -6,18 +6,20 @@
  * getConfig() releia imediatamente na próxima chamada do frontend.
  *
  * Funções expostas ao frontend (google.script.run):
- *   salvarConfigGeral(dados, token)   → { sucesso, mensagem }
- *   salvarSetores(setores, token)     → { sucesso, mensagem }
- *   salvarListas(listas, token)       → { sucesso, mensagem }
- *   salvarGatilhos(gatilhos, token)   → { sucesso, mensagem }
- *   listarGatilhos(token)             → Array<{medicamento}>
+ *   salvarConfigGeral(dados, token)          → { sucesso, mensagem }
+ *   salvarSetores(setores, token)            → { sucesso, mensagem }
+ *   salvarListas(listas, token)              → { sucesso, mensagem }
+ *   listarGatilhos(token)                    → Array<{id, medicamento, ativo, atualizadoEm}>
+ *   salvarGatilho(dados, token)              → { sucesso, mensagem }
+ *   alternarStatusGatilho(id, ativo, token)  → { sucesso, mensagem }
+ *   excluirGatilho(id, token)                → { sucesso, mensagem }
  *
  * FASE 9 — FIRESTORE COMO SINGLE SOURCE OF TRUTH:
- *   listarGatilhos/salvarGatilhos deixaram de ler/gravar em DB_Antidotos
- *   (Sheets) e passaram a operar 100% em Firestore (SCHEMA.FS.GATILHOS),
- *   com a mesma estratégia "upsert + delete-de-órfãos" de salvarSetores —
- *   nunca há uma janela em que a coleção fica vazia/parcial em caso de falha
- *   no meio da operação.
+ *   Gatilhos deixaram de ler/gravar em DB_Antidotos (Sheets) e passaram a
+ *   operar 100% em Firestore (SCHEMA.FS.GATILHOS). O CRUD é linha-a-linha
+ *   (cada medicamento é seu próprio documento, ID = nome em SNAKE_CASE),
+ *   para alimentar a tabela de dados do painel admin (toggle de status,
+ *   editar, excluir individualmente) sem depender mais de um "salvar tudo".
  *
  *   Toda função aqui trocou o log Sheets-only registrarLog_() (Audit.gs) por
  *   fsRegistrarLog_() (Firestore.gs) — grava a auditoria no Firestore (fonte
@@ -171,18 +173,27 @@ function salvarListas(listas, token) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Lê a lista de gatilhos direto da coleção Firestore SCHEMA.FS.GATILHOS.
- * DB_Antidotos (Sheets) não é mais lido aqui — ver handleGetTriggers()
- * em Ingest.gs para a rota equivalente consumida pelo robô PowerShell.
- * Retorna array de objetos { medicamento }.
+ * Lê a lista completa de gatilhos (ativos e inativos) direto da coleção
+ * Firestore SCHEMA.FS.GATILHOS, para alimentar a tabela de dados do painel
+ * admin. DB_Antidotos (Sheets) não é lido aqui — ver handleGetTriggers()
+ * em Ingest.gs para a rota equivalente consumida pelo robô PowerShell
+ * (que continua vendo só os ativos).
+ * Retorna array de objetos { id, medicamento, ativo, atualizadoEm }.
  */
 function listarGatilhos(token) {
   return comAutenticacao_(token, function () {
     try {
       const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
       return docs
-        .filter(function (d) { return d.medicamento && d.ativo !== false; })
-        .map(function (d) { return { medicamento: String(d.medicamento).trim().toUpperCase() }; })
+        .filter(function (d) { return d.medicamento && d._id; })
+        .map(function (d) {
+          return {
+            id:           d._id,
+            medicamento:  String(d.medicamento).trim().toUpperCase(),
+            ativo:        d.ativo !== false,
+            atualizadoEm: d.atualizadoEm || null
+          };
+        })
         .sort(function (a, b) { return a.medicamento.localeCompare(b.medicamento); });
     } catch (erro) {
       throw new Error('Não foi possível carregar os gatilhos do Firestore: ' + erro.message);
@@ -191,54 +202,84 @@ function listarGatilhos(token) {
 }
 
 /**
- * Substitui a lista de gatilhos na coleção Firestore SCHEMA.FS.GATILHOS.
- * Mesma estratégia "upsert + delete-de-órfãos" de salvarSetores — nunca há
- * uma janela em que a coleção fica vazia/parcial em caso de falha no meio
- * da operação. ID do documento = nome do medicamento em SNAKE_CASE.
- * @param {string[]} gatilhos — lista de nomes de medicamentos (strings)
+ * Cria ou edita um único gatilho (linha da tabela do painel admin).
+ * ID do documento = nome do medicamento em SNAKE_CASE. Se `dados.id` for
+ * informado e o nome mudar, o documento é recriado sob o novo ID e o
+ * antigo é removido (mesma lógica de "upsert + delete do órfão").
+ * @param {{id?: string, medicamento: string, ativo: boolean}} dados
  */
-function salvarGatilhos(gatilhos, token) {
+function salvarGatilho(dados, token) {
   return _comAdmin_(token, function () {
-    if (!Array.isArray(gatilhos)) {
-      return { sucesso: false, mensagem: 'Lista inválida.' };
+    const idOriginal = String((dados && dados.id) || '').trim();
+    const nome        = String((dados && dados.medicamento) || '').trim().toUpperCase();
+    const ativo        = !dados || dados.ativo !== false;
+
+    if (!nome) return { sucesso: false, mensagem: 'Informe o nome do medicamento.' };
+
+    const idNovo = nome.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+    if (!idNovo) return { sucesso: false, mensagem: 'Nome de medicamento inválido.' };
+
+    if (idNovo !== idOriginal) {
+      const existente = fsGetDoc_(SCHEMA.FS.GATILHOS, idNovo);
+      if (existente) return { sucesso: false, mensagem: 'Já existe um gatilho com esse nome.' };
     }
 
-    const nomesFiltrados = gatilhos
-      .map(function (g) { return String(g || '').trim().toUpperCase(); })
-      .filter(Boolean);
-
-    if (nomesFiltrados.length === 0) {
-      return { sucesso: false, mensagem: 'Adicione ao menos um medicamento.' };
-    }
-
-    // 1) Upsert — coleção nunca fica menor que o conjunto final durante a operação
-    const idsNovos = {};
-    let upserts = 0;
-    nomesFiltrados.forEach(function (nome) {
-      const id = nome.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
-      if (!id) return;
-      idsNovos[id] = true;
-      fsSetDoc_(SCHEMA.FS.GATILHOS, id, { medicamento: nome, ativo: true });
-      upserts++;
+    fsSetDoc_(SCHEMA.FS.GATILHOS, idNovo, {
+      medicamento:  nome,
+      ativo:        ativo,
+      atualizadoEm: new Date()
     });
 
-    if (upserts === 0) {
-      return { sucesso: false, mensagem: 'Nenhum medicamento válido na lista.' };
+    if (idOriginal && idOriginal !== idNovo) {
+      fsDeleteDoc_(SCHEMA.FS.GATILHOS, idOriginal);
     }
 
-    // 2) Delete só dos órfãos (IDs que saíram da lista)
-    let removidos = 0;
-    const existentes = fsListarTodos_(SCHEMA.FS.GATILHOS);
-    existentes.forEach(function (doc) {
-      if (doc._id && !idsNovos[doc._id]) {
-        fsDeleteDoc_(SCHEMA.FS.GATILHOS, doc._id);
-        removidos++;
-      }
-    });
+    fsRegistrarLog_(idOriginal ? 'GATILHO_ATUALIZADO' : 'GATILHO_CRIADO', 'N/A',
+      nome + ' | Por: ' + __emailSessaoAtual);
 
-    fsRegistrarLog_('GATILHOS_ATUALIZADOS', 'N/A',
-      upserts + ' gatilho(s) salvos, ' + removidos + ' removido(s) | Por: ' + __emailSessaoAtual);
+    return { sucesso: true, mensagem: 'Gatilho "' + nome + '" salvo com sucesso.' };
+  });
+}
 
-    return { sucesso: true, mensagem: upserts + ' gatilho(s) salvo(s) com sucesso.' };
+/**
+ * Alterna o status ativo/inativo de um gatilho (toggle switch da tabela).
+ * @param {string} id - ID do documento (nome em SNAKE_CASE)
+ * @param {boolean} ativo
+ */
+function alternarStatusGatilho(id, ativo, token) {
+  return _comAdmin_(token, function () {
+    const docId = String(id || '').trim();
+    if (!docId) return { sucesso: false, mensagem: 'Gatilho inválido.' };
+
+    const existente = fsGetDoc_(SCHEMA.FS.GATILHOS, docId);
+    if (!existente) return { sucesso: false, mensagem: 'Gatilho não encontrado.' };
+
+    fsUpdateDoc_(SCHEMA.FS.GATILHOS, docId, { ativo: !!ativo, atualizadoEm: new Date() });
+
+    fsRegistrarLog_(ativo ? 'GATILHO_ATIVADO' : 'GATILHO_DESATIVADO', 'N/A',
+      (existente.medicamento || docId) + ' | Por: ' + __emailSessaoAtual);
+
+    return { sucesso: true, mensagem: 'Status atualizado.' };
+  });
+}
+
+/**
+ * Exclui definitivamente um gatilho.
+ * @param {string} id - ID do documento (nome em SNAKE_CASE)
+ */
+function excluirGatilho(id, token) {
+  return _comAdmin_(token, function () {
+    const docId = String(id || '').trim();
+    if (!docId) return { sucesso: false, mensagem: 'Gatilho inválido.' };
+
+    const existente = fsGetDoc_(SCHEMA.FS.GATILHOS, docId);
+    if (!existente) return { sucesso: false, mensagem: 'Gatilho não encontrado.' };
+
+    fsDeleteDoc_(SCHEMA.FS.GATILHOS, docId);
+
+    fsRegistrarLog_('GATILHO_EXCLUIDO', 'N/A',
+      (existente.medicamento || docId) + ' | Por: ' + __emailSessaoAtual);
+
+    return { sucesso: true, mensagem: 'Gatilho excluído com sucesso.' };
   });
 }

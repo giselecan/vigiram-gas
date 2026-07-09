@@ -13,6 +13,7 @@
  *   criarUsuario(dados, token)                   → { sucesso, mensagem }
  *   trocarSenhaUsuario(email, novaSenha, token)  → { sucesso, mensagem }
  *   alterarStatusUsuario(email, ativo, token)    → { sucesso, mensagem }
+ *   listarLogsAuditoria(token, limite)           → array de { data, usuario, acao, idCaso, detalhe }
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,5 +159,34 @@ function alterarStatusUsuario(email, ativo, token) {
       `Alterado por ${__emailSessaoAtual}`
     );
     return { sucesso: true, mensagem: `Usuário "${emailAlvo}" ${ativo ? 'ativado' : 'desativado'}.` };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGS E AUDITORIA (somente leitura)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lista os registros mais recentes da coleção Firestore SCHEMA.FS.LOG
+ * (trilha de auditoria), ordenados do mais novo para o mais antigo.
+ * @param {number=} limite - máximo de registros retornados (padrão 200, teto 500)
+ * @returns {Array<{data, usuario, acao, idCaso, detalhe}>}
+ */
+function listarLogsAuditoria(token, limite) {
+  return _comAdmin_(token, function () {
+    const max = Math.min(Number(limite) || 200, 500);
+    const docs = fsListarTodos_(SCHEMA.FS.LOG);
+    return docs
+      .map(function (d) {
+        return {
+          data:    d.data || null,
+          usuario: String(d.usuario || '').trim(),
+          acao:    String(d.acao    || '').trim(),
+          idCaso:  String(d.idCaso  || '').trim(),
+          detalhe: String(d.detalhe || '').trim()
+        };
+      })
+      .sort(function (a, b) { return new Date(b.data) - new Date(a.data); })
+      .slice(0, max);
   });
 }
