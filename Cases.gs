@@ -457,6 +457,11 @@ function registrarInvestigacao(dados, token) {
 
         fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, dados.idCaso, {
           status: novoStatus,
+          // Farmacêutico pode corrigir o nome do medicamento suspeito caso o
+          // notificador tenha digitado errado na notificação original.
+          medicamento: dados.medicamento
+            ? String(dados.medicamento).toUpperCase().trim()
+            : caso.medicamento,
           historiaClinica: dados.historiaClinica,
           relato: dados.relatoEvento,
           exames: dados.exames,

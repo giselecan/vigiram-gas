@@ -34,21 +34,21 @@ const DEFAULT_LISTAS = {
   desfecho:         ["PROLONGADO INTERNAÇÃO", "PACIENTE RECUPERADO", "TRANSFERÊNCIA INTERNA",
                      "ALTA", "TRANSFERÊNCIA EXTERNA", "ÓBITO"],
   conclusao:        ["CONFIRMADO", "NÃO RELACIONADO AO MEDICAMENTO", "PROVÁVEL"],
-  motivo_descarte:  ["Uso Profilático / Rotina", "Erro de Prescrição", "Evolução da Doença", "Outros"],
-  readministrado:   ["Não", "Sim", "Sim. Sintomas reapareceram", "Sim. Sintomas não reapareceram"],
+  motivo_descarte:  ["USO PROFILÁTICO / ROTINA", "ERRO DE PRESCRIÇÃO", "EVOLUÇÃO DA DOENÇA", "OUTROS"],
+  readministrado:   ["NÃO", "SIM", "SIM. SINTOMAS REAPARECERAM", "SIM. SINTOMAS NÃO REAPARECERAM"],
   evolucao:         ["NENHUMA CONDUTA REALIZADA", "SINTOMAS DESAPARECERAM",
                      "MELHORA DOS SINTOMAS", "SINTOMAS NÃO DESAPARECERAM"],
   // ── Fase 2 (roadmap) — campos novos da tela de investigação ──────────────
   // Rótulos aqui precisam bater (após toUpperCase) com as chaves dos mapas
   // SCHEMA.E2B.*_MAP correspondentes — ver Schema.gs.
-  acao_adotada:               ["Retirada do medicamento", "Redução da dose", "Aumento da dose",
-                               "Sem alteração da dose", "Desconhecido", "Não aplicável"],
-  relacao_medicamento_evento: ["Suspeito", "Concomitante", "Interagente", "Medicamento não administrado"],
-  problemas_adicionais:       ["Falsificação", "Superdosagem", "Medicamento usado pelo pai",
-                               "Uso após validade", "Lote testado — dentro das especificações",
-                               "Lote testado — fora das especificações", "Erro de medicação",
-                               "Uso indevido", "Abuso", "Exposição ocupacional", "Uso off-label"],
-  unidade_intervalo:          ["Hora(s)", "Dia(s)", "Semana(s)", "Mês(es)", "Ano(s)"]
+  acao_adotada:               ["RETIRADA DO MEDICAMENTO", "REDUÇÃO DA DOSE", "AUMENTO DA DOSE",
+                               "SEM ALTERAÇÃO DA DOSE", "DESCONHECIDO", "NÃO APLICÁVEL"],
+  relacao_medicamento_evento: ["SUSPEITO", "CONCOMITANTE", "INTERAGENTE", "MEDICAMENTO NÃO ADMINISTRADO"],
+  problemas_adicionais:       ["FALSIFICAÇÃO", "SUPERDOSAGEM", "MEDICAMENTO USADO PELO PAI",
+                               "USO APÓS VALIDADE", "LOTE TESTADO — DENTRO DAS ESPECIFICAÇÕES",
+                               "LOTE TESTADO — FORA DAS ESPECIFICAÇÕES", "ERRO DE MEDICAÇÃO",
+                               "USO INDEVIDO", "ABUSO", "EXPOSIÇÃO OCUPACIONAL", "USO OFF-LABEL"],
+  unidade_intervalo:          ["HORA(S)", "DIA(S)", "SEMANA(S)", "MÊS(ES)", "ANO(S)"]
 };
 
 const DEFAULT_NARANJO = [

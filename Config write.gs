@@ -127,7 +127,10 @@ function salvarListas(listas, token) {
     }
 
     const camposValidos = ['gravidade', 'desfecho', 'conclusao',
-                           'motivo_descarte', 'readministrado', 'evolucao'];
+                           'motivo_descarte', 'readministrado', 'evolucao',
+                           // Fase 2 (roadmap) — dropdowns novos da tela de investigação
+                           'acao_adotada', 'relacao_medicamento_evento',
+                           'problemas_adicionais', 'unidade_intervalo'];
 
     let salvos = 0;
     Object.entries(listas).forEach(function (par) {
