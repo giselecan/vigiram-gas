@@ -1,6 +1,82 @@
+<style>
+  /* ---------------------------------------------------------
+     NARANJO — Segmented Controls (Não Sei / Sim / Não)
+     v2.4: substitui os antigos <select> por grupos de botões
+     estilo toggle — 1 clique por pergunta, pontuação visível.
+  --------------------------------------------------------- */
+  .naranjo-toggle-group {
+    display: inline-flex;
+    border: 1px solid #e5e7eb;
+    border-radius: 9999px;
+    overflow: hidden;
+    background: #fff;
+    flex-shrink: 0;
+  }
+  .naranjo-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #6b7280;
+    background: transparent;
+    border: none;
+    border-right: 1px solid #e5e7eb;
+    cursor: pointer;
+    transition: background-color .15s, color .15s;
+    white-space: nowrap;
+  }
+  .naranjo-btn:last-child { border-right: none; }
+  .naranjo-btn:hover:not(:disabled) { background: #f3f4f6; }
+  .naranjo-btn:disabled { cursor: not-allowed; opacity: .6; }
+  .naranjo-btn .naranjo-btn-score { font-weight: 400; opacity: .75; font-size: 10px; }
+
+  .naranjo-btn[data-tipo="ns"].naranjo-btn-ativo  { background: #9ca3af; color: #fff; }
+  .naranjo-btn[data-tipo="sim"].naranjo-btn-ativo { background: #0d9488; color: #fff; }
+  .naranjo-btn[data-tipo="nao"].naranjo-btn-ativo { background: #475569; color: #fff; }
+
+  /* ---------------------------------------------------------
+     PROBLEMAS ADICIONAIS — chips multi-select
+  --------------------------------------------------------- */
+  .chip-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #374151;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: background-color .15s, border-color .15s, color .15s;
+    user-select: none;
+  }
+  .chip-toggle:hover { border-color: #0d9488; }
+  .chip-toggle input[type="checkbox"] { display: none; }
+  .chip-toggle.chip-ativo { background: #ccfbf1; border-color: #0d9488; color: #0f766e; }
+</style>
+
 <script>
 // =========================================================
-// js_investigacao.html — v2.3
+// js_investigacao.html — v2.4
+//
+// v2.4: Refatoração de UX da aba de investigação farmacêutica.
+//   - Naranjo: <select> substituídos por segmented controls
+//     (botões NS/Sim/Não). Estado "respondido" agora é rastreado
+//     via dataset.respondida no <input type="hidden"> associado,
+//     em vez de comparar o valor numérico com '0' — isso corrigia
+//     o bug em que uma resposta "Não" (que muitas vezes vale 0) era
+//     contada como pendente de preenchimento.
+//   - Problemas Adicionais: checkboxes agora renderizados como
+//     chips (ver _popularCheckboxes em js_core.html).
+//   - Formulário reorganizado em 4 seções (ver index.html):
+//     1. Perfil do Paciente e História Clínica
+//     2. Medicamento Suspeito, Posologia e Conduta
+//     3. Avaliação de Causalidade (Naranjo)
+//     4. Desfecho e Encerramento do Caso
 //
 // P2: casosGlobais agora contém apenas o RESUMO de cada caso (ver
 // Cases.gs). abrirInvestigacao() foi dividida em duas etapas:
@@ -105,6 +181,8 @@ function construirNaranjo() {
   if (!container) return;
   container.innerHTML = '';
 
+  const fmt = v => (v > 0 ? `+${v}` : `${v}`);
+
   NARANJO_CONFIG.forEach(q => {
     const row = document.createElement('div');
     row.className = 'naranjo-row flex items-center justify-between py-2 border-b border-gray-100 gap-3';
@@ -114,14 +192,63 @@ function construirNaranjo() {
         <span class="font-bold text-gray-400 mr-1">${q.id}.</span>${escapeHtml(q.pergunta)}
         <i class="fas fa-info-circle text-gray-300 ml-1 text-[10px]"></i>
       </p>
-      <select class="naranjo-select text-xs border rounded-lg px-2 py-1.5 min-w-[110px]
-        focus:ring-2 focus:ring-blue-400 transition" onchange="calcularNaranjo()">
-        <option value="${q.ns.valor}">${escapeHtml(q.ns.label)}</option>
-        <option value="${q.sim.valor}">${escapeHtml(q.sim.label)}</option>
-        <option value="${q.nao.valor}">${escapeHtml(q.nao.label)}</option>
-      </select>`;
+      <div class="naranjo-toggle-group" data-qid="${q.id}">
+        <button type="button" class="naranjo-btn" data-tipo="ns"
+                onclick="selecionarNaranjo(${q.id}, 'ns')">NS <span class="naranjo-btn-score">(${fmt(q.ns.valor)})</span></button>
+        <button type="button" class="naranjo-btn" data-tipo="sim"
+                onclick="selecionarNaranjo(${q.id}, 'sim')">Sim <span class="naranjo-btn-score">(${fmt(q.sim.valor)})</span></button>
+        <button type="button" class="naranjo-btn" data-tipo="nao"
+                onclick="selecionarNaranjo(${q.id}, 'nao')">Não <span class="naranjo-btn-score">(${fmt(q.nao.valor)})</span></button>
+      </div>
+      <input type="hidden" class="naranjo-select" id="naranjoResp${q.id}" data-qid="${q.id}" value="">`;
     container.appendChild(row);
   });
+}
+
+/**
+ * Clique em um dos botões do segmented control (NS/Sim/Não).
+ * Marca a pergunta como respondida (dataset.respondida = '1') —
+ * distinto de "nenhum valor selecionado ainda" (dataset ausente).
+ */
+function selecionarNaranjo(qid, tipo) {
+  const q = NARANJO_CONFIG.find(x => x.id === qid);
+  const input = document.getElementById('naranjoResp' + qid);
+  if (!q || !input) return;
+  input.value = q[tipo].valor;
+  input.dataset.respondida = '1';
+  input.dataset.tipo = tipo;
+  _marcarBotaoNaranjoAtivo(qid, tipo);
+  calcularNaranjo();
+}
+
+function _marcarBotaoNaranjoAtivo(qid, tipo) {
+  const grupo = document.querySelector(`.naranjo-toggle-group[data-qid="${qid}"]`);
+  if (!grupo) return;
+  grupo.querySelectorAll('.naranjo-btn').forEach(b => {
+    b.classList.toggle('naranjo-btn-ativo', b.dataset.tipo === tipo);
+  });
+}
+
+/** Restaura uma resposta persistida (score numérico) para o botão correspondente. */
+function _restaurarNaranjoResposta(qid, valorStr) {
+  const q = NARANJO_CONFIG.find(x => x.id === qid);
+  const input = document.getElementById('naranjoResp' + qid);
+  if (!q || !input) return;
+  const valorNum = parseInt(valorStr, 10);
+  if (isNaN(valorNum)) {
+    input.value = '';
+    delete input.dataset.respondida;
+    delete input.dataset.tipo;
+    _marcarBotaoNaranjoAtivo(qid, null);
+    return;
+  }
+  // Mais de uma opção pode compartilhar o mesmo score (ex: NS e Não = 0);
+  // segue a mesma prioridade do <select> anterior (NS > Sim > Não).
+  const tipo = ['ns', 'sim', 'nao'].find(t => q[t].valor === valorNum) || 'ns';
+  input.value = valorNum;
+  input.dataset.respondida = '1';
+  input.dataset.tipo = tipo;
+  _marcarBotaoNaranjoAtivo(qid, tipo);
 }
 
 // ---------------------------------------------------------
@@ -179,6 +306,8 @@ function abrirInvestigacao(id) {
   document.getElementById('invSetor').innerText       = caso.setor;
   document.getElementById('invMedicamento').innerText = caso.medicamento;
   document.getElementById('invTipoBadge').innerText   = caso.tipo;
+  const elMedConfirmado = document.getElementById('invMedicamentoConfirmado');
+  if (elMedConfirmado) elMedConfirmado.innerText = caso.medicamento;
   document.getElementById('invDataEvento').innerText  = formatarDataExibicao(caso.data_evento) || '-';
   document.getElementById('invSubtitulo').textContent = `ID: ${caso.id} · ${caso.setor}`;
   _aplicarModoSomenteLeitura(caso.status === STATUS.CONCLUIDO);
@@ -244,7 +373,12 @@ function _limparFormularioInvestigacao() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
-  document.querySelectorAll('.naranjo-select').forEach(s => s.value = '0');
+  document.querySelectorAll('.naranjo-select').forEach(s => {
+    s.value = '';
+    delete s.dataset.respondida;
+    delete s.dataset.tipo;
+  });
+  document.querySelectorAll('.naranjo-btn').forEach(b => b.classList.remove('naranjo-btn-ativo'));
   calcularNaranjo();
   const bloco = document.getElementById('invBlocoNotificador');
   if (bloco) bloco.classList.add('hidden');
@@ -254,7 +388,11 @@ function _limparFormularioInvestigacao() {
   if (elGestante) elGestante.checked = false;
   const elLactante = document.getElementById('invLactante');
   if (elLactante) elLactante.checked = false;
-  document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]').forEach(c => c.checked = false);
+  document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]').forEach(c => {
+    c.checked = false;
+    const label = c.closest('label');
+    if (label) label.classList.remove('chip-ativo');
+  });
   const blocoGestante = document.getElementById('invBlocoGestante');
   if (blocoGestante) blocoGestante.classList.add('hidden');
   const blocoObito = document.getElementById('invBlocoObito');
@@ -315,7 +453,10 @@ function _preencherFormularioInvestigacao(caso) {
   if (elLactante) elLactante.checked = !!caso.lactante;
 
   document.querySelectorAll('#invProblemasAdicionais input[type="checkbox"]').forEach(c => {
-    c.checked = Array.isArray(caso.problemasAdicionais) && caso.problemasAdicionais.includes(c.value);
+    const marcado = Array.isArray(caso.problemasAdicionais) && caso.problemasAdicionais.includes(c.value);
+    c.checked = marcado;
+    const label = c.closest('label');
+    if (label) label.classList.toggle('chip-ativo', marcado);
   });
 
   // F2-13 — só mostra DUM/Gestante/Lactante se o sexo (ETL, não editável
@@ -345,9 +486,14 @@ function _preencherFormularioInvestigacao(caso) {
   const selects = document.querySelectorAll('.naranjo-select');
   if (caso.naranjoRespostas) {
     const resp = caso.naranjoRespostas.split('|');
-    selects.forEach((s, i) => { s.value = resp[i] !== undefined ? resp[i] : '0'; });
+    selects.forEach((s, i) => _restaurarNaranjoResposta(parseInt(s.dataset.qid, 10), resp[i]));
   } else {
-    selects.forEach(s => s.value = '0');
+    selects.forEach(s => {
+      s.value = '';
+      delete s.dataset.respondida;
+      delete s.dataset.tipo;
+    });
+    document.querySelectorAll('.naranjo-btn').forEach(b => b.classList.remove('naranjo-btn-ativo'));
   }
   calcularNaranjo();
 
@@ -432,6 +578,7 @@ function _aplicarModoSomenteLeitura(somenteLeitura) {
     });
   }
   document.querySelectorAll('.naranjo-select').forEach(s => s.disabled = somenteLeitura);
+  document.querySelectorAll('.naranjo-btn').forEach(b => b.disabled = somenteLeitura);
 
   const btnRascunho    = document.getElementById('btnRascunho');
   const btnFinalizar   = document.getElementById('btnFinalizar');
@@ -569,9 +716,13 @@ function atualizarProgresso() {
     if (el && el.value && el.value.trim()) preenchidos++;
   });
 
+  // BUG FIX: contar como respondida apenas quando um botão foi de fato
+  // clicado (dataset.respondida), não quando o valor numérico é '0' —
+  // "Não" é uma resposta válida em várias perguntas do Naranjo e também
+  // vale 0.
   let narRespondidas = 0;
   document.querySelectorAll('.naranjo-select').forEach(s => {
-    if (s.value !== '0') narRespondidas++;
+    if (s.dataset.respondida === '1') narRespondidas++;
   });
   if (narRespondidas >= 5) preenchidos = Math.min(preenchidos + 1, CAMPOS_PROGRESSO.length);
 
@@ -716,7 +867,7 @@ function enviarInvestigacao(finalizar) {
     const faltando = obrigatorios.filter(c => !document.getElementById(c.id).value);
 
     const narRespondidas = Array.from(document.querySelectorAll('.naranjo-select'))
-      .filter(s => s.value !== '0').length;
+      .filter(s => s.dataset.respondida === '1').length;
     if (narRespondidas < 10) {
       mostrarToast('Para finalizar, responda todas as 10 perguntas do Algoritmo de Naranjo.', 'erro');
       return;

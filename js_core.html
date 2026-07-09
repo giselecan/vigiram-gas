@@ -385,8 +385,10 @@ function _popularSelect(id, lista) {
 
 /**
  * F2-12 — popula um container de checkboxes (multi-select) a partir de
- * uma lista de rótulos. Preserva os itens já marcados (chamada de novo
- * a cada getConfig() não desmarca o que o farmacêutico já escolheu).
+ * uma lista de rótulos, renderizados como chips clicáveis (mais rápidos
+ * de preencher que uma lista de checkboxes tradicional). Preserva os
+ * itens já marcados (chamada de novo a cada getConfig() não desmarca o
+ * que o farmacêutico já escolheu).
  */
 function _popularCheckboxes(containerId, lista) {
   const el = document.getElementById(containerId);
@@ -399,9 +401,9 @@ function _popularCheckboxes(containerId, lista) {
     const id = containerId + '_' + i;
     const marcado = marcados.has(opt);
     el.innerHTML += `
-      <label for="${id}" class="flex items-center gap-1.5 cursor-pointer">
+      <label for="${id}" class="chip-toggle ${marcado ? 'chip-ativo' : ''}">
         <input type="checkbox" id="${id}" value="${escapeHtml(opt)}" ${marcado ? 'checked' : ''}
-               onchange="agendarAutosave()" class="w-3.5 h-3.5">
+               onchange="this.closest('label').classList.toggle('chip-ativo', this.checked); agendarAutosave()">
         ${escapeHtml(opt)}
       </label>`;
   });
