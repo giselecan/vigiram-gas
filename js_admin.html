@@ -1,14 +1,20 @@
 <script>
 // =========================================================
-// js_admin.html — v2.0
+// js_admin.html — v3.0
 //
-// Modal de Configurações do Sistema (perfil ADMIN).
+// Painel Administrativo (perfil ADMIN) — dashboard style.
 // Acessado via ícone de engrenagem na navbar.
-// Seções: Usuários, E-mails, SLA, Setores, Listas, Gatilhos
 //
-// Depende de: tokenSessao, mostrarToast, escapeHtml (js_core)
-// Backend: Admin.gs, Config_Write.gs
+// Arquitetura de navegação:
+//   Sidebar (4 abas) → Visão Geral | Gatilhos | Logs e Auditoria | Configurações
+//   "Configurações" abre uma sub-navegação em abas (pills) com as seções
+//   Usuários / E-mails de Alerta / SLA / Setores / Listas-Dropdowns.
+//
+// Depende de: tokenSessao, mostrarToast, escapeHtml, _gerarIniciais (js_core)
+// Backend: Admin.gs, Config.gs, Config_Write.gs
 // =========================================================
+
+let _gatCache = [];
 
 // ─────────────────────────────────────────────────────────
 // ABERTURA / FECHAMENTO DO MODAL PRINCIPAL
@@ -18,7 +24,8 @@ function abrirConfiguracoes() {
   if (!modal) { _criarModalConfig(); modal = document.getElementById('modalConfig'); }
   modal.classList.remove('hidden');
   modal.classList.add('flex');
-  _abrirSecaoConfig('usuarios');
+  _cfgAtualizarIdentidade();
+  _abrirSecaoTopo('visao_geral');
 }
 
 function fecharConfiguracoes() {
@@ -26,82 +33,422 @@ function fecharConfiguracoes() {
   if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
 }
 
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('modalConfig');
+    if (modal && modal.classList.contains('flex')) fecharConfiguracoes();
+  }
+});
+
 // ─────────────────────────────────────────────────────────
 // CRIAÇÃO DO MODAL (injetado uma vez no DOM)
 // ─────────────────────────────────────────────────────────
 function _criarModalConfig() {
   const modal = document.createElement('div');
   modal.id = 'modalConfig';
-  modal.className = 'fixed inset-0 bg-black/60 hidden items-center justify-center z-50 p-4';
+  modal.className = 'fixed inset-0 bg-black/60 hidden items-center justify-center z-50 p-0 sm:p-4';
   modal.innerHTML = `
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex overflow-hidden">
+    <div class="bg-white sm:rounded-2xl shadow-2xl w-full max-w-6xl h-full sm:h-[92vh] flex flex-col md:flex-row overflow-hidden relative">
 
       <!-- SIDEBAR DE NAVEGAÇÃO -->
-      <div class="w-52 bg-gray-900 flex flex-col flex-shrink-0">
-        <div class="p-5 border-b border-gray-700">
-          <div class="flex items-center gap-2">
-            <i class="fas fa-cog text-teal-400"></i>
-            <span class="text-white font-bold text-sm">Configurações</span>
+      <div class="bg-gray-900 flex-shrink-0 flex flex-row md:flex-col overflow-x-auto md:overflow-x-visible md:overflow-y-auto border-b md:border-b-0 md:border-r border-gray-800 md:w-56">
+        <div class="hidden md:flex items-center gap-2.5 p-5 border-b border-gray-700 flex-shrink-0">
+          <i class="fas fa-shield-halved text-teal-400"></i>
+          <div>
+            <p class="text-white font-bold text-sm leading-none">Painel Admin</p>
+            <p class="text-gray-400 text-[10px] mt-1">VigiRAM · Farmacovigilância</p>
           </div>
-          <p class="text-gray-400 text-[10px] mt-0.5">VigiRAM · Admin</p>
         </div>
-        <nav class="flex-1 p-3 space-y-1 overflow-y-auto">
-          ${_menuItem('usuarios',  'fa-users',         'Usuários')}
-          ${_menuItem('emails',    'fa-envelope',      'E-mails de Alerta')}
-          ${_menuItem('sla',       'fa-clock',         'SLA')}
-          ${_menuItem('setores',   'fa-hospital',      'Setores')}
-          ${_menuItem('listas',    'fa-list',          'Listas / Dropdowns')}
-          ${_menuItem('gatilhos',  'fa-pills',         'Gatilhos')}
+        <nav class="flex md:flex-col flex-1 p-2 md:p-3 gap-1 md:gap-1 md:space-y-1">
+          ${_menuItemTopo('visao_geral',   'fa-gauge-high',     'Visão Geral')}
+          ${_menuItemTopo('gatilhos',      'fa-pills',          'Gatilhos')}
+          ${_menuItemTopo('logs',          'fa-clipboard-list', 'Logs e Auditoria')}
+          ${_menuItemTopo('configuracoes', 'fa-gear',           'Configurações')}
         </nav>
-        <div class="p-3 border-t border-gray-700">
-          <button onclick="fecharConfiguracoes()"
-                  class="w-full text-xs text-gray-400 hover:text-white flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition">
-            <i class="fas fa-times-circle"></i> Fechar
-          </button>
-        </div>
       </div>
 
       <!-- ÁREA DE CONTEÚDO -->
-      <div class="flex-1 flex flex-col overflow-hidden">
-        <div id="cfgConteudo" class="flex-1 overflow-y-auto p-6 bg-gray-50"></div>
+      <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <!-- CABEÇALHO -->
+        <div class="flex items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-gray-200 bg-white flex-shrink-0">
+          <div class="min-w-0">
+            <h2 id="cfgTituloSecao" class="text-lg font-bold text-gray-800 truncate">Visão Geral</h2>
+            <p class="text-xs text-gray-400 hidden sm:block">Painel Administrativo · VigiRAM</p>
+          </div>
+          <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <div class="hidden sm:flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-full pl-1 pr-3 py-1">
+              <div id="cfgAvatarUsuario" class="w-6 h-6 rounded-full bg-teal-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">--</div>
+              <div class="leading-tight">
+                <p id="cfgNomeUsuario" class="text-xs font-bold text-gray-700">—</p>
+                <p id="cfgPerfilUsuario" class="text-[10px] text-gray-400 uppercase tracking-wide">Admin</p>
+              </div>
+            </div>
+            <button onclick="fecharConfiguracoes()"
+                    class="w-9 h-9 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-700 flex items-center justify-center transition"
+                    title="Fechar">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+        </div>
+
+        <div id="cfgConteudo" class="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50"></div>
       </div>
     </div>`;
+  modal.addEventListener('mousedown', e => { if (e.target === modal) fecharConfiguracoes(); });
   document.body.appendChild(modal);
 }
 
-function _menuItem(id, icon, label) {
-  return `<button id="cfgMenu_${id}" onclick="_abrirSecaoConfig('${id}')"
-    class="cfg-menu-item w-full text-left text-xs text-gray-400 hover:text-white flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-700 transition font-medium">
-    <i class="fas ${icon} w-4 text-center"></i> ${label}
+function _menuItemTopo(id, icon, label) {
+  return `<button id="cfgNav_${id}" onclick="_abrirSecaoTopo('${id}')"
+    class="cfg-nav-item flex-shrink-0 md:w-full text-left text-sm text-gray-400 hover:text-white flex items-center gap-2.5 px-3.5 py-2.5 rounded-lg hover:bg-gray-800 transition font-semibold whitespace-nowrap">
+    <i class="fas ${icon} w-4 text-center"></i> <span>${label}</span>
   </button>`;
 }
 
-function _abrirSecaoConfig(secao) {
-  // Destaca item ativo no menu
-  document.querySelectorAll('.cfg-menu-item').forEach(b => {
-    b.classList.remove('bg-teal-600', 'text-white');
-    b.classList.add('text-gray-400');
-  });
-  const btn = document.getElementById('cfgMenu_' + secao);
-  if (btn) { btn.classList.add('bg-teal-600', 'text-white'); btn.classList.remove('text-gray-400'); }
-
-  const area = document.getElementById('cfgConteudo');
-  area.innerHTML = `<div class="flex items-center justify-center h-40 text-gray-400">
-    <i class="fas fa-spinner fa-spin mr-2"></i> Carregando…</div>`;
-
-  const renderizadores = {
-    usuarios: _renderSecaoUsuarios,
-    emails:   _renderSecaoEmails,
-    sla:      _renderSecaoSLA,
-    setores:  _renderSecaoSetores,
-    listas:   _renderSecaoListas,
-    gatilhos: _renderSecaoGatilhos
-  };
-  if (renderizadores[secao]) renderizadores[secao](area);
+function _cfgAtualizarIdentidade() {
+  const nome    = sessionStorage.getItem('vigi_nome')   || '—';
+  const perfil  = sessionStorage.getItem('vigi_perfil') || 'ADMIN';
+  const avatar  = document.getElementById('cfgAvatarUsuario');
+  const nomeEl  = document.getElementById('cfgNomeUsuario');
+  const perfilEl = document.getElementById('cfgPerfilUsuario');
+  if (avatar)   avatar.textContent   = typeof _gerarIniciais === 'function' ? _gerarIniciais(nome) : nome.substring(0, 2).toUpperCase();
+  if (nomeEl)   nomeEl.textContent   = nome;
+  if (perfilEl) perfilEl.textContent = perfil;
 }
 
 // ─────────────────────────────────────────────────────────
-// SEÇÃO 1 — USUÁRIOS
+// ROTEAMENTO DAS ABAS PRINCIPAIS (SIDEBAR)
+// ─────────────────────────────────────────────────────────
+const _SECOES_TOPO = {
+  visao_geral:   { label: 'Visão Geral',      render: _renderSecaoVisaoGeral },
+  gatilhos:      { label: 'Gatilhos',         render: _renderSecaoGatilhos },
+  logs:          { label: 'Logs e Auditoria', render: _renderSecaoLogs },
+  configuracoes: { label: 'Configurações',    render: _renderConfiguracoesShell }
+};
+
+function _abrirSecaoTopo(secao) {
+  document.querySelectorAll('.cfg-nav-item').forEach(b => {
+    b.classList.remove('bg-teal-600', 'text-white');
+    b.classList.add('text-gray-400');
+  });
+  const btn = document.getElementById('cfgNav_' + secao);
+  if (btn) { btn.classList.add('bg-teal-600', 'text-white'); btn.classList.remove('text-gray-400'); }
+
+  const titulo = document.getElementById('cfgTituloSecao');
+  if (titulo && _SECOES_TOPO[secao]) titulo.textContent = _SECOES_TOPO[secao].label;
+
+  const area = document.getElementById('cfgConteudo');
+  area.innerHTML = _loadingHtml();
+  if (_SECOES_TOPO[secao]) _SECOES_TOPO[secao].render(area);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO — VISÃO GERAL (dashboard resumido)
+// ─────────────────────────────────────────────────────────
+function _renderSecaoVisaoGeral(area) {
+  Promise.all([
+    _chamarGS('listarUsuarios', tokenSessao),
+    _chamarGS('listarGatilhos', tokenSessao),
+    _chamarGS('getConfig'),
+    _chamarGS('listarLogsAuditoria', tokenSessao, 6)
+  ]).then(([usuarios, gatilhos, cfg, logs]) => {
+    const usuariosAtivos = (usuarios  || []).filter(u => u.ativo === 'SIM').length;
+    const gatilhosAtivos = (gatilhos  || []).filter(g => g.ativo).length;
+    const setores        = (cfg && cfg.setores) || [];
+    const sla             = (cfg && cfg.geral && cfg.geral.SLA_PADRAO_HORAS) || '48';
+
+    area.innerHTML = `
+      <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-5">
+        <i class="fas fa-gauge-high text-teal-600"></i> Visão Geral do Sistema
+      </h2>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        ${_cardStat('fa-users', 'Usuários Ativos', usuariosAtivos + ' / ' + (usuarios || []).length, 'text-blue-600', 'bg-blue-50')}
+        ${_cardStat('fa-pills', 'Gatilhos Ativos', gatilhosAtivos + ' / ' + (gatilhos || []).length, 'text-teal-600', 'bg-teal-50')}
+        ${_cardStat('fa-hospital', 'Setores Cadastrados', String(setores.length), 'text-purple-600', 'bg-purple-50')}
+        ${_cardStat('fa-clock', 'SLA Padrão', sla + 'h', 'text-orange-600', 'bg-orange-50')}
+      </div>
+      <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
+        <div class="px-5 py-3.5 border-b border-gray-200 flex items-center justify-between">
+          <h3 class="text-sm font-bold text-gray-700 flex items-center gap-2">
+            <i class="fas fa-clock-rotate-left text-gray-400"></i> Atividade Recente
+          </h3>
+          <button onclick="_abrirSecaoTopo('logs')" class="text-xs text-teal-600 hover:text-teal-800 font-semibold">Ver tudo →</button>
+        </div>
+        <div class="divide-y divide-gray-100">
+          ${(logs && logs.length) ? logs.map(l => `
+            <div class="px-5 py-3 flex items-center justify-between gap-3 text-sm">
+              <div class="min-w-0">
+                <p class="font-semibold text-gray-700 truncate">${escapeHtml(l.acao)}</p>
+                <p class="text-xs text-gray-400 truncate">${escapeHtml(l.usuario)}${l.idCaso ? ' · ' + escapeHtml(l.idCaso) : ''}</p>
+              </div>
+              <span class="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">${_fmtDataHora(l.data)}</span>
+            </div>`).join('') : `<div class="px-5 py-8 text-center text-gray-400 text-sm">Nenhuma atividade registrada.</div>`}
+        </div>
+      </div>`;
+  }).catch(e => { area.innerHTML = _erroHtml(e.message); });
+}
+
+function _cardStat(icon, label, valor, corTexto, corFundo) {
+  return `
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center gap-3">
+      <div class="w-11 h-11 rounded-lg ${corFundo} ${corTexto} flex items-center justify-center flex-shrink-0">
+        <i class="fas ${icon}"></i>
+      </div>
+      <div class="min-w-0">
+        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide truncate">${label}</p>
+        <p class="text-lg font-bold text-gray-800">${valor}</p>
+      </div>
+    </div>`;
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO — GATILHOS (Gestão de Antídotos — CRUD completo)
+// ─────────────────────────────────────────────────────────
+function _renderSecaoGatilhos(area) {
+  google.script.run
+    .withSuccessHandler(gatilhos => {
+      _gatCache = gatilhos || [];
+      area.innerHTML = `
+        <div class="flex items-center justify-between mb-5 gap-3 flex-wrap">
+          <div>
+            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <i class="fas fa-pills text-teal-600"></i> Gatilhos (Medicamentos Antídoto)
+            </h2>
+            <p class="text-xs text-gray-400 mt-0.5">Medicamentos monitorados pelo ETL. Alterações refletem na próxima execução do pipeline.</p>
+          </div>
+          <button onclick="_gatAbrirModal()"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm">
+            <i class="fas fa-plus"></i> Adicionar Novo Gatilho
+          </button>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <table class="w-full text-left">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Nome do Medicamento</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Status</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Última Modificação</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="gatTabelaBody"></tbody>
+          </table>
+        </div>`;
+      _gatRenderTabela();
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .listarGatilhos(tokenSessao);
+}
+
+function _gatRenderTabela() {
+  const tbody = document.getElementById('gatTabelaBody');
+  if (!tbody) return;
+
+  if (!_gatCache.length) {
+    tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400 text-sm">Nenhum gatilho cadastrado.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = _gatCache.map(g => `
+    <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm">
+      <td class="px-4 py-3 font-semibold text-gray-800 uppercase">${escapeHtml(g.medicamento)}</td>
+      <td class="px-4 py-3">
+        <div class="flex items-center gap-2">
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" class="sr-only peer" ${g.ativo ? 'checked' : ''}
+                   onchange="_gatAlternarStatus('${g.id}', this)">
+            <div class="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:bg-teal-600 peer-disabled:opacity-50 transition-colors"></div>
+            <span class="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform peer-checked:translate-x-5"></span>
+          </label>
+          <span class="text-[10px] font-bold uppercase ${g.ativo ? 'text-teal-700' : 'text-gray-400'}">${g.ativo ? 'Ativo' : 'Inativo'}</span>
+        </div>
+      </td>
+      <td class="px-4 py-3 text-xs text-gray-500">${_fmtDataHora(g.atualizadoEm)}</td>
+      <td class="px-4 py-3">
+        <div class="flex justify-end gap-2">
+          <button onclick="_gatAbrirModal('${g.id}')"
+                  class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
+            <i class="fas fa-pen mr-1"></i>Editar
+          </button>
+          <button onclick="_gatExcluir('${g.id}')"
+                  class="text-xs bg-red-50 hover:bg-red-100 text-red-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
+            <i class="fas fa-trash mr-1"></i>Excluir
+          </button>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+function _gatAlternarStatus(id, checkbox) {
+  checkbox.disabled = true;
+  const novoAtivo = checkbox.checked;
+  google.script.run
+    .withSuccessHandler(res => {
+      checkbox.disabled = false;
+      mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
+      if (res.sucesso) {
+        const item = _gatCache.find(x => x.id === id);
+        if (item) { item.ativo = novoAtivo; item.atualizadoEm = new Date(); }
+        _gatRenderTabela();
+      } else {
+        checkbox.checked = !novoAtivo;
+      }
+    })
+    .withFailureHandler(e => {
+      checkbox.disabled = false;
+      checkbox.checked  = !novoAtivo;
+      mostrarToast(e.message, 'erro');
+    })
+    .alternarStatusGatilho(id, novoAtivo, tokenSessao);
+}
+
+function _gatAbrirModal(id) {
+  const editando = !!id;
+  const atual    = editando ? _gatCache.find(x => x.id === id) : null;
+
+  _cfgAbrirSubModal(editando ? 'Editar Gatilho' : 'Novo Gatilho', `
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-bold text-gray-600 mb-1">Nome do Medicamento *</label>
+        <input type="text" id="gatModalNome" style="text-transform:uppercase" value="${atual ? escapeHtml(atual.medicamento) : ''}"
+               placeholder="EX: FLUMAZENIL"
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-teal-500 outline-none">
+      </div>
+      <div class="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3.5 py-2.5">
+        <span class="text-xs font-bold text-gray-600">Status</span>
+        <label class="relative inline-flex items-center cursor-pointer">
+          <input type="checkbox" id="gatModalAtivo" class="sr-only peer" ${(!atual || atual.ativo) ? 'checked' : ''}>
+          <div class="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:bg-teal-600 transition-colors"></div>
+          <span class="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform peer-checked:translate-x-5"></span>
+        </label>
+      </div>
+    </div>`,
+    editando ? 'Salvar' : 'Criar Gatilho', () => {
+      const nome  = document.getElementById('gatModalNome').value.trim();
+      const ativo = document.getElementById('gatModalAtivo').checked;
+      if (!nome) { mostrarToast('Informe o nome do medicamento.', 'erro'); return; }
+
+      const btn = document.getElementById('cfgSubModalBtn');
+      _iniciarCarregando(btn);
+      google.script.run
+        .withSuccessHandler(res => {
+          _pararCarregando(btn);
+          mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
+          if (res.sucesso) { _fecharSubModal(); _renderSecaoGatilhos(document.getElementById('cfgConteudo')); }
+        })
+        .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
+        .salvarGatilho({ id: atual ? atual.id : '', medicamento: nome, ativo: ativo }, tokenSessao);
+    });
+}
+
+function _gatExcluir(id) {
+  const item = _gatCache.find(x => x.id === id);
+  const nome = item ? item.medicamento : id;
+  if (!confirm(`Confirma excluir o gatilho "${nome}"? Esta ação não pode ser desfeita.`)) return;
+
+  google.script.run
+    .withSuccessHandler(res => {
+      mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
+      if (res.sucesso) _renderSecaoGatilhos(document.getElementById('cfgConteudo'));
+    })
+    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .excluirGatilho(id, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO — LOGS E AUDITORIA (somente leitura)
+// ─────────────────────────────────────────────────────────
+function _renderSecaoLogs(area) {
+  google.script.run
+    .withSuccessHandler(logs => {
+      area.innerHTML = `
+        <div class="flex items-center justify-between mb-5 gap-3 flex-wrap">
+          <div>
+            <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <i class="fas fa-clipboard-list text-teal-600"></i> Logs e Auditoria
+            </h2>
+            <p class="text-xs text-gray-400 mt-0.5">Histórico somente leitura das últimas ${(logs || []).length} ações registradas no sistema.</p>
+          </div>
+          <button onclick="_abrirSecaoTopo('logs')"
+                  class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-3 py-2 rounded-lg transition flex items-center gap-1.5">
+            <i class="fas fa-rotate"></i> Atualizar
+          </button>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div class="overflow-y-auto max-h-[62vh]">
+            <table class="w-full text-left text-xs">
+              <thead class="bg-gray-50 border-b border-gray-200 sticky top-0">
+                <tr>
+                  <th class="px-3 py-2.5 font-bold text-gray-500 uppercase">Data/Hora</th>
+                  <th class="px-3 py-2.5 font-bold text-gray-500 uppercase">Usuário</th>
+                  <th class="px-3 py-2.5 font-bold text-gray-500 uppercase">Ação</th>
+                  <th class="px-3 py-2.5 font-bold text-gray-500 uppercase">Caso</th>
+                  <th class="px-3 py-2.5 font-bold text-gray-500 uppercase">Detalhe</th>
+                </tr>
+              </thead>
+              <tbody>${_logsLinhasHtml(logs)}</tbody>
+            </table>
+          </div>
+        </div>`;
+    })
+    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .listarLogsAuditoria(tokenSessao, 300);
+}
+
+function _logsLinhasHtml(logs) {
+  if (!logs || !logs.length) {
+    return `<tr><td colspan="5" class="px-3 py-8 text-center text-gray-400">Nenhum registro encontrado.</td></tr>`;
+  }
+  return logs.map(l => `
+    <tr class="border-b border-gray-100 hover:bg-gray-50">
+      <td class="px-3 py-2 text-gray-500 whitespace-nowrap">${_fmtDataHora(l.data)}</td>
+      <td class="px-3 py-2 text-gray-700 font-medium">${escapeHtml(l.usuario || '—')}</td>
+      <td class="px-3 py-2"><span class="bg-gray-100 text-gray-700 font-bold px-1.5 py-0.5 rounded">${escapeHtml(l.acao || '—')}</span></td>
+      <td class="px-3 py-2 text-gray-500">${escapeHtml(l.idCaso || '—')}</td>
+      <td class="px-3 py-2 text-gray-400">${escapeHtml(l.detalhe || '—')}</td>
+    </tr>`).join('');
+}
+
+// ─────────────────────────────────────────────────────────
+// SEÇÃO — CONFIGURAÇÕES (sub-navegação: Usuários/E-mails/SLA/Setores/Listas)
+// ─────────────────────────────────────────────────────────
+const _SUBSECOES_CONFIG = {
+  usuarios: { label: 'Usuários',           icon: 'fa-users',    render: _renderSecaoUsuarios },
+  emails:   { label: 'E-mails de Alerta',  icon: 'fa-envelope', render: _renderSecaoEmails },
+  sla:      { label: 'SLA',                icon: 'fa-clock',    render: _renderSecaoSLA },
+  setores:  { label: 'Setores',            icon: 'fa-hospital', render: _renderSecaoSetores },
+  listas:   { label: 'Listas / Dropdowns', icon: 'fa-list',     render: _renderSecaoListas }
+};
+
+function _renderConfiguracoesShell(area) {
+  area.innerHTML = `
+    <div class="flex items-center gap-1 mb-6 border-b border-gray-200 overflow-x-auto">
+      ${Object.entries(_SUBSECOES_CONFIG).map(([id, s]) => `
+        <button id="cfgSub_${id}" onclick="_abrirSubConfig('${id}')"
+                class="cfg-subnav-item whitespace-nowrap text-sm font-semibold px-4 py-2.5 border-b-2 border-transparent text-gray-400 hover:text-gray-700 transition flex items-center gap-2">
+          <i class="fas ${s.icon} text-xs"></i> ${s.label}
+        </button>`).join('')}
+    </div>
+    <div id="cfgSubConteudo">${_loadingHtml()}</div>`;
+  _abrirSubConfig('usuarios');
+}
+
+function _abrirSubConfig(id) {
+  document.querySelectorAll('.cfg-subnav-item').forEach(b => {
+    b.classList.remove('border-teal-600', 'text-teal-700');
+    b.classList.add('text-gray-400', 'border-transparent');
+  });
+  const btn = document.getElementById('cfgSub_' + id);
+  if (btn) { btn.classList.add('border-teal-600', 'text-teal-700'); btn.classList.remove('text-gray-400', 'border-transparent'); }
+
+  const area = document.getElementById('cfgSubConteudo');
+  if (!area) return;
+  area.innerHTML = _loadingHtml();
+  if (_SUBSECOES_CONFIG[id]) _SUBSECOES_CONFIG[id].render(area);
+}
+
+// ─────────────────────────────────────────────────────────
+// CONFIGURAÇÕES · USUÁRIOS
 // ─────────────────────────────────────────────────────────
 function _renderSecaoUsuarios(area) {
   google.script.run
@@ -129,7 +476,7 @@ function _renderSecaoUsuarios(area) {
                       class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
                 <i class="fas fa-key mr-1"></i>Senha
               </button>
-              <button onclick="_cfgAlterarStatus('${escapeHtml(u.email)}', ${!ativo})"
+              <button onclick="_cfgAlterarStatus('${escapeHtml(u.email)}', ${!ativo}, this)"
                       class="text-xs ${ativo ? 'bg-red-50 hover:bg-red-100 text-red-600' : 'bg-green-50 hover:bg-green-100 text-green-700'} font-semibold px-2.5 py-1.5 rounded-lg transition">
                 <i class="fas ${ativo ? 'fa-user-slash' : 'fa-user-check'} mr-1"></i>${ativo ? 'Desativar' : 'Ativar'}
               </button>
@@ -201,9 +548,16 @@ function _cfgNovoUsuario() {
       };
       if (!dados.email || !dados.nome || !dados.senha) { mostrarToast('Preencha todos os campos.', 'erro'); return; }
       if (dados.senha.length < 8) { mostrarToast('Senha deve ter ao menos 8 caracteres.', 'erro'); return; }
+
+      const btn = document.getElementById('cfgSubModalBtn');
+      _iniciarCarregando(btn);
       google.script.run
-        .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) { _fecharSubModal(); _abrirSecaoConfig('usuarios'); } })
-        .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+        .withSuccessHandler(res => {
+          _pararCarregando(btn);
+          mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
+          if (res.sucesso) { _fecharSubModal(); _abrirSubConfig('usuarios'); }
+        })
+        .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
         .criarUsuario(dados, tokenSessao);
     });
 }
@@ -219,23 +573,27 @@ function _cfgResetSenha(email) {
     'Salvar', () => {
       const senha = document.getElementById('cfgRsSenha').value.trim();
       if (senha.length < 8) { mostrarToast('Senha deve ter ao menos 8 caracteres.', 'erro'); return; }
+
+      const btn = document.getElementById('cfgSubModalBtn');
+      _iniciarCarregando(btn);
       google.script.run
-        .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) _fecharSubModal(); })
-        .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+        .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) _fecharSubModal(); })
+        .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
         .trocarSenhaUsuario(email, senha, tokenSessao);
     });
 }
 
-function _cfgAlterarStatus(email, novoAtivo) {
+function _cfgAlterarStatus(email, novoAtivo, btn) {
   if (!confirm(`Confirma ${novoAtivo ? 'ativar' : 'desativar'} o usuário ${email}?`)) return;
+  _iniciarCarregando(btn);
   google.script.run
-    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) _abrirSecaoConfig('usuarios'); })
-    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) _abrirSubConfig('usuarios'); })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .alterarStatusUsuario(email, novoAtivo, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────
-// SEÇÃO 2 — E-MAILS
+// CONFIGURAÇÕES · E-MAILS
 // ─────────────────────────────────────────────────────────
 function _renderSecaoEmails(area) {
   google.script.run
@@ -260,7 +618,7 @@ function _renderSecaoEmails(area) {
               <option value="NAO" ${geral.ALERTAS_ATIVOS === 'NAO' ? 'selected' : ''}>Desativados</option>
             </select>
           </div>
-          <button onclick="_cfgSalvarEmails()"
+          <button onclick="_cfgSalvarEmails(this)"
                   class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
             <i class="fas fa-save"></i> Salvar Configurações de E-mail
           </button>
@@ -270,19 +628,20 @@ function _renderSecaoEmails(area) {
     .getConfig();
 }
 
-function _cfgSalvarEmails() {
+function _cfgSalvarEmails(btn) {
   const dados = {
     EMAIL_COORDENACAO: document.getElementById('cfgEmailCoord').value.trim(),
     ALERTAS_ATIVOS:    document.getElementById('cfgAlertasAtivos').value
   };
+  _iniciarCarregando(btn);
   google.script.run
-    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
-    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .salvarConfigGeral(dados, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────
-// SEÇÃO 3 — SLA
+// CONFIGURAÇÕES · SLA
 // ─────────────────────────────────────────────────────────
 function _renderSecaoSLA(area) {
   google.script.run
@@ -306,7 +665,7 @@ function _renderSecaoSLA(area) {
                 class="text-xs bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-600 font-semibold px-3 py-1.5 rounded-lg transition">${h}h</button>`).join('')}
             </div>
           </div>
-          <button onclick="_cfgSalvarSLA()"
+          <button onclick="_cfgSalvarSLA(this)"
                   class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
             <i class="fas fa-save"></i> Salvar SLA
           </button>
@@ -316,17 +675,18 @@ function _renderSecaoSLA(area) {
     .getConfig();
 }
 
-function _cfgSalvarSLA() {
+function _cfgSalvarSLA(btn) {
   const horas = parseInt(document.getElementById('cfgSlaHoras').value || '48', 10);
   if (isNaN(horas) || horas < 1) { mostrarToast('Informe um valor válido em horas.', 'erro'); return; }
+  _iniciarCarregando(btn);
   google.script.run
-    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) { SLA_PADRAO_HORAS = horas; invalidarConfigCache(); } })
-    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) { SLA_PADRAO_HORAS = horas; invalidarConfigCache(); } })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .salvarConfigGeral({ SLA_PADRAO_HORAS: String(horas) }, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────
-// SEÇÃO 4 — SETORES
+// CONFIGURAÇÕES · SETORES
 // ─────────────────────────────────────────────────────────
 function _renderSecaoSetores(area) {
   google.script.run
@@ -377,7 +737,7 @@ function _renderSecaoSetores(area) {
             <tbody id="setoresBody">${linhas}</tbody>
           </table>
         </div>
-        <button onclick="_cfgSalvarSetores()"
+        <button onclick="_cfgSalvarSetores(this)"
                 class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
           <i class="fas fa-save"></i> Salvar Setores
         </button>`;
@@ -410,7 +770,7 @@ function _cfgRemoverSetor(idx) {
   if (linha) linha.remove();
 }
 
-function _cfgSalvarSetores() {
+function _cfgSalvarSetores(btn) {
   const tbody = document.getElementById('setoresBody');
   if (!tbody) return;
   const setores = [];
@@ -420,14 +780,16 @@ function _cfgSalvarSetores() {
     if (campos.setor) setores.push(campos);
   });
   if (!setores.length) { mostrarToast('Adicione ao menos um setor.', 'erro'); return; }
+
+  _iniciarCarregando(btn);
   google.script.run
-    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
-    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .salvarSetores(setores, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────
-// SEÇÃO 5 — LISTAS / DROPDOWNS
+// CONFIGURAÇÕES · LISTAS / DROPDOWNS
 // ─────────────────────────────────────────────────────────
 const _CAMPOS_LISTA = {
   gravidade:       'Gravidade',
@@ -475,7 +837,7 @@ function _renderSecaoListas(area) {
           <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
             <i class="fas fa-list text-teal-600"></i> Listas e Dropdowns
           </h2>
-          <button onclick="_cfgSalvarListas()"
+          <button onclick="_cfgSalvarListas(this)"
                   class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
             <i class="fas fa-save"></i> Salvar Todas
           </button>
@@ -502,7 +864,7 @@ function _cfgAdicionarItemLista(campo) {
   div.querySelector('input').focus();
 }
 
-function _cfgSalvarListas() {
+function _cfgSalvarListas(btn) {
   const listas = {};
   Object.keys(_CAMPOS_LISTA).forEach(campo => {
     const container = document.getElementById('listaItens_' + campo);
@@ -510,81 +872,21 @@ function _cfgSalvarListas() {
     listas[campo] = Array.from(container.querySelectorAll('input[data-lista]'))
       .map(inp => inp.value.trim()).filter(Boolean);
   });
+  _iniciarCarregando(btn);
   google.script.run
-    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
-    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .salvarListas(listas, tokenSessao);
-}
-
-// ─────────────────────────────────────────────────────────
-// SEÇÃO 6 — GATILHOS
-// ─────────────────────────────────────────────────────────
-function _renderSecaoGatilhos(area) {
-  google.script.run
-    .withSuccessHandler(gatilhos => {
-      const itens = (gatilhos || []).map((g, i) => `
-        <div class="flex items-center gap-2 mb-2" id="gatilhoItem_${i}">
-          <input type="text" value="${escapeHtml(g.medicamento || g)}" data-idx="${i}"
-                 class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm uppercase focus:ring-1 focus:ring-teal-400 outline-none">
-          <button onclick="document.getElementById('gatilhoItem_${i}').remove()"
-                  class="text-red-400 hover:text-red-600 transition flex-shrink-0">
-            <i class="fas fa-trash text-sm"></i>
-          </button>
-        </div>`).join('');
-
-      area.innerHTML = `
-        <div class="flex items-center justify-between mb-5">
-          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-            <i class="fas fa-pills text-teal-600"></i> Medicamentos Gatilho (Trigger Tools)
-          </h2>
-          <button onclick="_cfgAdicionarGatilho()"
-                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
-            <i class="fas fa-plus"></i> Adicionar
-          </button>
-        </div>
-        <p class="text-xs text-gray-400 mb-4">Medicamentos monitorados pelo ETL. Alterações refletem na próxima execução do pipeline.</p>
-        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4 mb-4">
-          <div id="gatilhosContainer">${itens || '<p class="text-sm text-gray-400 text-center py-4">Nenhum gatilho cadastrado.</p>'}</div>
-        </div>
-        <button onclick="_cfgSalvarGatilhos()"
-                class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
-          <i class="fas fa-save"></i> Salvar Gatilhos
-        </button>`;
-    })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .listarGatilhos(tokenSessao);
-}
-
-function _cfgAdicionarGatilho() {
-  const container = document.getElementById('gatilhosContainer');
-  if (!container) return;
-  const idx = container.querySelectorAll('[data-idx]').length;
-  const div = document.createElement('div');
-  div.className = 'flex items-center gap-2 mb-2';
-  div.innerHTML = `
-    <input type="text" data-idx="${idx}" placeholder="NOME DO MEDICAMENTO" style="text-transform:uppercase"
-           class="flex-1 border border-teal-300 rounded-lg px-3 py-2 text-sm uppercase focus:ring-1 focus:ring-teal-400 outline-none bg-teal-50">
-    <button onclick="this.parentElement.remove()" class="text-red-400 hover:text-red-600 flex-shrink-0">
-      <i class="fas fa-trash text-sm"></i>
-    </button>`;
-  container.appendChild(div);
-  div.querySelector('input').focus();
-}
-
-function _cfgSalvarGatilhos() {
-  const container = document.getElementById('gatilhosContainer');
-  if (!container) return;
-  const gatilhos = Array.from(container.querySelectorAll('input[data-idx]'))
-    .map(inp => inp.value.trim().toUpperCase()).filter(Boolean);
-  google.script.run
-    .withSuccessHandler(res => { mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); })
-    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
-    .salvarGatilhos(gatilhos, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────
+function _loadingHtml() {
+  return `<div class="flex items-center justify-center h-40 text-gray-400">
+    <i class="fas fa-spinner fa-spin mr-2"></i> Carregando…</div>`;
+}
+
 function _erroHtml(msg) {
   return `<div class="flex flex-col items-center justify-center h-40 text-red-400">
     <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
@@ -592,9 +894,46 @@ function _erroHtml(msg) {
   </div>`;
 }
 
+/** Formata Date/ISO em dd/mm/aaaa HH:mm, com fallback para valores ausentes. */
+function _fmtDataHora(d) {
+  if (!d) return '—';
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt.getTime())) return '—';
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}/${dt.getFullYear()} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+}
+
 /** Invalida o cache de config no servidor para refletir edições imediatamente. */
 function invalidarConfigCache() {
   google.script.run.invalidarConfig();
+}
+
+/** Promisifica google.script.run para permitir Promise.all() em telas com múltiplas fontes (ex: Visão Geral). */
+function _chamarGS(nomeFuncao, ...args) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(reject)
+      [nomeFuncao](...args);
+  });
+}
+
+/** Coloca um botão em estado de carregamento (spinner + disabled) — evita cliques duplos que corrompem o banco. */
+function _iniciarCarregando(btn) {
+  if (!btn || btn.dataset.carregando === '1') return;
+  btn.dataset.carregando   = '1';
+  btn.dataset.originalHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.classList.add('opacity-60', 'cursor-not-allowed');
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Salvando…';
+}
+
+function _pararCarregando(btn) {
+  if (!btn) return;
+  btn.disabled = false;
+  btn.dataset.carregando = '0';
+  btn.classList.remove('opacity-60', 'cursor-not-allowed');
+  if (btn.dataset.originalHtml) btn.innerHTML = btn.dataset.originalHtml;
 }
 
 /** Sub-modal reutilizável para formulários pequenos dentro do modal de config. */
@@ -603,9 +942,9 @@ function _cfgAbrirSubModal(titulo, conteudo, labelBtn, onConfirmar) {
   if (anterior) anterior.remove();
   const div = document.createElement('div');
   div.id = 'cfgSubModal';
-  div.className = 'absolute inset-0 bg-black/50 flex items-center justify-center z-10 rounded-2xl';
+  div.className = 'absolute inset-0 bg-black/50 flex items-center justify-center z-10 sm:rounded-2xl p-4';
   div.innerHTML = `
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-6">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 fade-in">
       <h3 class="text-base font-bold text-gray-800 mb-4 border-b pb-3">${escapeHtml(titulo)}</h3>
       <div class="mb-5">${conteudo}</div>
       <div class="flex justify-end gap-3">
@@ -614,13 +953,13 @@ function _cfgAbrirSubModal(titulo, conteudo, labelBtn, onConfirmar) {
           Cancelar
         </button>
         <button id="cfgSubModalBtn"
-                class="px-4 py-2 bg-teal-600 text-white rounded-lg font-semibold text-sm hover:bg-teal-700 transition">
+                class="px-4 py-2 bg-teal-600 text-white rounded-lg font-semibold text-sm hover:bg-teal-700 transition min-w-[110px] flex items-center justify-center gap-2">
           ${escapeHtml(labelBtn)}
         </button>
       </div>
     </div>`;
-  document.getElementById('modalConfig').querySelector('.rounded-2xl').style.position = 'relative';
-  document.getElementById('modalConfig').querySelector('.rounded-2xl').appendChild(div);
+  const painel = document.getElementById('modalConfig').querySelector('.relative');
+  painel.appendChild(div);
   document.getElementById('cfgSubModalBtn').onclick = onConfirmar;
 }
 
