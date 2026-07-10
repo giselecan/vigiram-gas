@@ -13,7 +13,11 @@
        substitui o Play CDN. As classes deste form entram no build porque o scan
        (tailwind.config.js) inclui form.html. -->
   <?!= include('styles'); ?>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <!-- Font Awesome NÃO-bloqueante (media="print" + onload): não atrasa o primeiro
+       paint do formulário; <noscript> garante fallback síncrono sem JS. -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"></noscript>
   <style>
     input[type=number]::-webkit-inner-spin-button,
     input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -34,8 +38,7 @@
   </style>
 </head>
 
-<body class="bg-slate-100 font-sans min-h-screen flex flex-col items-center justify-start py-6 px-4"
-      onload="inicializar()">
+<body class="bg-slate-100 font-sans min-h-screen flex flex-col items-center justify-start py-6 px-4">
 
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
 
@@ -455,6 +458,14 @@
       document.getElementById('iptProntuario').focus();
 
       window.addEventListener('beforeunload', _guardarSaida);
+    }
+
+    // Init no DOMContentLoaded (e não em body onload): não espera o webfont do
+    // Font Awesome baixar para preencher a data, carregar setores e focar o 1º campo.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', inicializar);
+    } else {
+      inicializar();
     }
 
     function carregarSetores() {

@@ -9,15 +9,21 @@
   <!-- Tailwind: CSS pré-compilado embutido em styles.html (npm run build:css).
        Substitui o Play CDN (cdn.tailwindcss.com), que baixava ~3 MB e compilava
        o CSS na main thread do navegador a cada carregamento. -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <!-- Font Awesome carregado de forma NÃO-bloqueante: um <link rel=stylesheet>
+       no <head> bloqueia o primeiro paint até baixar o CSS + o webfont (~150 KB).
+       O truque media="print" + onload deixa o navegador pintar a tela de login
+       imediatamente e "encaixar" os ícones logo em seguida. O <noscript> garante
+       fallback síncrono caso o JS esteja desabilitado. -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+        media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"></noscript>
   <!-- defer: Chart.js só é usado ao abrir a aba Dashboard (clique do usuário),
        bem depois do load — não deve bloquear o parse do HTML na carga inicial
        do Kanban, que é a tela padrão. -->
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <?!= include('styles'); ?>
 </head>
-<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-gray-800"
-      onload="inicializar()">
+<body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-gray-800">
 
   <!-- =====================================================
        TELA DE LOGIN
@@ -1198,5 +1204,17 @@
   <?!= include('js_dashboard'); ?>
   <?!= include('js_notificacao_interna'); ?>
   <?!= include('js_admin'); ?>
+
+  <!-- Init no DOMContentLoaded (e não em body onload): onload espera TODOS os
+       subrecursos — inclusive o webfont do Font Awesome e o Chart.js defer —
+       antes de validar a sessão. DOMContentLoaded dispara assim que o HTML foi
+       parseado, adiantando a interatividade da tela de login. -->
+  <script>
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', inicializar);
+    } else {
+      inicializar();
+    }
+  </script>
 </body>
 </html>
