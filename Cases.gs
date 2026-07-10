@@ -303,7 +303,7 @@ function salvarDemandaEspontanea(formDados) {
 
     let farmaceuticoResponsavel = '';
     try {
-      const cfg = getConfig();
+      const cfg = getConfig_();
       const setorUp = setor.toUpperCase().trim();
       const setorObj = (cfg.setores || []).find(function (s) {
         return s.setor && s.setor.toUpperCase().trim() === setorUp;

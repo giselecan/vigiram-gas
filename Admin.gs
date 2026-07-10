@@ -72,6 +72,12 @@ function criarUsuario(dados, token) {
     if (!email || !nome || !senha) {
       return { sucesso: false, mensagem: 'E-mail, nome e senha são obrigatórios.' };
     }
+    // Defesa em profundidade: e-mail vira ID do documento (usado depois em
+    // atributos data-* no admin) e chave de e-mails automáticos — bloqueia
+    // formato inválido/anômalo na origem, além do fix de XSS no front-end.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { sucesso: false, mensagem: 'E-mail em formato inválido.' };
+    }
     if (senha.length < 8) {
       return { sucesso: false, mensagem: 'Senha deve ter ao menos 8 caracteres.' };
     }

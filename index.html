@@ -2,6 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VigiRAM</title>
   <!-- Tema: aplica a preferência salva ANTES do paint, evitando flash claro→escuro.
        Precede o CSS/tema; se localStorage falhar (sandbox), segue no tema claro. -->
@@ -18,8 +19,15 @@
   <?!= include('icons'); ?>
   <!-- defer: Chart.js só é usado ao abrir a aba Dashboard (clique do usuário),
        bem depois do load — não deve bloquear o parse do HTML na carga inicial
-       do Kanban, que é a tela padrão. -->
-  <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+       do Kanban, que é a tela padrão.
+       Versão FIXADA (4.5.1, última estável em 07/2026): "/npm/chart.js" sem
+       versão sempre resolve para o último release — uma major/breaking change
+       publicada pelo mantenedor quebraria o Dashboard em produção sem aviso.
+       TODO: adicionar integrity= (SRI) — não incluído aqui porque exigiria
+       baixar o arquivo real e calcular o hash sha384 para confirmar, o que
+       não foi possível nesta sessão (rede restrita); um hash incorreto
+       bloquearia o script inteiro no navegador. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
   <?!= include('styles'); ?>
 </head>
 <body class="bg-gray-100 font-sans h-screen flex flex-col overflow-hidden text-gray-800">
@@ -70,11 +78,14 @@
   <div id="app-container" class="hidden flex-1 flex-col w-full overflow-hidden">
 
     <!-- NAVBAR -->
-    <nav class="bg-teal-700 text-white shadow-md z-10 relative">
-      <div class="flex justify-between items-end px-4 pt-4">
+    <!-- overflow-x-auto: em telas estreitas (~360px) logo+abas+~6 botões não
+         cabem numa linha; sem isso o body (overflow-hidden) cortava botões
+         como "Sair" sem qualquer forma de alcançá-los. -->
+    <nav class="bg-teal-700 text-white shadow-md z-10 relative overflow-x-auto">
+      <div class="flex justify-between items-end px-4 pt-4 w-max min-w-full">
 
         <!-- Identidade -->
-        <div class="mb-4 flex items-center gap-3">
+        <div class="mb-4 flex items-center gap-3 shrink-0">
           <div class="bg-white/10 rounded-lg w-10 h-10 flex items-center justify-center shrink-0">
             <i class="fas fa-shield-virus text-teal-200 text-lg"></i>
           </div>
@@ -87,7 +98,7 @@
         </div>
 
         <!-- Abas -->
-        <div class="flex items-end self-end space-x-1">
+        <div class="flex items-end self-end space-x-1 shrink-0">
           <button onclick="alternarAba('kanban')" id="btnAbaKanban"
                   class="px-5 py-3 font-bold text-sm transition aba-ativa">
             <i class="fas fa-tasks mr-2"></i> Painel de Notificações
@@ -99,7 +110,7 @@
         </div>
 
         <!-- Ações da direita -->
-        <div class="flex items-center gap-2 mb-4">
+        <div class="flex items-center gap-2 mb-4 shrink-0">
           <button onclick="abrirNotificacaoInterna()"
                   class="pill-action bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded-lg font-semibold
                          text-sm shadow-sm flex items-center gap-1.5"

@@ -67,7 +67,16 @@ const DEFAULT_NARANJO = [
 // ─────────────────────────────────────────────────────────────────────────────
 // PONTO ÚNICO DE LEITURA — com cache de 10 minutos (idêntico ao original)
 // ─────────────────────────────────────────────────────────────────────────────
-function getConfig() {
+// [SEGURANÇA/LGPD] getConfig() devolve `setores` COM nome/e-mail do farmacêutico
+// de cada setor + EMAIL_COORDENACAO (PII). Por isso a entrada pública exige token
+// válido (getConfig(token) → comAutenticacao_). O corpo virou getConfig_(), com
+// sufixo "_" para NÃO ficar exposto a google.script.run anônimo — o form público
+// usa getSetoresPublico() (só nomes), e o backend chama getConfig_() diretamente.
+function getConfig(token) {
+  return comAutenticacao_(token, function () { return getConfig_(); });
+}
+
+function getConfig_() {
   const cache = CacheService.getScriptCache();
   const hit   = cache.get(CONFIG_CACHE_KEY);
   if (hit) {

@@ -360,8 +360,13 @@ function fazerLogout() {
   tokenSessao = null;
 
   // Invalida a sessão no servidor (best-effort — não bloqueia o retorno ao login).
+  // withFailureHandler é só um log: o front já limpou o token localmente acima,
+  // então uma falha aqui não muda o comportamento visível, mas documenta a
+  // decisão em vez de deixar a chamada sem handler nenhum.
   if (t && window.google && google.script && google.script.run) {
-    google.script.run.encerrarSessao(t);
+    google.script.run
+      .withFailureHandler(e => console.warn('encerrarSessao falhou (sessão já limpa localmente):', e.message))
+      .encerrarSessao(t);
   }
 
   // NÃO usar window.location.reload(): o app roda dentro de um iframe sandbox
@@ -386,7 +391,7 @@ function carregarConfig() {
       console.warn('getConfig falhou:', e.message);
       carregarCasos();
     })
-    .getConfig();
+    .getConfig(tokenSessao);
 }
 
 function aplicarConfig(cfg) {
@@ -556,7 +561,9 @@ function carregarCasos() {
         // reload é inócuo no iframe sandbox do GAS — volta ao login direto.
         _mostrarLogin();
       } else {
-        mostrarToast('Erro ao carregar casos: ' + msg, 'erro');
+        // Mensagem amigável — o detalhe técnico já foi logado acima
+        // (console.error) para diagnóstico, sem expor stack/URL cru ao usuário.
+        mostrarToast('Não foi possível carregar os casos. Tente novamente em instantes.', 'erro');
         if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.classList.remove('btn-carregando'); }
       }
     })

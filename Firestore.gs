@@ -101,7 +101,14 @@ function fsFetch_(metodo, url, corpo) {
     }
     break;
   }
-  throw new Error('Firestore.gs: HTTP ' + status + ' em ' + url + ' → ' + texto);
+  // Log completo (URL com projectId + corpo bruto da resposta) só no console/
+  // Stackdriver — a mensagem lançada NÃO carrega esses detalhes adiante, pois
+  // erro.message costuma ser concatenado direto em toasts do frontend
+  // (ex.: Cases.gs "Erro ao salvar investigação: " + erro.message). Mantém o
+  // prefixo "Firestore.gs" pois Auth.gs:88 detecta falha de infraestrutura
+  // por esse substring.
+  console.error('Firestore.gs: HTTP ' + status + ' em ' + url + ' → ' + texto);
+  throw new Error('Firestore.gs: falha de comunicação com o banco de dados (HTTP ' + status + ').');
 }
 
 function fsParaValorFs_(valor) {

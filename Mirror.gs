@@ -299,6 +299,10 @@ function _gravarLogNoSheets(payload) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function _enfileirarRetry(item) {
+  // Motivo do descarte por capacidade (fila cheia / >9KB), setado dentro do
+  // comTrava_ e usado DEPOIS de liberar a trava para disparar o alerta por
+  // e-mail (MailApp é chamada de rede — não deve rodar com o lock preso).
+  let motivoDescarteCapacidade = null;
   try {
     // [RETIFICADO — Regra de Ouro #2] o read-modify-write da fila em
     // PropertiesService era feito SEM trava: dois enfileiramentos simultâneos
@@ -317,6 +321,7 @@ function _enfileirarRetry(item) {
 
       if (fila.length >= MIRROR_FILA_MAX_ITENS) {
         console.error('Mirror: fila de retry cheia (' + MIRROR_FILA_MAX_ITENS + ' itens). Item descartado: ' + JSON.stringify(item));
+        motivoDescarteCapacidade = 'Fila de retry do Mirror cheia (' + MIRROR_FILA_MAX_ITENS + ' itens) — item descartado sem tentar novamente.';
         return;
       }
 
@@ -326,11 +331,20 @@ function _enfileirarRetry(item) {
       // PropertiesService: limite de 9 KB por valor
       if (serializado.length > 9000) {
         console.error('Mirror: fila excede 9 KB após adicionar item. Item descartado: ' + JSON.stringify(item));
+        motivoDescarteCapacidade = 'Fila de retry do Mirror excedeu 9 KB — item descartado sem tentar novamente.';
         return;
       }
 
       props.setProperty(MIRROR_RETRY_KEY, serializado);
     });
+
+    // Mesmo alerta por e-mail do caminho "3 tentativas esgotadas" (ver
+    // processarFilaEspelho) — sem isso, um pico de falhas do Sheets que lota
+    // a fila perdia itens (potencialmente casos de RAM não espelhados) de
+    // forma visível só nos logs de execução, nunca na caixa de entrada.
+    if (motivoDescarteCapacidade) {
+      _alertarDescarteFinal_(item, motivoDescarteCapacidade);
+    }
   } catch (e) {
     console.error('Mirror: falha ao enfileirar retry: ' + e.message + ' | Item: ' + JSON.stringify(item));
   }
@@ -416,7 +430,7 @@ function processarFilaEspelho() {
  */
 function _alertarDescarteFinal_(item, mensagemErro) {
   try {
-    const cfg = getConfig();
+    const cfg = getConfig_();
     const destino = (cfg.geral && cfg.geral.EMAIL_COORDENACAO) || 'farmacia.clinica@hospital.com';
     const idRef = item.idCaso || (item.payload && item.payload.idCaso) || '-';
 

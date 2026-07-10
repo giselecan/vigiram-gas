@@ -139,7 +139,7 @@ function gerarXmlE2B(idCaso, token) {
     caso.idMedicamentoE2B = ids.idMedicamentoE2B;
     caso.safetyReportIdE2B = ids.safetyReportIdE2B;
 
-    const config   = getConfig();
+    const config   = getConfig_();
     const usuario  = _buscarUsuarioAtualParaAssinatura_();
 
     const xml = _montarXmlE2B_(caso, usuario, config);
@@ -201,6 +201,12 @@ function _validarCasoParaE2B_(caso) {
   // E.i.7 é 1..1 no padrão — sem desfecho mapeado, sai '6' (Unknown), não trava.
   if (!caso.desfecho || !SCHEMA.E2B.DESFECHO_MAP[String(caso.desfecho).toUpperCase()]) {
     avisos.push('Desfecho ausente ou sem mapeamento (SCHEMA.E2B.DESFECHO_MAP) — E.i.7 sairá como "6" (Desconhecido).');
+  }
+  // Desfecho ÓBITO sem data de óbito: D.9.1 <deceasedTime> sai OMITIDO do XML
+  // (ver dataObitoE2B em _montarXmlE2B_) — justamente o caso mais grave, sem
+  // qualquer sinal na tela hoje. Avisa explicitamente em vez de omitir em silêncio.
+  if (String(caso.desfecho || '').toUpperCase() === 'ÓBITO' && !caso.dataObito) {
+    avisos.push('Desfecho é ÓBITO mas a data do óbito não foi preenchida — D.9.1 sairá ausente do XML.');
   }
 
   return avisos;
