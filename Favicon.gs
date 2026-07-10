@@ -18,7 +18,10 @@
  * for público, ou qualquer host de imagem. Enquanto estiver vazio, mantém o
  * ícone padrão do Google (sem quebrar nada).
  */
-const FAVICON_URL = ''; // ← cole aqui a URL pública do PNG (vazio = ícone padrão)
+// Hotlink de imagem do Google Drive via endpoint /thumbnail (o mais confiável
+// para servir imagem pública do Drive em <img>/favicon; redimensiona no servidor).
+// Arquivo confirmado público (Qualquer pessoa com o link, Leitor) e image/png.
+const FAVICON_URL = 'https://drive.google.com/thumbnail?id=1iMAlsxB8dZl_z-UKg1eGxj3sLC4MgwLs&sz=w128-h128';
 
 /**
  * Aplica o favicon num HtmlOutput servido pelo doGet, de forma SEGURA:
