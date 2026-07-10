@@ -185,11 +185,20 @@ function listarGatilhos(token) {
     try {
       const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
       return docs
-        .filter(function (d) { return d.medicamento && d._id; })
+        // Antes filtrava por `d.medicamento && d._id`, o que ESCONDIA qualquer
+        // doc sem o campo `medicamento` (campo ausente/renomeado por migração ou
+        // versão antiga). Isso causava o sintoma "salvar diz que já existe, mas
+        // não aparece na lista": fsGetDoc_ enxerga o doc, mas listarGatilhos o
+        // descartava. Agora só exigimos o _id e derivamos o nome do próprio ID
+        // (medicamento em SNAKE_CASE) quando o campo faltar — nada é ocultado.
+        .filter(function (d) { return d._id; })
         .map(function (d) {
+          const nome = (d.medicamento != null && String(d.medicamento).trim())
+            ? String(d.medicamento)
+            : String(d._id).replace(/_/g, ' ');
           return {
             id:           d._id,
-            medicamento:  String(d.medicamento).trim().toUpperCase(),
+            medicamento:  nome.trim().toUpperCase(),
             ativo:        d.ativo !== false,
             atualizadoEm: d.atualizadoEm || null
           };
