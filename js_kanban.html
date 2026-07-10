@@ -27,10 +27,9 @@
 // SKELETONS
 // ---------------------------------------------------------
 function mostrarSkeletons() {
+  const sk = '<div class="skeleton skeleton-card"></div>'.repeat(4); // atribuição única (sem += por item)
   ['coluna-triagem', 'coluna-investigacao', 'coluna-concluidos'].forEach(id => {
-    const col = document.getElementById(id);
-    col.innerHTML = '';
-    for (let i = 0; i < 4; i++) col.innerHTML += '<div class="skeleton skeleton-card"></div>';
+    document.getElementById(id).innerHTML = sk;
   });
 }
 
