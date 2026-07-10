@@ -181,13 +181,19 @@ function listarLogsAuditoria(token, limite) {
     // `data` e (b) FALHA se o índice do campo não existir. Em qualquer um dos
     // casos os logs sumiam do painel. Fallback: varre a coleção e ordena em
     // memória, garantindo que a auditoria sempre apareça.
+    // A query ordenada só é confiável quando devolve exatamente `max` docs —
+    // se vier incompleta (menos que o pedido), tanto pode ser porque a
+    // coleção tem menos que `max` registros no total, quanto porque o
+    // orderBy excluiu docs sem o campo `data` (ver comentário acima); em
+    // ambos os casos caímos no fallback, que é barato justamente quando a
+    // ordenada devolve poucos resultados.
     let docs = null;
     try {
       docs = fsQuery_(SCHEMA.FS.LOG, null, max, [{ campo: 'data', direcao: 'DESCENDING' }]);
     } catch (e) {
       console.error('listarLogsAuditoria: query ordenada falhou (índice ausente?), usando fallback — ' + e.message);
     }
-    if (!docs || !docs.length) {
+    if (!docs || docs.length < max) {
       docs = fsListarTodos_(SCHEMA.FS.LOG)
         .sort(function (a, b) {
           const da = a.data ? new Date(a.data).getTime() : 0;
@@ -198,7 +204,7 @@ function listarLogsAuditoria(token, limite) {
     }
     return docs.map(function (d) {
       return {
-        data:    d.data ? new Date(d.data).toISOString() : null,
+        data:    dataParaIsoSegura_(d.data),
         usuario: String(d.usuario || '').trim(),
         acao:    String(d.acao    || '').trim(),
         idCaso:  String(d.idCaso  || '').trim(),

@@ -20,8 +20,9 @@
  * via _montarEmailBase_):
  *  1) enviarRelatorioDiarioGatilhos() — job diário (07:00) que substitui o
  *     alerta imediato por inserção: agrega os gatilhos (casos tipo 'BA')
- *     identificados nas últimas 24h por setor e manda 1 e-mail por setor
- *     para o farmacêutico responsável. Instalar com instalarTriggerRelatorioDiario().
+ *     AINDA PENDENTES DE TRIAGEM (status TRIAGEM, sem limite de tempo) por
+ *     setor e manda 1 e-mail por setor para o farmacêutico responsável.
+ *     Instalar com instalarTriggerRelatorioDiario().
  *  2) notificarNovaDemandaEspontanea_(idCaso) — disparado na hora pela
  *     criação de uma Demanda Espontânea (salvarDemandaEspontanea, Cases.gs),
  *     avisa o farmacêutico do setor que há uma nova DE aguardando investigação.
@@ -91,39 +92,29 @@ function _montarEmailBase_(corDestaque, titulo, subtitulo, corpoHtml, linkSistem
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Traduz o status interno do caso para um rótulo curto e legível no e-mail.
- */
-function _rotuloStatus_(status) {
-  const rotulos = {};
-  rotulos[SCHEMA.STATUS.TRIAGEM]      = 'Aguardando triagem';
-  rotulos[SCHEMA.STATUS.INVESTIGACAO] = 'Em investigação';
-  rotulos[SCHEMA.STATUS.CONCLUIDO]    = 'Concluído';
-  rotulos[SCHEMA.STATUS.DESCARTADO]   = 'Descartado';
-  return rotulos[status] || String(status || '-');
-}
-
-/**
- * Job diário (instalar via instalarTriggerRelatorioDiario(), 07:00): agrega
- * os gatilhos (casos tipo 'BA') identificados nas últimas 24h, agrupa por
- * setor e manda 1 e-mail de resumo por setor para o farmacêutico responsável.
- * Setores sem nenhum gatilho novo no período não recebem e-mail.
+ * Job diário (instalar via instalarTriggerRelatorioDiario(), 07:00): agrupa
+ * por setor os gatilhos (casos tipo 'BA') AINDA PENDENTES DE TRIAGEM (status
+ * TRIAGEM) e manda 1 e-mail de resumo por setor para o farmacêutico
+ * responsável. Não usa janela de tempo — um caso só sai da lista quando é
+ * triado (muda de status), não porque "envelheceu" 24h. Setores sem nenhum
+ * gatilho pendente não recebem e-mail.
  */
 function enviarRelatorioDiarioGatilhos() {
   const cfg = getConfig();
   if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
-  const LIMITE_24H = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-  const todosOsCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+  // Filtro composto no SERVIDOR (tipo='BA' AND status=TRIAGEM) em vez de
+  // fsListarTodos_ + filtro em memória: CASOS é o histórico completo do
+  // hospital (só cresce), então buscar a coleção inteira todo dia às 07:00
+  // não escalaria — aqui só trafegam os gatilhos que realmente entram no
+  // e-mail.
+  const casosPendentes = fsQuery_(SCHEMA.FS.CASOS, [
+    { campo: 'tipo',   op: 'EQUAL', valor: 'BA' },
+    { campo: 'status', op: 'EQUAL', valor: SCHEMA.STATUS.TRIAGEM }
+  ]);
   const casosPorSetor = {};
 
-  todosOsCasos.forEach(function (caso) {
-    if (caso.tipo !== 'BA') return;
-    const atualizadoEm = caso.auditoria && caso.auditoria.atualizadoEm
-      ? new Date(caso.auditoria.atualizadoEm)
-      : null;
-    if (!atualizadoEm || atualizadoEm < LIMITE_24H) return;
-
+  casosPendentes.forEach(function (caso) {
     const setor = String(caso.setor || '').toUpperCase().trim();
     if (!setor) return;
     if (!casosPorSetor[setor]) casosPorSetor[setor] = [];
@@ -160,13 +151,12 @@ function _montarEmailRelatorioDiario_(setor, listaCasos, linkSistema) {
         <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.iniciais)}</td>
         <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;color:#c2410c;font-weight:bold;">${escaparHtml_(c.medicamento)}</td>
         <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(c.data)}</td>
-        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(_rotuloStatus_(c.status))}</td>
       </tr>`;
   });
 
   const corpo = `
     <p style="color:#374151;font-size:16px;">Olá,</p>
-    <p style="color:#374151;font-size:16px;">Este é o resumo diário dos gatilhos rastreados pelo <b>VigiRAM</b> nas últimas 24h para o seu setor (<strong>${setorSeguro}</strong>).</p>
+    <p style="color:#374151;font-size:16px;">Estes são os gatilhos rastreados pelo <b>VigiRAM</b> ainda <b>aguardando triagem</b> no seu setor (<strong>${setorSeguro}</strong>).</p>
     <table style="width:100%;border-collapse:collapse;margin-top:15px;">
       <thead>
         <tr style="background-color:#f9fafb;">
@@ -174,7 +164,6 @@ function _montarEmailRelatorioDiario_(setor, listaCasos, linkSistema) {
           <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Paciente</th>
           <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Medicamento</th>
           <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Data</th>
-          <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Status atual</th>
         </tr>
       </thead>
       <tbody>${linhas}</tbody>
@@ -183,7 +172,7 @@ function _montarEmailRelatorioDiario_(setor, listaCasos, linkSistema) {
   const html = _montarEmailBase_(
     '#f97316',
     'Relatório Diário de Gatilhos',
-    'Busca Ativa (Trigger Tool) — últimas 24h',
+    'Busca Ativa (Trigger Tool) — pendentes de triagem',
     corpo,
     linkSistema,
     'Abrir VigiRAM'
@@ -338,8 +327,8 @@ function enviarEmailTeste(tipo, destinatario, token) {
 
     if (tipo === 'RELATORIO_DIARIO') {
       montado = _montarEmailRelatorioDiario_('UTI ADULTO', [
-        { prontuario: '123456', iniciais: 'J.S.', medicamento: 'VANCOMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy'), status: SCHEMA.STATUS.TRIAGEM },
-        { prontuario: '654321', iniciais: 'M.A.', medicamento: 'GENTAMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy'), status: SCHEMA.STATUS.INVESTIGACAO }
+        { prontuario: '123456', iniciais: 'J.S.', medicamento: 'VANCOMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy') },
+        { prontuario: '654321', iniciais: 'M.A.', medicamento: 'GENTAMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy') }
       ], LINK_SISTEMA);
     } else if (tipo === 'NOVA_DEMANDA') {
       montado = _montarEmailNovaDemandaEspontanea_({
