@@ -541,7 +541,7 @@ function _montarXmlE2B_(caso, usuario, config) {
   // com fallback pro e-mail geral da farmácia configurado em Config.gs.
   const emailSender = usuario.email ||
                        (config.geral && config.geral.EMAIL_COORDENACAO) ||
-                       'farmacovigilancia@hrn.org.br';
+                       'farmaceuticos.hrn@isgh.org.br';
   // C.2.r telecom — e-mail do notificador primário: mesma regra do Sender.
   const emailNotificador = emailSender;
 
