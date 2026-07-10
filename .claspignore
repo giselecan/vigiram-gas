@@ -1,0 +1,13 @@
+# Arquivos que NÃO devem ser enviados ao Apps Script (dev/build apenas).
+# Só existe efeito se vocês usarem `clasp push`. Sem isto, o clasp enviaria o
+# package.json como um .json qualquer e poderia quebrar o projeto GAS.
+node_modules/**
+package.json
+package-lock.json
+tailwind.config.js
+tw-input.css
+tw-output.css
+.gitignore
+.claspignore
+.git/**
+**/*.md

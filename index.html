@@ -4,10 +4,11 @@
   <meta charset="UTF-8">
   <title>VigiRAM</title>
   <!-- Preconnect: abre DNS/TCP/TLS aos CDNs antes das requisições render-blocking abaixo -->
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind: CSS pré-compilado embutido em styles.html (npm run build:css).
+       Substitui o Play CDN (cdn.tailwindcss.com), que baixava ~3 MB e compilava
+       o CSS na main thread do navegador a cada carregamento. -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <!-- defer: Chart.js só é usado ao abrir a aba Dashboard (clique do usuário),
        bem depois do load — não deve bloquear o parse do HTML na carga inicial
