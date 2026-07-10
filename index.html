@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <title>VigiRAM</title>
+  <!-- Tema: aplica a preferência salva ANTES do paint, evitando flash claro→escuro.
+       Precede o CSS/tema; se localStorage falhar (sandbox), segue no tema claro. -->
+  <script>try{var _t=localStorage.getItem('vigi_tema');if(_t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
   <!-- Preconnect: abre DNS/TCP/TLS ao CDN do Chart.js antes da requisição defer. -->
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <!-- Tailwind: CSS pré-compilado embutido em styles.html (npm run build:css).
@@ -109,6 +112,12 @@
                   class="pill-action bg-teal-600 hover:bg-teal-500 w-9 h-9 rounded-lg flex items-center justify-center shadow-sm"
                   title="Sincronizar casos">
             <i class="fas fa-sync-alt"></i>
+          </button>
+
+          <button onclick="alternarTema()" id="btnTema"
+                  class="btn-tema bg-teal-600 hover:bg-teal-500 w-9 h-9 rounded-lg flex items-center justify-center shadow-sm"
+                  title="Alternar tema claro/escuro">
+            <i class="fas fa-moon"></i>
           </button>
 
           <div class="navbar-divider"></div>

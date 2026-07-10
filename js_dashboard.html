@@ -222,6 +222,18 @@ function desenharGraficos() {
 
   Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
 
+  // Paleta sensível ao tema. desenharGraficos() é re-chamada ao alternar o tema
+  // (js_core _aplicarTema), então legendas/eixos/grade acompanham claro↔escuro.
+  // No tema claro os valores igualam os defaults do Chart.js — nada muda.
+  const _escuro   = document.documentElement.getAttribute('data-theme') === 'dark';
+  const corTexto  = _escuro ? '#cbd5e1' : '#666';
+  const corGrade  = _escuro ? 'rgba(148,163,184,0.16)' : 'rgba(0,0,0,0.1)';
+  const corTitulo = _escuro ? '#94a3b8' : '#6b7280';
+  const corNeutra = _escuro ? '#475569' : '#e5e7eb';   // barra "Total Rastreado"
+  const corFatal  = _escuro ? '#64748b' : '#112937';   // "Fatal" — visível nos 2 temas
+  Chart.defaults.color       = corTexto;   // legendas, ticks e títulos
+  Chart.defaults.borderColor = corGrade;   // linhas de grade dos eixos
+
   // Gráfico 1 - Desfecho dos gatilhos (rosca)
   _grafDesfechos = new Chart(document.getElementById('graficoDesfechos').getContext('2d'), {
     type: 'doughnut',
@@ -243,7 +255,7 @@ function desenharGraficos() {
       labels: ['Leve', 'Moderada', 'Grave', 'Fatal'],
       datasets: [{
         data: [calc.gravidade.LEVE, calc.gravidade.MODERADA, calc.gravidade.GRAVE, calc.gravidade.FATAL],
-        backgroundColor: ['#fcd34d', '#f97316', '#dc2626', '#112937'],
+        backgroundColor: ['#fcd34d', '#f97316', '#dc2626', corFatal],
         borderWidth: 0
       }]
     },
@@ -263,7 +275,7 @@ function desenharGraficos() {
         {
           label: 'Total Rastreado',
           data: topSetores.map(s => calc.setores[s]),
-          backgroundColor: '#e5e7eb'
+          backgroundColor: corNeutra
         },
         {
           label: 'Casos Concluídos',
@@ -316,7 +328,7 @@ function desenharGraficos() {
           display: true,
           text: `${calc.gatilho.total} gatilho(s) rastreado(s) no período`,
           font: { size: 11, weight: 'normal' },
-          color: '#6b7280',
+          color: corTitulo,
           padding: { top: 4 }
         }
       }
@@ -340,7 +352,7 @@ function desenharGraficos() {
         { label: 'Leve',     data: setoresRam.map(s => calc.gravidadeSetor[s].LEVE),     backgroundColor: '#fcd34d' },
         { label: 'Moderada', data: setoresRam.map(s => calc.gravidadeSetor[s].MODERADA), backgroundColor: '#f97316' },
         { label: 'Grave',    data: setoresRam.map(s => calc.gravidadeSetor[s].GRAVE),    backgroundColor: '#dc2626' },
-        { label: 'Fatal',    data: setoresRam.map(s => calc.gravidadeSetor[s].FATAL),    backgroundColor: '#112937' }
+        { label: 'Fatal',    data: setoresRam.map(s => calc.gravidadeSetor[s].FATAL),    backgroundColor: corFatal }
       ]
     },
     options: {

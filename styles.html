@@ -10,6 +10,38 @@
 
 <style>
   /* =====================================================
+     TOKENS DE COR — STATUS / BADGES (fonte única da verdade)
+     Centraliza as cores semânticas do domínio (tipo de origem,
+     status do caso, SLA, VigiMed) que antes viviam espalhadas em
+     classes utilitárias do Tailwind pelo HTML/JS. Mudar a paleta
+     agora é editar aqui. Também é a base pronta para um tema
+     escuro futuro: bastaria sobrescrever estas variáveis num
+     seletor :root[data-theme="dark"]. Os valores espelham as
+     cores atuais do Tailwind — nenhuma mudança visual.
+  ===================================================== */
+  :root {
+    /* Origem da notificação */
+    --cor-de-bg: #f3e8ff; --cor-de-fg: #6b21a8;   /* DE — assistência (roxo) */
+    --cor-ba-bg: #fee2e2; --cor-ba-fg: #991b1b;   /* BA — robô/ETL (vermelho) */
+
+    /* Status do caso */
+    --cor-triagem:      #f97316;  /* laranja */
+    --cor-investigacao: #2563eb;  /* azul   */
+    --cor-concluido:    #15803d;  /* verde  */
+    --cor-descartado:   #6b7280;  /* cinza  */
+
+    /* SLA */
+    --cor-sla-ok-bg:   #d1fae5; --cor-sla-ok-fg:   #065f46; --cor-sla-ok-bd:   #6ee7b7;
+    --cor-sla-warn-bg: #fef9c3; --cor-sla-warn-fg: #92400e; --cor-sla-warn-bd: #fde68a;
+    --cor-sla-late-bg: #fee2e2; --cor-sla-late-fg: #991b1b; --cor-sla-late-bd: #fca5a5;
+    --cor-sla-sem-bg:  #f3f4f6; --cor-sla-sem-fg:  #6b7280; --cor-sla-sem-bd:  #e5e7eb;
+
+    /* Importação VigiMed */
+    --cor-vigimed-ok-bg:   #ecfdf5; --cor-vigimed-ok-fg:   #047857; --cor-vigimed-ok-bd:   #a7f3d0;
+    --cor-vigimed-pend-bg: #fffbeb; --cor-vigimed-pend-fg: #b45309; --cor-vigimed-pend-bd: #fde68a;
+  }
+
+  /* =====================================================
      ANIMAÇÕES E TRANSITIONS GLOBAIS
   ===================================================== */
   .fade-in { animation: fadeIn 0.25s ease-in; }
@@ -87,12 +119,133 @@
   .skeleton-card { height: 110px; margin-bottom: 12px; }
 
   /* =====================================================
-     BADGES DE SLA
+     BADGES DE SLA — cores vindas dos tokens :root
   ===================================================== */
-  .badge-sla-ok    { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
-  .badge-sla-warn  { background: #fef9c3; color: #92400e; border: 1px solid #fde68a; }
-  .badge-sla-late  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-  .badge-sla-sem   { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+  .badge-sla-ok   { background: var(--cor-sla-ok-bg);   color: var(--cor-sla-ok-fg);   border: 1px solid var(--cor-sla-ok-bd); }
+  .badge-sla-warn { background: var(--cor-sla-warn-bg); color: var(--cor-sla-warn-fg); border: 1px solid var(--cor-sla-warn-bd); }
+  .badge-sla-late { background: var(--cor-sla-late-bg); color: var(--cor-sla-late-fg); border: 1px solid var(--cor-sla-late-bd); }
+  .badge-sla-sem  { background: var(--cor-sla-sem-bg);  color: var(--cor-sla-sem-fg);  border: 1px solid var(--cor-sla-sem-bd); }
+
+  /* =====================================================
+     BADGES DE STATUS / ORIGEM / VIGIMED — tokens :root
+     (substituem as classes de cor utilitárias do Tailwind que
+     antes ficavam inline no construirCard e afins)
+  ===================================================== */
+  .badge-tipo-de { background: var(--cor-de-bg); color: var(--cor-de-fg); }
+  .badge-tipo-ba { background: var(--cor-ba-bg); color: var(--cor-ba-fg); }
+
+  .txt-concluido  { color: var(--cor-concluido); }
+  .txt-descartado { color: var(--cor-descartado); }
+
+  .badge-vigimed-ok   { background: var(--cor-vigimed-ok-bg);   color: var(--cor-vigimed-ok-fg);   border: 1px solid var(--cor-vigimed-ok-bd); }
+  .badge-vigimed-pend { background: var(--cor-vigimed-pend-bg); color: var(--cor-vigimed-pend-fg); border: 1px solid var(--cor-vigimed-pend-bd); }
+
+  /* =====================================================
+     TEMA ESCURO — "skin" sobre o Tailwind (sem rebuild).
+     Ativado por data-theme="dark" no <html> (definido cedo, antes
+     do paint, por um script no <head> que lê localStorage). Reaproveita
+     os tokens de status (sobrescritos abaixo) e remapeia os utilitários
+     de superfície/texto/borda mais usados. A especificidade do seletor
+     (atributo + descendente) vence a classe utilitária simples do
+     Tailwind sem precisar de !important. A navbar/login teal e os botões
+     de ação coloridos permanecem — só as superfícies neutras invertem.
+  ===================================================== */
+  :root[data-theme="dark"] {
+    /* Badges de status/origem/SLA/VigiMed reajustados p/ fundo escuro */
+    --cor-de-bg: rgba(168,85,247,.20); --cor-de-fg: #e9d5ff;
+    --cor-ba-bg: rgba(239,68,68,.20);  --cor-ba-fg: #fecaca;
+    --cor-concluido: #4ade80; --cor-descartado: #94a3b8;
+    --cor-sla-ok-bg:  rgba(16,185,129,.16); --cor-sla-ok-fg:  #6ee7b7; --cor-sla-ok-bd:  rgba(16,185,129,.40);
+    --cor-sla-warn-bg:rgba(234,179,8,.16);  --cor-sla-warn-fg:#fde047; --cor-sla-warn-bd:rgba(234,179,8,.40);
+    --cor-sla-late-bg:rgba(239,68,68,.16);  --cor-sla-late-fg:#fca5a5; --cor-sla-late-bd:rgba(239,68,68,.40);
+    --cor-sla-sem-bg: rgba(148,163,184,.16);--cor-sla-sem-fg: #cbd5e1; --cor-sla-sem-bd: rgba(148,163,184,.35);
+    --cor-vigimed-ok-bg:  rgba(16,185,129,.16); --cor-vigimed-ok-fg:  #6ee7b7; --cor-vigimed-ok-bd:  rgba(16,185,129,.40);
+    --cor-vigimed-pend-bg:rgba(245,158,11,.16); --cor-vigimed-pend-fg:#fcd34d; --cor-vigimed-pend-bd:rgba(245,158,11,.40);
+
+    --dk-bg: #0f172a;        /* fundo do app */
+    --dk-surface: #1e293b;   /* cartões / painéis / modais */
+    --dk-surface-2: #172033; /* inputs / superfícies sutis */
+    --dk-border: #334155;
+    --dk-txt: #e5e7eb;
+    --dk-txt-2: #94a3b8;
+  }
+
+  /* Fundo geral + superfícies */
+  :root[data-theme="dark"] body               { background-color: var(--dk-bg); color: var(--dk-txt); }
+  :root[data-theme="dark"] .bg-gray-100,
+  :root[data-theme="dark"] .bg-slate-100      { background-color: var(--dk-bg); }
+  :root[data-theme="dark"] .bg-white          { background-color: var(--dk-surface); }
+  :root[data-theme="dark"] .bg-gray-50        { background-color: var(--dk-surface-2); }
+  :root[data-theme="dark"] .bg-gray-200       { background-color: #334155; }
+  :root[data-theme="dark"] .bg-gray-300       { background-color: #475569; }
+  :root[data-theme="dark"] .bg-gray-900       { background-color: #020617; }
+
+  /* Texto */
+  :root[data-theme="dark"] .text-gray-800,
+  :root[data-theme="dark"] .text-gray-700     { color: var(--dk-txt); }
+  :root[data-theme="dark"] .text-gray-600,
+  :root[data-theme="dark"] .text-gray-500,
+  :root[data-theme="dark"] .text-gray-400     { color: var(--dk-txt-2); }
+  :root[data-theme="dark"] .text-teal-700     { color: #5eead4; }   /* legível sobre cartão escuro */
+
+  /* Bordas */
+  :root[data-theme="dark"] .border-gray-100,
+  :root[data-theme="dark"] .border-gray-200,
+  :root[data-theme="dark"] .border-gray-300   { border-color: var(--dk-border); }
+  :root[data-theme="dark"] .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--dk-border); }
+  :root[data-theme="dark"] .kanban-card       { border-color: var(--dk-border); }
+
+  /* Hovers de superfície */
+  :root[data-theme="dark"] .hover\:bg-gray-50:hover  { background-color: #233043; }
+  :root[data-theme="dark"] .hover\:bg-gray-100:hover { background-color: #233043; }
+  :root[data-theme="dark"] .hover\:bg-gray-200:hover { background-color: #2b3a52; }
+  :root[data-theme="dark"] .hover\:bg-white:hover    { background-color: var(--dk-surface); }
+  :root[data-theme="dark"] .naranjo-row:hover        { background: #233043; }
+
+  /* Skeleton no escuro */
+  :root[data-theme="dark"] .skeleton {
+    background: linear-gradient(90deg, #1e293b 25%, #273549 50%, #1e293b 75%);
+    background-size: 200% 100%;
+  }
+
+  /* --- Painéis tingidos (info boxes, seções coloridas de modais/admin) ---
+     No claro são fundos -50/-100 com texto -700/-800 casado. No escuro isso
+     ofuscaria, então: fundo vira tint translúcido da mesma cor, texto e borda
+     clareiam — mantendo a semântica (teal=info, red=alerta, etc.) legível. */
+  :root[data-theme="dark"] .bg-blue-50,   :root[data-theme="dark"] .bg-blue-100    { background-color: rgba(59,130,246,.14); }
+  :root[data-theme="dark"] .bg-purple-50, :root[data-theme="dark"] .bg-purple-100  { background-color: rgba(168,85,247,.14); }
+  :root[data-theme="dark"] .bg-red-50,    :root[data-theme="dark"] .bg-red-100     { background-color: rgba(239,68,68,.14); }
+  :root[data-theme="dark"] .bg-amber-50                                            { background-color: rgba(245,158,11,.14); }
+  :root[data-theme="dark"] .bg-orange-50, :root[data-theme="dark"] .bg-orange-100  { background-color: rgba(249,115,22,.14); }
+  :root[data-theme="dark"] .bg-teal-50,   :root[data-theme="dark"] .bg-teal-100    { background-color: rgba(20,184,166,.14); }
+  :root[data-theme="dark"] .bg-emerald-50                                          { background-color: rgba(16,185,129,.14); }
+  :root[data-theme="dark"] .bg-green-50,  :root[data-theme="dark"] .bg-green-100   { background-color: rgba(34,197,94,.14); }
+  :root[data-theme="dark"] .bg-yellow-50                                           { background-color: rgba(250,204,21,.12); }
+  :root[data-theme="dark"] .bg-pink-50                                             { background-color: rgba(236,72,153,.14); }
+
+  :root[data-theme="dark"] .text-blue-600,   :root[data-theme="dark"] .text-blue-700,   :root[data-theme="dark"] .text-blue-800   { color: #93c5fd; }
+  :root[data-theme="dark"] .text-purple-600, :root[data-theme="dark"] .text-purple-700, :root[data-theme="dark"] .text-purple-800 { color: #d8b4fe; }
+  :root[data-theme="dark"] .text-red-600,    :root[data-theme="dark"] .text-red-700,    :root[data-theme="dark"] .text-red-800    { color: #fca5a5; }
+  :root[data-theme="dark"] .text-orange-600, :root[data-theme="dark"] .text-orange-800                                            { color: #fdba74; }
+  :root[data-theme="dark"] .text-amber-600,  :root[data-theme="dark"] .text-amber-700,  :root[data-theme="dark"] .text-amber-800  { color: #fcd34d; }
+  :root[data-theme="dark"] .text-teal-600,   :root[data-theme="dark"] .text-teal-800                                             { color: #5eead4; }
+  :root[data-theme="dark"] .text-green-700,  :root[data-theme="dark"] .text-green-800                                            { color: #86efac; }
+  :root[data-theme="dark"] .text-emerald-700,:root[data-theme="dark"] .text-emerald-800                                          { color: #6ee7b7; }
+  :root[data-theme="dark"] .text-yellow-800                                                                                       { color: #fde047; }
+
+  :root[data-theme="dark"] .border-blue-100,   :root[data-theme="dark"] .border-blue-200   { border-color: rgba(59,130,246,.35); }
+  :root[data-theme="dark"] .border-red-200                                                 { border-color: rgba(239,68,68,.35); }
+  :root[data-theme="dark"] .border-amber-200                                               { border-color: rgba(245,158,11,.35); }
+  :root[data-theme="dark"] .border-orange-200, :root[data-theme="dark"] .border-orange-300 { border-color: rgba(249,115,22,.35); }
+  :root[data-theme="dark"] .border-teal-200,   :root[data-theme="dark"] .border-teal-300   { border-color: rgba(20,184,166,.35); }
+  :root[data-theme="dark"] .border-emerald-200                                             { border-color: rgba(16,185,129,.35); }
+  :root[data-theme="dark"] .border-green-200                                               { border-color: rgba(34,197,94,.35); }
+  :root[data-theme="dark"] .border-yellow-300                                              { border-color: rgba(250,204,21,.35); }
+  :root[data-theme="dark"] .border-pink-200                                                { border-color: rgba(236,72,153,.35); }
+
+  /* Botão de tema na navbar (mesmo formato dos pills-action) */
+  .btn-tema { transition: transform .15s ease, background-color .15s ease; }
+  .btn-tema:hover { transform: translateY(-1px); }
 
   /* =====================================================
      CARD KANBAN

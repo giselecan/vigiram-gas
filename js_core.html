@@ -162,6 +162,37 @@ function _mostrarLogin() {
   _animarEntrada(document.getElementById('loginCard'), 'login-card-anim');
 }
 
+// ---------------------------------------------------------
+// TEMA CLARO / ESCURO
+// O tema é aplicado no <html data-theme> — o CSS (styles.html) faz o resto.
+// A preferência é salva em localStorage e reaplicada antes do paint por um
+// script no <head> (evita flash). Aqui só tratamos o TOGGLE e o ícone do botão.
+// ---------------------------------------------------------
+function _temaAtual() {
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function _aplicarTema(tema) {
+  document.documentElement.setAttribute('data-theme', tema);
+  const btn = document.getElementById('btnTema');
+  // Ícone-alvo: no claro mostra a lua (clique → escuro); no escuro mostra o sol.
+  if (btn) btn.innerHTML = tema === 'dark'
+    ? '<i class="fas fa-sun"></i>'
+    : '<i class="fas fa-moon"></i>';
+  // Chart.js pinta cores fixas no desenho — se o Dashboard estiver aberto,
+  // redesenha para as legendas/labels acompanharem o tema.
+  const dash = document.getElementById('view-dashboard');
+  if (dash && !dash.classList.contains('hidden') && typeof desenharGraficos === 'function') {
+    desenharGraficos();
+  }
+}
+
+function alternarTema() {
+  const novo = _temaAtual() === 'dark' ? 'light' : 'dark';
+  _aplicarTema(novo);
+  try { localStorage.setItem('vigi_tema', novo); } catch (e) { /* sandbox: só nesta sessão */ }
+}
+
 function inicializar() {
   tokenSessao = sessionStorage.getItem('vigi_token');
 
@@ -205,6 +236,7 @@ function iniciarAppSeguro() {
   containerApp.classList.remove('hidden');
   containerApp.classList.add('flex');
   _animarEntrada(containerApp, 'tela-anim'); // cross-fade suave login → app
+  _aplicarTema(_temaAtual());                // reflete no ícone o tema já aplicado no <head>
   _configurarAbaAdmin();
   construirNaranjo();
   carregarConfig();

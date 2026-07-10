@@ -6,6 +6,8 @@
        variados da assistência precisam poder ampliar o formulário). -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Notificação de RAM · VigiRAM</title>
+  <!-- Tema: respeita a preferência salva (mesmo origin do painel) antes do paint. -->
+  <script>try{var _t=localStorage.getItem('vigi_tema');if(_t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
   <!-- Favicon NÃO vai aqui: dentro do iframe do GAS o <link rel=icon> é ignorado
        pela aba. Aplicado no servidor via setFaviconUrl (Router.gs/Favicon.gs). -->
   <!-- Tailwind: CSS pré-compilado embutido via styles.html (npm run build:css) —
