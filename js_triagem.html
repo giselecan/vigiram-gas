@@ -28,6 +28,7 @@ function abrirTriagem(id) {
 
   document.getElementById('formTriagem').reset();
   toggleFormTriagem(null);
+  toggleMotivoDescarteOutro();
 
   document.getElementById('modalTriagem').classList.remove('hidden');
 }
@@ -48,6 +49,22 @@ function toggleFormTriagem(isRam) {
   document.getElementById('trgAreaNao').classList.toggle('hidden', isRam !== false);
   document.getElementById('trgMedSuspeito').required    = isRam === true;
   document.getElementById('trgMotivoDescarte').required = isRam === false;
+  if (isRam !== false) toggleMotivoDescarteOutro();
+}
+
+/**
+ * Mostra o campo de texto livre quando o motivo selecionado é "Outros" —
+ * a lista é configurável pelo admin (js_admin.html: cfg.listas.motivo_descarte),
+ * então o match é por prefixo "OUTRO" em vez de depender do texto exato.
+ */
+function toggleMotivoDescarteOutro() {
+  const select = document.getElementById('trgMotivoDescarte');
+  const campoOutro = document.getElementById('trgMotivoDescarteOutro');
+  const ehOutro = /^OUTRO/i.test(select.value.trim());
+
+  campoOutro.classList.toggle('hidden', !ehOutro);
+  campoOutro.required = ehOutro;
+  if (!ehOutro) campoOutro.value = '';
 }
 
 // ---------------------------------------------------------
@@ -62,6 +79,13 @@ function enviarTriagem(e) {
     return;
   }
 
+  const motivoSelecionado = document.getElementById('trgMotivoDescarte').value;
+  const motivoOutro       = document.getElementById('trgMotivoDescarteOutro').value.trim();
+  if (radioChecked.value === 'NAO' && /^OUTRO/i.test(motivoSelecionado.trim()) && !motivoOutro) {
+    mostrarToast('Descreva o motivo do descarte.', 'erro');
+    return;
+  }
+
   const btn = document.getElementById('btnSalvarTriagem');
   btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
   btn.disabled  = true;
@@ -70,7 +94,7 @@ function enviarTriagem(e) {
     idCaso:         _triagemIdAtual,
     houveRam:       radioChecked.value === 'SIM',
     medSuspeito:    document.getElementById('trgMedSuspeito').value,
-    motivoDescarte: document.getElementById('trgMotivoDescarte').value
+    motivoDescarte: motivoOutro || motivoSelecionado
   };
 
   google.script.run
