@@ -54,6 +54,7 @@ function doGet(e) {
       const htmlForm = HtmlService.createTemplateFromFile('form').evaluate();
       htmlForm.setTitle('VigiRAM - Notificação');
       htmlForm.addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      aplicarFavicon_(htmlForm); // Favicon.gs — setFaviconUrl na página de cima (o <link> no HTML é ignorado no iframe do GAS)
       return htmlForm;
     }
 
@@ -62,6 +63,7 @@ function doGet(e) {
     htmlIndex.setTitle('VigiRAM');
     htmlIndex.addMetaTag('viewport', 'width=device-width, initial-scale=1');
     htmlIndex.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT);
+    aplicarFavicon_(htmlIndex); // Favicon.gs — idem
     return htmlIndex;
 
   } catch (erro) {
