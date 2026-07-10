@@ -198,7 +198,7 @@ function listarLogsAuditoria(token, limite) {
     }
     return docs.map(function (d) {
       return {
-        data:    d.data || null,
+        data:    d.data ? new Date(d.data).toISOString() : null,
         usuario: String(d.usuario || '').trim(),
         acao:    String(d.acao    || '').trim(),
         idCaso:  String(d.idCaso  || '').trim(),
