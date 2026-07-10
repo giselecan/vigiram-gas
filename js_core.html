@@ -219,6 +219,12 @@ function realizarLogin(event) {
         sessionStorage.setItem('vigi_nome', res.nome);
         sessionStorage.setItem('vigi_perfil', res.perfil || 'FARMACEUTICO');
         tokenSessao = res.token;
+        // Restaura o botão ANTES de trocar de tela — sem isto ele fica como
+        // spinner desabilitado e, ao voltar ao login (logout sem reload), não
+        // daria para logar de novo.
+        btn.innerHTML = originalHtml;
+        btn.disabled  = false;
+        document.getElementById('loginSenha').value = '';
         _exibirNomeUsuario(res.nome || '');
         mostrarToast('Bem-vindo(a), ' + res.nome, 'sucesso');
         iniciarAppSeguro();
@@ -303,16 +309,18 @@ function fazerLogout() {
   sessionStorage.removeItem('vigi_perfil');
   tokenSessao = null;
 
-  const _recarregar = () => window.location.reload();
-
+  // Invalida a sessão no servidor (best-effort — não bloqueia o retorno ao login).
   if (t && window.google && google.script && google.script.run) {
-    google.script.run
-      .withSuccessHandler(_recarregar)
-      .withFailureHandler(_recarregar)
-      .encerrarSessao(t);
-  } else {
-    _recarregar();
+    google.script.run.encerrarSessao(t);
   }
+
+  // NÃO usar window.location.reload(): o app roda dentro de um iframe sandbox
+  // do Apps Script, onde o reload é bloqueado/inócuo — era por isso que "Sair"
+  // limpava a sessão mas NÃO voltava para o login. Mostramos a tela de login
+  // diretamente (o token já foi limpo, então nenhuma chamada protegida passa).
+  const inputSenha = document.getElementById('loginSenha');
+  if (inputSenha) inputSenha.value = ''; // não deixar a senha no campo oculto
+  _mostrarLogin();
 }
 
 // ---------------------------------------------------------
@@ -489,8 +497,9 @@ function carregarCasos() {
         sessionStorage.removeItem('vigi_nome');
         sessionStorage.removeItem('vigi_perfil');
         tokenSessao = null;
-        mostrarToast('Sessão expirada. Redirecionando...', 'erro');
-        setTimeout(() => window.location.reload(), 1500);
+        mostrarToast('Sessão expirada. Faça login novamente.', 'erro');
+        // reload é inócuo no iframe sandbox do GAS — volta ao login direto.
+        _mostrarLogin();
       } else {
         mostrarToast('Erro ao carregar casos: ' + msg, 'erro');
         if (btn) btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
