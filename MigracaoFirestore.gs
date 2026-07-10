@@ -373,8 +373,13 @@ function migrarGatilhosParaFirestore(dryRun) {
   for (let i = 1; i < dados.length; i++) {
     const medicamento = String(dados[i][0] || '').trim().toUpperCase();
     if (!medicamento) continue;
-    // Mesma regra de "ativo" do handleGetTriggers original: coluna D ausente == ativo.
-    const ativo = dados[i][3] != null ? !!dados[i][3] : true;
+    // Coluna D vazia significa ativo. getValues() devolve célula vazia como
+    // string "", portanto testar apenas null/undefined marcava todos como
+    // inativos. Valores explícitos de negação continuam sendo respeitados.
+    const valorAtivo = String(dados[i][3] || '').trim().toUpperCase();
+    const ativo = valorAtivo === ''
+      ? true
+      : ['NÃO', 'NAO', 'FALSE', '0', 'INATIVO'].indexOf(valorAtivo) === -1;
     const id = medicamento.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
     if (!id) continue;
 
