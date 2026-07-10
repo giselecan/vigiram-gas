@@ -18,6 +18,30 @@
     to   { opacity: 1; transform: none; }
   }
 
+  /* Transição de TELA (login <-> app, troca de abas). display:none corta
+     transições de CSS, então re-disparamos esta animação por JS (reflow)
+     ao exibir a tela — cross-fade suave em vez do "salto" seco. */
+  .tela-anim { animation: telaFade 0.35s cubic-bezier(.4,0,.2,1) both; }
+  @keyframes telaFade {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* Entrada do cartão de login — pop suave (spring leve). */
+  .login-card-anim { animation: loginPop 0.42s cubic-bezier(.34,1.4,.64,1) both; }
+  @keyframes loginPop {
+    from { opacity: 0; transform: translateY(14px) scale(.965); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* Botões em carregamento — feedback consistente (login, sincronizar…). */
+  .btn-carregando { pointer-events: none; opacity: .9; cursor: progress; }
+
+  /* Respeita usuários que pediram menos movimento. */
+  @media (prefers-reduced-motion: reduce) {
+    .tela-anim, .login-card-anim, .fade-in { animation: none; }
+  }
+
   /* =====================================================
      SAAS POLISH — navbar, badges, cards
   ===================================================== */
