@@ -610,18 +610,43 @@ function _renderSecaoEmails(area) {
             <input type="email" id="cfgEmailCoord" value="${escapeHtml(geral.EMAIL_COORDENACAO || '')}"
                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
           </div>
-          <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-            <label class="block text-xs font-bold text-gray-600 mb-1">Alertas Ativos</label>
-            <p class="text-xs text-gray-400 mb-2">Ativar/desativar o envio de todos os e-mails automáticos.</p>
-            <select id="cfgAlertasAtivos" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none">
-              <option value="SIM" ${geral.ALERTAS_ATIVOS === 'SIM' ? 'selected' : ''}>Ativados</option>
-              <option value="NAO" ${geral.ALERTAS_ATIVOS === 'NAO' ? 'selected' : ''}>Desativados</option>
-            </select>
+          <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-center justify-between gap-4">
+            <div>
+              <label class="block text-xs font-bold text-gray-600 mb-1">Alertas Ativos</label>
+              <p class="text-xs text-gray-400">Ativa/desativa o envio de todos os e-mails automáticos (relatório diário de gatilhos, nova demanda espontânea e investigação concluída). Aplica na hora, sem precisar salvar.</p>
+            </div>
+            <button id="cfgAlertasToggle" onclick="_cfgAlternarAlertas(this)"
+                    data-ativo="${geral.ALERTAS_ATIVOS === 'NAO' ? 'NAO' : 'SIM'}"
+                    title="${geral.ALERTAS_ATIVOS === 'NAO' ? 'Clique para ativar' : 'Clique para desativar'}"
+                    class="relative inline-flex shrink-0 h-8 w-14 items-center rounded-full transition-colors duration-200 ${geral.ALERTAS_ATIVOS === 'NAO' ? 'bg-gray-300' : 'bg-teal-600'}">
+              <span class="inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform duration-200 ${geral.ALERTAS_ATIVOS === 'NAO' ? 'translate-x-1' : 'translate-x-7'}"></span>
+            </button>
           </div>
           <button onclick="_cfgSalvarEmails(this)"
                   class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
-            <i class="fas fa-save"></i> Salvar Configurações de E-mail
+            <i class="fas fa-save"></i> Salvar E-mail da Coordenação
           </button>
+
+          <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <label class="block text-xs font-bold text-gray-600 mb-1">Ver Modelo dos E-mails</label>
+            <p class="text-xs text-gray-400 mb-3">Envia um exemplo (com dados fictícios) de cada e-mail automático para o endereço abaixo, só para conferir design e layout.</p>
+            <input type="email" id="cfgEmailTeste" placeholder="seu-email@exemplo.com" value="gisele.can@isgh.org.br"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3 focus:ring-2 focus:ring-teal-500 outline-none">
+            <div class="flex flex-wrap gap-2">
+              <button onclick="_cfgEnviarEmailTeste(this, 'RELATORIO_DIARIO')"
+                      class="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition">
+                <i class="fas fa-clipboard-list"></i> Relatório Diário
+              </button>
+              <button onclick="_cfgEnviarEmailTeste(this, 'NOVA_DEMANDA')"
+                      class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition">
+                <i class="fas fa-bell"></i> Nova Demanda Espontânea
+              </button>
+              <button onclick="_cfgEnviarEmailTeste(this, 'INVESTIGACAO_CONCLUIDA')"
+                      class="bg-green-600 hover:bg-green-700 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center gap-2 transition">
+                <i class="fas fa-check-circle"></i> Investigação Concluída
+              </button>
+            </div>
+          </div>
         </div>`;
     })
     .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
@@ -630,14 +655,63 @@ function _renderSecaoEmails(area) {
 
 function _cfgSalvarEmails(btn) {
   const dados = {
-    EMAIL_COORDENACAO: document.getElementById('cfgEmailCoord').value.trim(),
-    ALERTAS_ATIVOS:    document.getElementById('cfgAlertasAtivos').value
+    EMAIL_COORDENACAO: document.getElementById('cfgEmailCoord').value.trim()
   };
   _iniciarCarregando(btn);
   google.script.run
     .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
     .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .salvarConfigGeral(dados, tokenSessao);
+}
+
+/** Botão-toggle: aplica a mudança na hora (sem passar pelo fluxo de "Salvar"). */
+function _cfgAlternarAlertas(btn) {
+  if (btn.dataset.carregando === '1') return;
+  const ativoAtual = btn.dataset.ativo !== 'NAO';
+  const novoValor  = ativoAtual ? 'NAO' : 'SIM';
+
+  btn.dataset.carregando = '1';
+  btn.disabled = true;
+  btn.classList.add('opacity-60', 'cursor-not-allowed');
+
+  google.script.run
+    .withSuccessHandler(res => {
+      btn.dataset.carregando = '0';
+      btn.disabled = false;
+      btn.classList.remove('opacity-60', 'cursor-not-allowed');
+      if (!res.sucesso) { mostrarToast(res.mensagem, 'erro'); return; }
+
+      btn.dataset.ativo = novoValor;
+      const knob = btn.querySelector('span');
+      if (novoValor === 'NAO') {
+        btn.classList.remove('bg-teal-600'); btn.classList.add('bg-gray-300');
+        knob.classList.remove('translate-x-7'); knob.classList.add('translate-x-1');
+        btn.title = 'Clique para ativar';
+      } else {
+        btn.classList.remove('bg-gray-300'); btn.classList.add('bg-teal-600');
+        knob.classList.remove('translate-x-1'); knob.classList.add('translate-x-7');
+        btn.title = 'Clique para desativar';
+      }
+      invalidarConfigCache();
+      mostrarToast(`Alertas por e-mail ${novoValor === 'SIM' ? 'ativados' : 'desativados'}.`, 'sucesso');
+    })
+    .withFailureHandler(e => {
+      btn.dataset.carregando = '0';
+      btn.disabled = false;
+      btn.classList.remove('opacity-60', 'cursor-not-allowed');
+      mostrarToast(e.message, 'erro');
+    })
+    .salvarConfigGeral({ ALERTAS_ATIVOS: novoValor }, tokenSessao);
+}
+
+function _cfgEnviarEmailTeste(btn, tipo) {
+  const destino = document.getElementById('cfgEmailTeste').value.trim();
+  if (!destino) { mostrarToast('Informe um e-mail de destino para o teste.', 'erro'); return; }
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
+    .enviarEmailTeste(tipo, destino, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────

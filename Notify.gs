@@ -137,45 +137,7 @@ function enviarRelatorioDiarioGatilhos() {
   for (const setor in casosPorSetor) {
     const emailDestino = DIRETORIO[setor] || EMAIL_COORDENACAO;
     const listaCasos = casosPorSetor[setor];
-    const setorSeguro = escaparHtml_(setor);
-    const assunto = `📋 VigiRAM: Relatório Diário — ${listaCasos.length} Gatilho(s) em ${setor}`;
-
-    let linhas = "";
-    listaCasos.forEach(function (c) {
-      linhas += `
-        <tr>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.prontuario)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.iniciais)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;color:#c2410c;font-weight:bold;">${escaparHtml_(c.medicamento)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(c.data)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(_rotuloStatus_(c.status))}</td>
-        </tr>`;
-    });
-
-    const corpo = `
-      <p style="color:#374151;font-size:16px;">Olá,</p>
-      <p style="color:#374151;font-size:16px;">Este é o resumo diário dos gatilhos rastreados pelo <b>VigiRAM</b> nas últimas 24h para o seu setor (<strong>${setorSeguro}</strong>).</p>
-      <table style="width:100%;border-collapse:collapse;margin-top:15px;">
-        <thead>
-          <tr style="background-color:#f9fafb;">
-            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Prontuário</th>
-            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Paciente</th>
-            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Medicamento</th>
-            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Data</th>
-            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Status atual</th>
-          </tr>
-        </thead>
-        <tbody>${linhas}</tbody>
-      </table>`;
-
-    const html = _montarEmailBase_(
-      '#f97316',
-      'Relatório Diário de Gatilhos',
-      'Busca Ativa (Trigger Tool) — últimas 24h',
-      corpo,
-      LINK_SISTEMA,
-      'Abrir VigiRAM'
-    );
+    const { assunto, html } = _montarEmailRelatorioDiario_(setor, listaCasos, LINK_SISTEMA);
 
     try {
       MailApp.sendEmail({ to: emailDestino, subject: assunto, htmlBody: html });
@@ -183,6 +145,51 @@ function enviarRelatorioDiarioGatilhos() {
       console.error('Falha ao enviar relatório diário para ' + setor + ' (' + emailDestino + '): ' + e.message);
     }
   }
+}
+
+/** Monta assunto + HTML do relatório diário para um setor — usado no envio real e no e-mail de teste. */
+function _montarEmailRelatorioDiario_(setor, listaCasos, linkSistema) {
+  const setorSeguro = escaparHtml_(setor);
+  const assunto = `📋 VigiRAM: Relatório Diário — ${listaCasos.length} Gatilho(s) em ${setor}`;
+
+  let linhas = "";
+  listaCasos.forEach(function (c) {
+    linhas += `
+      <tr>
+        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.prontuario)}</td>
+        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.iniciais)}</td>
+        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;color:#c2410c;font-weight:bold;">${escaparHtml_(c.medicamento)}</td>
+        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(c.data)}</td>
+        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(_rotuloStatus_(c.status))}</td>
+      </tr>`;
+  });
+
+  const corpo = `
+    <p style="color:#374151;font-size:16px;">Olá,</p>
+    <p style="color:#374151;font-size:16px;">Este é o resumo diário dos gatilhos rastreados pelo <b>VigiRAM</b> nas últimas 24h para o seu setor (<strong>${setorSeguro}</strong>).</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+      <thead>
+        <tr style="background-color:#f9fafb;">
+          <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Prontuário</th>
+          <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Paciente</th>
+          <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Medicamento</th>
+          <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Data</th>
+          <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Status atual</th>
+        </tr>
+      </thead>
+      <tbody>${linhas}</tbody>
+    </table>`;
+
+  const html = _montarEmailBase_(
+    '#f97316',
+    'Relatório Diário de Gatilhos',
+    'Busca Ativa (Trigger Tool) — últimas 24h',
+    corpo,
+    linkSistema,
+    'Abrir VigiRAM'
+  );
+
+  return { assunto, html };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -205,35 +212,43 @@ function notificarNovaDemandaEspontanea_(caso) {
     const emailDestino = DIRETORIO[setor] || EMAIL_COORDENACAO;
     const LINK_SISTEMA = ScriptApp.getService().getUrl();
 
-    const notificador = caso.notificador || {};
-    const assunto = `🔔 VigiRAM: Nova Demanda Espontânea em ${setor}`;
-
-    const corpo = `
-      <p style="color:#374151;font-size:16px;">Olá,</p>
-      <p style="color:#374151;font-size:16px;">Uma nova <b>Demanda Espontânea</b> foi registrada para o seu setor (<strong>${escaparHtml_(setor)}</strong>) e está aguardando investigação.</p>
-      <table style="width:100%;border-collapse:collapse;margin-top:15px;">
-        <tbody>
-          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;width:40%;">Prontuário</td><td style="padding:8px 10px;font-weight:bold;">${escaparHtml_(caso.prontuario)}</td></tr>
-          <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Paciente</td><td style="padding:8px 10px;">${escaparHtml_(caso.iniciais)}</td></tr>
-          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Medicamento</td><td style="padding:8px 10px;color:#c2410c;font-weight:bold;">${escaparHtml_(caso.medicamento)}</td></tr>
-          <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Notificado por</td><td style="padding:8px 10px;">${escaparHtml_(notificador.nome || 'N/I')} (${escaparHtml_(notificador.categoria || 'N/I')})</td></tr>
-        </tbody>
-      </table>
-      <p style="color:#374151;font-size:14px;margin-top:20px;">Acesse o VigiRAM para iniciar a investigação deste caso.</p>`;
-
-    const html = _montarEmailBase_(
-      '#2563eb',
-      'Nova Demanda Espontânea',
-      setor,
-      corpo,
-      LINK_SISTEMA,
-      'Investigar Agora'
-    );
+    const { assunto, html } = _montarEmailNovaDemandaEspontanea_(caso, LINK_SISTEMA);
 
     MailApp.sendEmail({ to: emailDestino, subject: assunto, htmlBody: html });
   } catch (e) {
     console.error('notificarNovaDemandaEspontanea_: falha ao enviar e-mail: ' + e.message);
   }
+}
+
+/** Monta assunto + HTML do alerta de nova Demanda Espontânea — usado no envio real e no e-mail de teste. */
+function _montarEmailNovaDemandaEspontanea_(caso, linkSistema) {
+  const setor = String(caso.setor || '').toUpperCase().trim();
+  const notificador = caso.notificador || {};
+  const assunto = `🔔 VigiRAM: Nova Demanda Espontânea em ${setor}`;
+
+  const corpo = `
+    <p style="color:#374151;font-size:16px;">Olá,</p>
+    <p style="color:#374151;font-size:16px;">Uma nova <b>Demanda Espontânea</b> foi registrada para o seu setor (<strong>${escaparHtml_(setor)}</strong>) e está aguardando investigação.</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+      <tbody>
+        <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;width:40%;">Prontuário</td><td style="padding:8px 10px;font-weight:bold;">${escaparHtml_(caso.prontuario)}</td></tr>
+        <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Paciente</td><td style="padding:8px 10px;">${escaparHtml_(caso.iniciais)}</td></tr>
+        <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Medicamento</td><td style="padding:8px 10px;color:#c2410c;font-weight:bold;">${escaparHtml_(caso.medicamento)}</td></tr>
+        <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Notificado por</td><td style="padding:8px 10px;">${escaparHtml_(notificador.nome || 'N/I')} (${escaparHtml_(notificador.categoria || 'N/I')})</td></tr>
+      </tbody>
+    </table>
+    <p style="color:#374151;font-size:14px;margin-top:20px;">Acesse o VigiRAM para iniciar a investigação deste caso.</p>`;
+
+  const html = _montarEmailBase_(
+    '#2563eb',
+    'Nova Demanda Espontânea',
+    setor,
+    corpo,
+    linkSistema,
+    'Investigar Agora'
+  );
+
+  return { assunto, html };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,36 +274,90 @@ function notificarInvestigacaoConcluida_(caso) {
     if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
     const LINK_FORM = ScriptApp.getService().getUrl() + '?page=form';
-    const assunto = `✅ VigiRAM: Investigação Concluída — Caso ${caso.id || caso._id}`;
-
-    const corpo = `
-      <p style="color:#374151;font-size:16px;">Olá, ${escaparHtml_(notificador.nome || '')},</p>
-      <p style="color:#374151;font-size:16px;">A investigação da notificação espontânea que você registrou foi <b>concluída</b> pela equipe de Farmacovigilância. Obrigado por contribuir com a segurança do paciente.</p>
-      <table style="width:100%;border-collapse:collapse;margin-top:15px;">
-        <tbody>
-          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;width:40%;">Prontuário</td><td style="padding:8px 10px;font-weight:bold;">${escaparHtml_(caso.prontuario)}</td></tr>
-          <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Setor</td><td style="padding:8px 10px;">${escaparHtml_(caso.setor)}</td></tr>
-          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Medicamento</td><td style="padding:8px 10px;color:#c2410c;font-weight:bold;">${escaparHtml_(caso.medicamento)}</td></tr>
-          ${caso.desfecho ? `<tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Desfecho</td><td style="padding:8px 10px;">${escaparHtml_(caso.desfecho)}</td></tr>` : ''}
-        </tbody>
-      </table>
-      <p style="color:#374151;font-size:15px;margin-top:20px;">
-        Identificou um novo evento suspeito relacionado a medicamentos? <b>Faça uma nova notificação</b> — quanto antes o caso for reportado, mais rápido a farmácia clínica pode investigar.
-      </p>`;
-
-    const html = _montarEmailBase_(
-      '#16a34a',
-      'Investigação Concluída',
-      'Obrigado por notificar',
-      corpo,
-      LINK_FORM,
-      'Fazer Nova Notificação'
-    );
+    const { assunto, html } = _montarEmailInvestigacaoConcluida_(caso, LINK_FORM);
 
     MailApp.sendEmail({ to: emailNotificador, subject: assunto, htmlBody: html });
   } catch (e) {
     console.error('notificarInvestigacaoConcluida_: falha ao enviar e-mail: ' + e.message);
   }
+}
+
+/** Monta assunto + HTML do alerta de investigação concluída — usado no envio real e no e-mail de teste. */
+function _montarEmailInvestigacaoConcluida_(caso, linkForm) {
+  const notificador = caso.notificador || {};
+  const assunto = `✅ VigiRAM: Investigação Concluída — Caso ${caso.id || caso._id}`;
+
+  const corpo = `
+    <p style="color:#374151;font-size:16px;">Olá, ${escaparHtml_(notificador.nome || '')},</p>
+    <p style="color:#374151;font-size:16px;">A investigação da notificação espontânea que você registrou foi <b>concluída</b> pela equipe de Farmacovigilância. Obrigado por contribuir com a segurança do paciente.</p>
+    <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+      <tbody>
+        <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;width:40%;">Prontuário</td><td style="padding:8px 10px;font-weight:bold;">${escaparHtml_(caso.prontuario)}</td></tr>
+        <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Setor</td><td style="padding:8px 10px;">${escaparHtml_(caso.setor)}</td></tr>
+        <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Medicamento</td><td style="padding:8px 10px;color:#c2410c;font-weight:bold;">${escaparHtml_(caso.medicamento)}</td></tr>
+        ${caso.desfecho ? `<tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Desfecho</td><td style="padding:8px 10px;">${escaparHtml_(caso.desfecho)}</td></tr>` : ''}
+      </tbody>
+    </table>
+    <p style="color:#374151;font-size:15px;margin-top:20px;">
+      Identificou um novo evento suspeito relacionado a medicamentos? <b>Faça uma nova notificação</b> — quanto antes o caso for reportado, mais rápido a farmácia clínica pode investigar.
+    </p>`;
+
+  const html = _montarEmailBase_(
+    '#16a34a',
+    'Investigação Concluída',
+    'Obrigado por notificar',
+    corpo,
+    linkForm,
+    'Fazer Nova Notificação'
+  );
+
+  return { assunto, html };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// E-MAIL DE TESTE (painel Admin) — envia um exemplo com dados fictícios para
+// o admin conferir o design/layout antes de confiar no envio automático.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Envia um e-mail de exemplo (dados fictícios) de um dos 3 fluxos deste
+ * arquivo para o endereço informado. Só ADMIN pode disparar. Ignora o
+ * toggle ALERTAS_ATIVOS de propósito — é um teste manual, não deve
+ * depender do alerta estar ligado/desligado.
+ * @param {'RELATORIO_DIARIO'|'NOVA_DEMANDA'|'INVESTIGACAO_CONCLUIDA'} tipo
+ * @param {string} destinatario
+ */
+function enviarEmailTeste(tipo, destinatario, token) {
+  return _comAdmin_(token, function () {
+    const email = String(destinatario || '').trim();
+    if (!email) throw new Error('Informe um e-mail de destino para o teste.');
+
+    const LINK_SISTEMA = ScriptApp.getService().getUrl();
+    const agora = new Date();
+    let montado;
+
+    if (tipo === 'RELATORIO_DIARIO') {
+      montado = _montarEmailRelatorioDiario_('UTI ADULTO', [
+        { prontuario: '123456', iniciais: 'J.S.', medicamento: 'VANCOMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy'), status: SCHEMA.STATUS.TRIAGEM },
+        { prontuario: '654321', iniciais: 'M.A.', medicamento: 'GENTAMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy'), status: SCHEMA.STATUS.INVESTIGACAO }
+      ], LINK_SISTEMA);
+    } else if (tipo === 'NOVA_DEMANDA') {
+      montado = _montarEmailNovaDemandaEspontanea_({
+        setor: 'UTI ADULTO', prontuario: '789012', iniciais: 'P.R.', medicamento: 'INSULINA',
+        notificador: { nome: 'Ana Souza', categoria: 'Enfermagem' }
+      }, LINK_SISTEMA);
+    } else if (tipo === 'INVESTIGACAO_CONCLUIDA') {
+      montado = _montarEmailInvestigacaoConcluida_({
+        id: 'ESP-789012-000001', prontuario: '789012', setor: 'UTI ADULTO', medicamento: 'INSULINA',
+        desfecho: 'Recuperado sem sequelas', notificador: { nome: 'Ana Souza' }
+      }, LINK_SISTEMA + '?page=form');
+    } else {
+      throw new Error('Tipo de e-mail de teste inválido: ' + tipo);
+    }
+
+    MailApp.sendEmail({ to: email, subject: '[TESTE] ' + montado.assunto, htmlBody: montado.html });
+    return { sucesso: true, mensagem: 'E-mail de teste enviado para ' + email + '.' };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
