@@ -200,7 +200,9 @@ function listarGatilhos(token) {
             id:           d._id,
             medicamento:  nome.trim().toUpperCase(),
             ativo:        d.ativo !== false,
-            atualizadoEm: d.atualizadoEm || null
+            atualizadoEm: d.atualizadoEm
+              ? new Date(d.atualizadoEm).toISOString()
+              : null
           };
         })
         .sort(function (a, b) { return a.medicamento.localeCompare(b.medicamento); });
