@@ -1,12 +1,11 @@
 /**
- * @fileoverview Notify.gs — Alertas por e-mail de novos gatilhos (Fase 4: Firestore).
+ * @fileoverview Notify.gs — Alertas por e-mail (gatilhos, demanda espontânea,
+ * conclusão de investigação). Fase 4/9: Firestore.
  *
  * MIGRAÇÃO: a única função que tocava Sheets diretamente era
  * resolverEmailsPorSetor_() (lia a aba legada DB_Config_Emails). Todo o
- * resto deste arquivo (enviarAlertasAgrupados, montagem de HTML, MailApp)
- * JÁ dependia exclusivamente de getConfig() — que foi migrado na Fase 4
- * anterior e já lê do Firestore. Portanto não precisou de nenhuma mudança
- * além da função abaixo.
+ * resto deste arquivo já depende exclusivamente de getConfig() — que foi
+ * migrado na Fase 4 anterior e já lê do Firestore.
  *
  * O e-mail legado (DB_Config_Emails) não fazia parte do plano de migração
  * de dados original porque já era tratado como fallback de baixa prioridade
@@ -16,6 +15,20 @@
  * Caso a aba esteja vazia/não exista (comum, já que é legado consolidado em
  * DB_Setores conforme a documentação original), pode ignorar esse passo —
  * o sistema funciona normalmente só com o canônico.
+ *
+ * SINALIZAÇÕES DE E-MAIL (3 fluxos, todos com layout visual compartilhado
+ * via _montarEmailBase_):
+ *  1) enviarRelatorioDiarioGatilhos() — job diário (07:00) que substitui o
+ *     alerta imediato por inserção: agrega os gatilhos (casos tipo 'BA')
+ *     identificados nas últimas 24h por setor e manda 1 e-mail por setor
+ *     para o farmacêutico responsável. Instalar com instalarTriggerRelatorioDiario().
+ *  2) notificarNovaDemandaEspontanea_(idCaso) — disparado na hora pela
+ *     criação de uma Demanda Espontânea (salvarDemandaEspontanea, Cases.gs),
+ *     avisa o farmacêutico do setor que há uma nova DE aguardando investigação.
+ *  3) notificarInvestigacaoConcluida_(idCaso) — disparado quando uma
+ *     investigação de DE é concluída (registrarInvestigacao, Cases.gs),
+ *     avisa o notificador original (quem relatou o caso) para reforçar que
+ *     ele pode/deve fazer uma nova notificação caso identifique outro evento.
  */
 
 /**
@@ -50,17 +63,72 @@ function resolverEmailsPorSetor_() {
 }
 
 /**
- * Envia um e-mail por setor com os novos gatilhos rastreados.
- * INALTERADO — já dependia só de getConfig(), resolverEmailsPorSetor_()
- * e ScriptApp/MailApp, nenhum dos quais toca Sheets diretamente.
- *
- * @param {Object} casosPorSetor - { "UTI ADULTO": [ {prontuario, iniciais_paciente, ...}, ... ] }
+ * Layout visual compartilhado pelos 3 e-mails deste arquivo — mesma
+ * identidade do painel (laranja #f97316), só muda cor de destaque, título,
+ * subtítulo e corpo.
  */
-function enviarAlertasAgrupados(casosPorSetor) {
-  const cfg = getConfig();
+function _montarEmailBase_(corDestaque, titulo, subtitulo, corpoHtml, linkSistema, textoBotao) {
+  return `
+    <div style="font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;max-width:650px;margin:auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.05);">
+      <div style="background-color:${corDestaque};padding:20px;text-align:center;">
+        <h2 style="color:white;margin:0;font-size:24px;">${titulo}</h2>
+        <p style="color:#ffedd5;margin:5px 0 0 0;font-size:14px;">${subtitulo}</p>
+      </div>
+      <div style="padding:25px;background-color:#ffffff;">
+        ${corpoHtml}
+        ${linkSistema ? `
+        <p style="text-align:center;margin-top:25px;">
+          <a href="${linkSistema}" style="background-color:${corDestaque};color:white;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">
+            ${textoBotao || 'Abrir VigiRAM'}
+          </a>
+        </p>` : ''}
+      </div>
+    </div>`;
+}
 
-  // Respeita o toggle de alertas
+// ─────────────────────────────────────────────────────────────────────────────
+// 1) RELATÓRIO DIÁRIO DE GATILHOS — substitui o alerta imediato por inserção.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Traduz o status interno do caso para um rótulo curto e legível no e-mail.
+ */
+function _rotuloStatus_(status) {
+  const rotulos = {};
+  rotulos[SCHEMA.STATUS.TRIAGEM]      = 'Aguardando triagem';
+  rotulos[SCHEMA.STATUS.INVESTIGACAO] = 'Em investigação';
+  rotulos[SCHEMA.STATUS.CONCLUIDO]    = 'Concluído';
+  rotulos[SCHEMA.STATUS.DESCARTADO]   = 'Descartado';
+  return rotulos[status] || String(status || '-');
+}
+
+/**
+ * Job diário (instalar via instalarTriggerRelatorioDiario(), 07:00): agrega
+ * os gatilhos (casos tipo 'BA') identificados nas últimas 24h, agrupa por
+ * setor e manda 1 e-mail de resumo por setor para o farmacêutico responsável.
+ * Setores sem nenhum gatilho novo no período não recebem e-mail.
+ */
+function enviarRelatorioDiarioGatilhos() {
+  const cfg = getConfig();
   if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
+
+  const LIMITE_24H = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const todosOsCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+  const casosPorSetor = {};
+
+  todosOsCasos.forEach(function (caso) {
+    if (caso.tipo !== 'BA') return;
+    const atualizadoEm = caso.auditoria && caso.auditoria.atualizadoEm
+      ? new Date(caso.auditoria.atualizadoEm)
+      : null;
+    if (!atualizadoEm || atualizadoEm < LIMITE_24H) return;
+
+    const setor = String(caso.setor || '').toUpperCase().trim();
+    if (!setor) return;
+    if (!casosPorSetor[setor]) casosPorSetor[setor] = [];
+    casosPorSetor[setor].push(caso);
+  });
 
   const DIRETORIO = resolverEmailsPorSetor_();
   const EMAIL_COORDENACAO = cfg.geral.EMAIL_COORDENACAO || "farmacia.clinica@hospital.com";
@@ -70,53 +138,204 @@ function enviarAlertasAgrupados(casosPorSetor) {
     const emailDestino = DIRETORIO[setor] || EMAIL_COORDENACAO;
     const listaCasos = casosPorSetor[setor];
     const setorSeguro = escaparHtml_(setor);
-    const assunto = `🚨 VigiRAM: ${listaCasos.length} Novo(s) Gatilho(s) em ${setor}`;
+    const assunto = `📋 VigiRAM: Relatório Diário — ${listaCasos.length} Gatilho(s) em ${setor}`;
 
     let linhas = "";
     listaCasos.forEach(function (c) {
       linhas += `
         <tr>
           <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.prontuario)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.iniciais_paciente)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;color:#c2410c;font-weight:bold;">${escaparHtml_(c.medicamento_suspeito)}</td>
-          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(c.data_evento)}</td>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.iniciais)}</td>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;color:#c2410c;font-weight:bold;">${escaparHtml_(c.medicamento)}</td>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(c.data)}</td>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(_rotuloStatus_(c.status))}</td>
         </tr>`;
     });
 
-    const html = `
-      <div style="font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;max-width:650px;margin:auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;box-shadow:0 4px 6px rgba(0,0,0,0.05);">
-        <div style="background-color:#f97316;padding:20px;text-align:center;">
-          <h2 style="color:white;margin:0;font-size:24px;">Alerta de Farmacovigilância</h2>
-          <p style="color:#ffedd5;margin:5px 0 0 0;font-size:14px;">Busca Ativa (Trigger Tool)</p>
-        </div>
-        <div style="padding:25px;background-color:#ffffff;">
-          <p style="color:#374151;font-size:16px;">Olá,</p>
-          <p style="color:#374151;font-size:16px;">O robô do <b>VigiRAM</b> rastreou novos gatilhos para o seu setor (<strong>${setorSeguro}</strong>).</p>
-          <table style="width:100%;border-collapse:collapse;margin-top:15px;">
-            <thead>
-              <tr style="background-color:#f9fafb;">
-                <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Prontuário</th>
-                <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Paciente</th>
-                <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Medicamento</th>
-                <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Data</th>
-              </tr>
-            </thead>
-            <tbody>${linhas}</tbody>
-          </table>
-          <p style="text-align:center;margin-top:25px;">
-            <a href="${LINK_SISTEMA}" style="background-color:#f97316;color:white;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">
-              Abrir VigiRAM
-            </a>
-          </p>
-        </div>
-      </div>`;
+    const corpo = `
+      <p style="color:#374151;font-size:16px;">Olá,</p>
+      <p style="color:#374151;font-size:16px;">Este é o resumo diário dos gatilhos rastreados pelo <b>VigiRAM</b> nas últimas 24h para o seu setor (<strong>${setorSeguro}</strong>).</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+        <thead>
+          <tr style="background-color:#f9fafb;">
+            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Prontuário</th>
+            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Paciente</th>
+            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Medicamento</th>
+            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Data</th>
+            <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Status atual</th>
+          </tr>
+        </thead>
+        <tbody>${linhas}</tbody>
+      </table>`;
+
+    const html = _montarEmailBase_(
+      '#f97316',
+      'Relatório Diário de Gatilhos',
+      'Busca Ativa (Trigger Tool) — últimas 24h',
+      corpo,
+      LINK_SISTEMA,
+      'Abrir VigiRAM'
+    );
 
     try {
       MailApp.sendEmail({ to: emailDestino, subject: assunto, htmlBody: html });
     } catch (e) {
-      console.error('Falha ao enviar e-mail para ' + setor + ' (' + emailDestino + '): ' + e.message);
+      console.error('Falha ao enviar relatório diário para ' + setor + ' (' + emailDestino + '): ' + e.message);
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2) NOVA DEMANDA ESPONTÂNEA — alerta imediato ao farmacêutico do setor.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Chamada por salvarDemandaEspontanea() (Cases.gs) logo após o caso ser
+ * persistido. Falha ao enviar não deve derrubar o salvamento do caso — por
+ * isso tem try/catch próprio e nunca lança.
+ */
+function notificarNovaDemandaEspontanea_(caso) {
+  try {
+    const cfg = getConfig();
+    if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
+
+    const setor = String(caso.setor || '').toUpperCase().trim();
+    const DIRETORIO = resolverEmailsPorSetor_();
+    const EMAIL_COORDENACAO = cfg.geral.EMAIL_COORDENACAO || "farmacia.clinica@hospital.com";
+    const emailDestino = DIRETORIO[setor] || EMAIL_COORDENACAO;
+    const LINK_SISTEMA = ScriptApp.getService().getUrl();
+
+    const notificador = caso.notificador || {};
+    const assunto = `🔔 VigiRAM: Nova Demanda Espontânea em ${setor}`;
+
+    const corpo = `
+      <p style="color:#374151;font-size:16px;">Olá,</p>
+      <p style="color:#374151;font-size:16px;">Uma nova <b>Demanda Espontânea</b> foi registrada para o seu setor (<strong>${escaparHtml_(setor)}</strong>) e está aguardando investigação.</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+        <tbody>
+          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;width:40%;">Prontuário</td><td style="padding:8px 10px;font-weight:bold;">${escaparHtml_(caso.prontuario)}</td></tr>
+          <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Paciente</td><td style="padding:8px 10px;">${escaparHtml_(caso.iniciais)}</td></tr>
+          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Medicamento</td><td style="padding:8px 10px;color:#c2410c;font-weight:bold;">${escaparHtml_(caso.medicamento)}</td></tr>
+          <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Notificado por</td><td style="padding:8px 10px;">${escaparHtml_(notificador.nome || 'N/I')} (${escaparHtml_(notificador.categoria || 'N/I')})</td></tr>
+        </tbody>
+      </table>
+      <p style="color:#374151;font-size:14px;margin-top:20px;">Acesse o VigiRAM para iniciar a investigação deste caso.</p>`;
+
+    const html = _montarEmailBase_(
+      '#2563eb',
+      'Nova Demanda Espontânea',
+      setor,
+      corpo,
+      LINK_SISTEMA,
+      'Investigar Agora'
+    );
+
+    MailApp.sendEmail({ to: emailDestino, subject: assunto, htmlBody: html });
+  } catch (e) {
+    console.error('notificarNovaDemandaEspontanea_: falha ao enviar e-mail: ' + e.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3) INVESTIGAÇÃO CONCLUÍDA — alerta ao notificador original (só casos DE).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Chamada por registrarInvestigacao() (Cases.gs) quando o caso é encerrado
+ * (status CONCLUIDO). Só se aplica a casos de Demanda Espontânea (tipo 'DE'),
+ * que têm notificador.email preenchido — casos de Busca Ativa (gatilho) não
+ * têm notificador cadastrado. Falha ao enviar não derruba o encerramento do
+ * caso — try/catch próprio, nunca lança.
+ */
+function notificarInvestigacaoConcluida_(caso) {
+  try {
+    if (caso.tipo !== 'DE') return;
+
+    const notificador = caso.notificador || {};
+    const emailNotificador = String(notificador.email || '').trim();
+    if (!emailNotificador) return;
+
+    const cfg = getConfig();
+    if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
+
+    const LINK_FORM = ScriptApp.getService().getUrl() + '?page=form';
+    const assunto = `✅ VigiRAM: Investigação Concluída — Caso ${caso.id || caso._id}`;
+
+    const corpo = `
+      <p style="color:#374151;font-size:16px;">Olá, ${escaparHtml_(notificador.nome || '')},</p>
+      <p style="color:#374151;font-size:16px;">A investigação da notificação espontânea que você registrou foi <b>concluída</b> pela equipe de Farmacovigilância. Obrigado por contribuir com a segurança do paciente.</p>
+      <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+        <tbody>
+          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;width:40%;">Prontuário</td><td style="padding:8px 10px;font-weight:bold;">${escaparHtml_(caso.prontuario)}</td></tr>
+          <tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Setor</td><td style="padding:8px 10px;">${escaparHtml_(caso.setor)}</td></tr>
+          <tr><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Medicamento</td><td style="padding:8px 10px;color:#c2410c;font-weight:bold;">${escaparHtml_(caso.medicamento)}</td></tr>
+          ${caso.desfecho ? `<tr style="background-color:#f9fafb;"><td style="padding:8px 10px;color:#6b7280;font-size:12px;">Desfecho</td><td style="padding:8px 10px;">${escaparHtml_(caso.desfecho)}</td></tr>` : ''}
+        </tbody>
+      </table>
+      <p style="color:#374151;font-size:15px;margin-top:20px;">
+        Identificou um novo evento suspeito relacionado a medicamentos? <b>Faça uma nova notificação</b> — quanto antes o caso for reportado, mais rápido a farmácia clínica pode investigar.
+      </p>`;
+
+    const html = _montarEmailBase_(
+      '#16a34a',
+      'Investigação Concluída',
+      'Obrigado por notificar',
+      corpo,
+      LINK_FORM,
+      'Fazer Nova Notificação'
+    );
+
+    MailApp.sendEmail({ to: emailNotificador, subject: assunto, htmlBody: html });
+  } catch (e) {
+    console.error('notificarInvestigacaoConcluida_: falha ao enviar e-mail: ' + e.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSTALAÇÃO DO TRIGGER DIÁRIO (rodar UMA VEZ no editor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Instala o trigger que roda enviarRelatorioDiarioGatilhos() todo dia às
+ * 07:00 (horário do fuso do projeto Apps Script). Rode manualmente no editor:
+ * selecione esta função → Executar. Idempotente: não cria duplicatas.
+ */
+function instalarTriggerRelatorioDiario() {
+  const existentes = ScriptApp.getProjectTriggers();
+  const jaExiste = existentes.some(function (t) {
+    return t.getHandlerFunction() === 'enviarRelatorioDiarioGatilhos';
+  });
+
+  if (jaExiste) {
+    Logger.log('Trigger enviarRelatorioDiarioGatilhos já instalado — nenhuma ação necessária.');
+    return;
+  }
+
+  ScriptApp.newTrigger('enviarRelatorioDiarioGatilhos')
+    .timeBased()
+    .atHour(7)
+    .everyDays(1)
+    .create();
+
+  Logger.log('✅ Trigger instalado: enviarRelatorioDiarioGatilhos todo dia às 07:00.');
+}
+
+/** Remove o trigger diário (use para manutenção ou desativação do relatório). */
+function removerTriggerRelatorioDiario() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === 'enviarRelatorioDiarioGatilhos'; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  Logger.log('Trigger enviarRelatorioDiarioGatilhos removido.');
+}
+
+/** Confirma se o trigger do relatório diário está instalado. */
+function verificarTriggerRelatorioDiario() {
+  const instalado = ScriptApp.getProjectTriggers()
+    .some(function (t) { return t.getHandlerFunction() === 'enviarRelatorioDiarioGatilhos'; });
+  Logger.log(instalado
+    ? '✅ Trigger enviarRelatorioDiarioGatilhos está instalado.'
+    : '⚠️ Trigger enviarRelatorioDiarioGatilhos NÃO está instalado — rode instalarTriggerRelatorioDiario().');
+  return instalado;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

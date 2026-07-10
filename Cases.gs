@@ -357,6 +357,7 @@ function salvarDemandaEspontanea(formDados) {
     espelharCasoNoSheets_(idCaso, objetoCaso, 'CRIACAO');
     fsRegistrarLog_('NOTIFICACAO_ESPONTANEA', idCaso, `${setor} / ${medicamento}`);
     invalidarCasosCache_(); // P1.1 — novo caso precisa aparecer na próxima leitura
+    notificarNovaDemandaEspontanea_(objetoCaso); // Notify.gs — alerta imediato ao farmacêutico do setor
 
     const resultado = { farmaceuticoResponsavel: farmaceuticoResponsavel };
 
@@ -549,6 +550,7 @@ function registrarInvestigacao(dados, token) {
       // atrasar ou quebrar o retorno ao frontend.
       if (novoStatus === SCHEMA.STATUS.CONCLUIDO) {
         espelharCasoNoSheets_(dados.idCaso, docAtualizado, 'FECHAMENTO');
+        notificarInvestigacaoConcluida_(docAtualizado); // Notify.gs — alerta ao notificador original (só casos DE)
       }
 
       return resultado;

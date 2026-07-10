@@ -119,7 +119,9 @@ function handleInsertDB(e) {
       //    (processarFilaEspelho, trigger 5 min), sem bloquear a resposta.
       espelharCasosEmLote_(paraInserir);
 
-      enviarAlertasAgrupados(novosCasosPorSetor); // Notify.gs — inalterado
+      // Alerta imediato por inserção foi substituído pelo relatório diário
+      // agregado (Notify.gs: enviarRelatorioDiarioGatilhos, trigger 07:00) —
+      // evita e-mail a cada lote do robô, farmacêutico recebe 1 resumo/dia.
 
       // Regra de Ouro #3: escrita sem trilha. Um log por LOTE (não por caso,
       // para não multiplicar chamadas Firestore/Sheets do ETL).
