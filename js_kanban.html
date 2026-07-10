@@ -53,6 +53,17 @@ function limparFiltros() {
   processarFiltros();
 }
 
+// Debounce da busca por texto: sem isto, cada tecla em #inputBusca disparava
+// processarFiltros() inteiro (re-filtra a base, re-ordena 2 colunas, re-renderiza
+// as 3 colunas do Kanban e, se o Dashboard estiver aberto, reconstrói os 6
+// gráficos). Digitar um termo = 1 rebuild por caractere → digitação travada.
+// Os <select> de filtro seguem chamando processarFiltros() direto (imediato).
+let _buscaDebounceTimer = null;
+function processarFiltrosDebounced() {
+  clearTimeout(_buscaDebounceTimer);
+  _buscaDebounceTimer = setTimeout(processarFiltros, 200);
+}
+
 function processarFiltros() {
   const busca     = document.getElementById('inputBusca').value.trim().toLowerCase();
   const setor     = document.getElementById('filtroSetor').value;

@@ -376,10 +376,10 @@ function _popularSelect(id, lista) {
   const el = document.getElementById(id);
   if (!el || !Array.isArray(lista)) return;
   const atual = el.value;
-  el.innerHTML = '<option value="">Selecione…</option>';
-  lista.forEach(opt => {
-    el.innerHTML += `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`;
-  });
+  // innerHTML montado UMA vez (era `+=` por item → reparse quadrático do
+  // <select> a cada opção; _popularSelect roda p/ ~11 selects a cada getConfig).
+  el.innerHTML = '<option value="">Selecione…</option>' +
+    lista.map(opt => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`).join('');
   if (lista.includes(atual)) el.value = atual;
 }
 
@@ -396,17 +396,19 @@ function _popularCheckboxes(containerId, lista) {
   const marcados = new Set(
     [...el.querySelectorAll('input[type="checkbox"]:checked')].map(c => c.value)
   );
-  el.innerHTML = '';
-  lista.forEach((opt, i) => {
+  // innerHTML montado UMA vez (era `+=` por chip → reparse/reflow do container
+  // a cada item). O Set `marcados` foi capturado acima, então a atribuição
+  // única preserva o que já estava marcado.
+  el.innerHTML = lista.map((opt, i) => {
     const id = containerId + '_' + i;
     const marcado = marcados.has(opt);
-    el.innerHTML += `
+    return `
       <label for="${id}" class="chip-toggle ${marcado ? 'chip-ativo' : ''}">
         <input type="checkbox" id="${id}" value="${escapeHtml(opt)}" ${marcado ? 'checked' : ''}
                onchange="this.closest('label').classList.toggle('chip-ativo', this.checked); agendarAutosave()">
         ${escapeHtml(opt)}
       </label>`;
-  });
+  }).join('');
 }
 
 // ---------------------------------------------------------
@@ -422,10 +424,8 @@ function _popularFiltroFarmaceutico() {
   const select   = document.getElementById('filtroFarmaceutico');
   if (!select) return;
   const anterior = select.value;
-  select.innerHTML = '<option value="TODOS">Todos os Farmacêuticos</option>';
-  listaCanonicaFarmas.forEach(f => {
-    select.innerHTML += `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`;
-  });
+  select.innerHTML = '<option value="TODOS">Todos os Farmacêuticos</option>' +
+    listaCanonicaFarmas.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('');
   if (listaCanonicaFarmas.includes(anterior)) select.value = anterior;
 }
 
@@ -508,10 +508,8 @@ function processarDados(casos) {
   const selectSetor = document.getElementById('filtroSetor');
   const setorAtual  = selectSetor.value;
   const setores     = [...new Set(casos.map(c => c.setor))].filter(Boolean).sort();
-  selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>';
-  setores.forEach(s => {
-    selectSetor.innerHTML += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
-  });
+  selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>' +
+    setores.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
   if (setores.includes(setorAtual)) selectSetor.value = setorAtual;
 
   _popularFiltroFarmaceutico();
@@ -543,10 +541,8 @@ function atualizarCasoLocal(casoAtualizado) {
   if (selectSetor) {
     const setorAtual = selectSetor.value;
     const setores = [...new Set(casosGlobais.map(c => c.setor))].filter(Boolean).sort();
-    selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>';
-    setores.forEach(s => {
-      selectSetor.innerHTML += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
-    });
+    selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>' +
+      setores.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
     if (setores.includes(setorAtual)) selectSetor.value = setorAtual;
   }
 
@@ -561,28 +557,40 @@ function calcularSLA(caso) {
   if (!caso.data_evento || caso.data_evento === 'Data N/I')
     return { status: 'SEM', restanteH: null };
 
-  let dataEvento = null;
-  const m = caso.data_evento.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-  if (m) {
-    dataEvento = new Date(
-      parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]),
-      parseInt(m[4]), parseInt(m[5])
-    );
-  } else {
-    const iso = caso.data_evento.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-    if (iso) {
-      // Parse manual — "yyyy-MM-dd HH:mm" (espaço) é NaN no Safari/iOS.
+  // Memoiza SÓ o parse (regex + new Date) da data do evento — a parte cara.
+  // calcularSLA é chamada 3x por card a cada render (comparador de ordenação
+  // 2x + badgeSLAHtml), e processarFiltros dispara render a cada tecla da
+  // busca. restanteH continua recalculado com Date.now() em toda chamada, então
+  // o valor exibido NUNCA fica obsoleto. O cache é invalidado sozinho se a
+  // string data_evento mudar (novo objeto de caso ou edição).
+  let evtMs = caso.__slaEvtMs;
+  if (evtMs === undefined || caso.__slaEvtSrc !== caso.data_evento) {
+    let dataEvento = null;
+    const m = caso.data_evento.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+    if (m) {
       dataEvento = new Date(
-        parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3]),
-        parseInt(iso[4] || '0'), parseInt(iso[5] || '0')
+        parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]),
+        parseInt(m[4]), parseInt(m[5])
       );
     } else {
-      dataEvento = new Date(caso.data_evento);
+      const iso = caso.data_evento.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+      if (iso) {
+        // Parse manual — "yyyy-MM-dd HH:mm" (espaço) é NaN no Safari/iOS.
+        dataEvento = new Date(
+          parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3]),
+          parseInt(iso[4] || '0'), parseInt(iso[5] || '0')
+        );
+      } else {
+        dataEvento = new Date(caso.data_evento);
+      }
     }
+    evtMs = dataEvento.getTime(); // NaN se a data for inválida
+    caso.__slaEvtMs  = evtMs;
+    caso.__slaEvtSrc = caso.data_evento;
   }
-  if (isNaN(dataEvento)) return { status: 'SEM', restanteH: null };
+  if (isNaN(evtMs)) return { status: 'SEM', restanteH: null };
 
-  const restanteH = (dataEvento.getTime() + SLA_PADRAO_HORAS * 3600000 - Date.now()) / 3600000;
+  const restanteH = (evtMs + SLA_PADRAO_HORAS * 3600000 - Date.now()) / 3600000;
   if (restanteH < 0)   return { status: 'VENCIDO',  restanteH };
   if (restanteH < 12)  return { status: 'VENCENDO', restanteH };
   return { status: 'OK', restanteH };
