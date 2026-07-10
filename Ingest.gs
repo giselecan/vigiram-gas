@@ -62,7 +62,12 @@ function handleInsertDB(e) {
   try {
     const dados = JSON.parse(e.postData.contents);
 
-    let inseridos = 0;
+    // Casos novos (após dedup) são ACUMULADOS e gravados EM LOTE no fim: um
+    // único :commit no Firestore (fsBatchSet_) e um único setValues no Sheets
+    // (espelharCasosEmLote_), em vez de um PATCH + um appendRow-sob-lock por
+    // caso. Um lote de 40 casos passa de ~80 round-trips de escrita + 40 ciclos
+    // de lock para ~1 commit + 1 gravação em lote.
+    const paraInserir = [];               // [{ id, objeto }]
     const novosCasosPorSetor = {};
 
     dados.forEach(function (caso) {
@@ -94,20 +99,26 @@ function handleInsertDB(e) {
         auditoria: { atualizadoPor: 'ETL', atualizadoEm: agora }
       };
 
-      fsSetDoc_(SCHEMA.FS.CASOS, idLimpo, objetoCaso);
-
-      // Espelho síncrono no Sheets — sem reler o Firestore (objeto já em memória)
-      // Se falhar, vai para fila de retry (processarFilaEspelho, trigger 5 min)
-      espelharCasoNoSheets_(idLimpo, objetoCaso, 'CRIACAO');
-
-      inseridos++;
+      paraInserir.push({ id: idLimpo, objeto: objetoCaso });
 
       const setor = String(caso.unidade_setor).toUpperCase().trim();
       if (!novosCasosPorSetor[setor]) novosCasosPorSetor[setor] = [];
       novosCasosPorSetor[setor].push(caso);
     });
 
+    const inseridos = paraInserir.length;
+
     if (inseridos > 0) {
+      // 1) Firestore em lote (upsert idempotente por ID — retry do robô é seguro).
+      fsBatchSet_(SCHEMA.FS.CASOS, paraInserir.map(function (x) {
+        return { id: x.id, dados: x.objeto };
+      }));
+
+      // 2) Espelho no Sheets em lote (objetos já em memória — sem reler o
+      //    Firestore). Se falhar, cada caso cai na fila de retry
+      //    (processarFilaEspelho, trigger 5 min), sem bloquear a resposta.
+      espelharCasosEmLote_(paraInserir);
+
       enviarAlertasAgrupados(novosCasosPorSetor); // Notify.gs — inalterado
 
       // Regra de Ouro #3: escrita sem trilha. Um log por LOTE (não por caso,

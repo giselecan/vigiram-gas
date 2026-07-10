@@ -384,6 +384,7 @@ function salvarDemandaEspontanea(formDados) {
 function registrarTriagem(dados, token) {
   return comAutenticacao_(token, function () {
     try {
+      let casoAtualizado = null;
       fsRunTransaction_(function (ctx) {
         const caso = fsTxnGetDoc_(ctx.id, SCHEMA.FS.CASOS, dados.idCaso);
         if (!caso) throw new Error('Caso não localizado.');
@@ -409,6 +410,11 @@ function registrarTriagem(dados, token) {
 
         fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, dados.idCaso, atualizacao);
         fsCarimbarAuditoria_(ctx, dados.idCaso);
+        // Estado pós-transação montado em memória (pré-imagem + atualização):
+        // evita um fsGetDoc_ extra só para devolver o resumo e reflete
+        // exatamente o que ESTA transação gravou (não um estado que um writer
+        // concorrente possa ter mudado entre o commit e uma releitura).
+        casoAtualizado = Object.assign({}, caso, atualizacao);
         return true;
       });
 
@@ -427,8 +433,7 @@ function registrarTriagem(dados, token) {
         fsRegistrarLog_('TRIAGEM', dados.idCaso, 'Enviado para investigação');
       }
 
-      const docAtualizado = fsGetDoc_(SCHEMA.FS.CASOS, dados.idCaso);
-      return _mapearCasoResumo_(docAtualizado);
+      return _mapearCasoResumo_(casoAtualizado);
 
     } catch (erro) {
       throw new Error(`Erro na triagem: ${erro.message}`);
@@ -564,6 +569,7 @@ function reabrirInvestigacao(idCaso, token) {
       const idLimpo = String(idCaso || '').trim();
       if (!idLimpo) throw new Error('ID do caso não informado.');
 
+      let casoAtualizado = null;
       fsRunTransaction_(function (ctx) {
         const caso = fsTxnGetDoc_(ctx.id, SCHEMA.FS.CASOS, idLimpo);
         if (!caso) throw new Error('Caso não localizado.');
@@ -571,10 +577,10 @@ function reabrirInvestigacao(idCaso, token) {
           throw new Error('Somente casos CONCLUÍDOS podem ser reabertos.');
         }
 
-        fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idLimpo, {
-          status: SCHEMA.STATUS.INVESTIGACAO
-        });
+        const atualizacao = { status: SCHEMA.STATUS.INVESTIGACAO };
+        fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idLimpo, atualizacao);
         fsCarimbarAuditoria_(ctx, idLimpo);
+        casoAtualizado = Object.assign({}, caso, atualizacao); // ver nota em registrarTriagem
         return true;
       });
 
@@ -585,8 +591,7 @@ function reabrirInvestigacao(idCaso, token) {
       invalidarCasosCache_();
       fsRegistrarLog_('CASO_REABERTO', idLimpo, 'Retornado para investigação pelo farmacêutico');
 
-      const docAtualizado = fsGetDoc_(SCHEMA.FS.CASOS, idLimpo);
-      return _mapearCasoResumo_(docAtualizado);
+      return _mapearCasoResumo_(casoAtualizado);
 
     } catch (erro) {
       throw new Error(`Erro ao reabrir caso: ${erro.message}`);
@@ -604,6 +609,7 @@ function registrarImportacaoVigimed(dados, token) {
       const idLimpo = String(dados && dados.idCaso || '').trim();
       if (!idLimpo) throw new Error('ID do caso não informado.');
 
+      let casoAtualizado = null;
       fsRunTransaction_(function (ctx) {
         const caso = fsTxnGetDoc_(ctx.id, SCHEMA.FS.CASOS, idLimpo);
         if (!caso) throw new Error('Caso não localizado.');
@@ -611,11 +617,13 @@ function registrarImportacaoVigimed(dados, token) {
           throw new Error('Só é possível registrar importação VigiMed em casos CONCLUÍDOS.');
         }
 
-        fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idLimpo, {
+        const atualizacao = {
           numVigimed:  String(dados.numVigimed  || '').trim(),
           dataVigimed: _normalizarDataHoraInput_(dados.dataVigimed)
-        });
+        };
+        fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idLimpo, atualizacao);
         fsCarimbarAuditoria_(ctx, idLimpo);
+        casoAtualizado = Object.assign({}, caso, atualizacao); // ver nota em registrarTriagem
         return true;
       });
 
@@ -625,8 +633,7 @@ function registrarImportacaoVigimed(dados, token) {
       invalidarCasosCache_();
       fsRegistrarLog_('VIGIMED_IMPORTADO', idLimpo, dados.numVigimed || '');
 
-      const docAtualizado = fsGetDoc_(SCHEMA.FS.CASOS, idLimpo);
-      return _mapearCasoResumo_(docAtualizado);
+      return _mapearCasoResumo_(casoAtualizado);
 
     } catch (erro) {
       throw new Error(`Erro ao registrar importação VigiMed: ${erro.message}`);

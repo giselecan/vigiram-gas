@@ -175,18 +175,19 @@ function alterarStatusUsuario(email, ativo, token) {
 function listarLogsAuditoria(token, limite) {
   return _comAdmin_(token, function () {
     const max = Math.min(Number(limite) || 200, 500);
-    const docs = fsListarTodos_(SCHEMA.FS.LOG);
-    return docs
-      .map(function (d) {
-        return {
-          data:    d.data || null,
-          usuario: String(d.usuario || '').trim(),
-          acao:    String(d.acao    || '').trim(),
-          idCaso:  String(d.idCaso  || '').trim(),
-          detalhe: String(d.detalhe || '').trim()
-        };
-      })
-      .sort(function (a, b) { return new Date(b.data) - new Date(a.data); })
-      .slice(0, max);
+    // Ordena e limita no SERVIDOR (orderBy data desc + limit): traz só os `max`
+    // registros mais recentes em um round-trip, em vez de paginar a coleção de
+    // log inteira (cresce a cada login/ETL/ação → dezenas de milhares de docs)
+    // para mapear/ordenar/fatiar tudo em memória.
+    const docs = fsQuery_(SCHEMA.FS.LOG, null, max, [{ campo: 'data', direcao: 'DESCENDING' }]);
+    return docs.map(function (d) {
+      return {
+        data:    d.data || null,
+        usuario: String(d.usuario || '').trim(),
+        acao:    String(d.acao    || '').trim(),
+        idCaso:  String(d.idCaso  || '').trim(),
+        detalhe: String(d.detalhe || '').trim()
+      };
+    });
   });
 }

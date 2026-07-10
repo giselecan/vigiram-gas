@@ -189,6 +189,31 @@ function fsSetDoc_(colecao, id, dados) {
   return fsFetch_('patch', url, corpo);
 }
 
+/**
+ * Grava (upsert) VÁRIOS documentos numa mesma coleção em um único :commit,
+ * em vez de um PATCH por documento. Colapsa N round-trips de escrita em
+ * ceil(N/400) chamadas — usado pelo ETL em lote (handleInsertDB). Cada chunk
+ * é atômico no Firestore (all-or-nothing); em falha, fsFetch_ lança e o caller
+ * (com id determinístico → upsert idempotente) pode reprocessar o lote inteiro
+ * sem duplicar. Firestore permite até 500 writes/commit; 400 dá folga.
+ * @param {string} colecao
+ * @param {Array<{id, dados}>} itens
+ */
+function fsBatchSet_(colecao, itens) {
+  if (!itens || !itens.length) return;
+  const cfg = fsConfig_();
+  const prefixo = 'projects/' + cfg.projectId + '/databases/' + cfg.databaseId + '/documents/' + colecao + '/';
+  const url = fsUrlBase_() + ':commit';
+  const CHUNK = 400;
+
+  for (let i = 0; i < itens.length; i += CHUNK) {
+    const writes = itens.slice(i, i + CHUNK).map(function (it) {
+      return { update: { name: prefixo + it.id, fields: fsParaCamposFs_(it.dados) } };
+    });
+    fsFetch_('post', url, { writes: writes });
+  }
+}
+
 function fsUpdateDoc_(colecao, id, camposParciais) {
   const nomesCampos = Object.keys(camposParciais);
   const mascara = nomesCampos.map(function (c) { return 'updateMask.fieldPaths=' + encodeURIComponent(c); }).join('&');
@@ -208,14 +233,31 @@ function fsDeleteCampos_(colecao, id, nomesCampos) {
   return fsUpdateDoc_(colecao, id, camposVazios);
 }
 
-/** FIX: url sem strip de /documents — parent do runQuery exige /documents. */
-function fsQuery_(colecao, filtros, limite) {
+/**
+ * FIX: url sem strip de /documents — parent do runQuery exige /documents.
+ * @param {string} colecao
+ * @param {Array<{campo,op,valor}>=} filtros
+ * @param {number=} limite
+ * @param {Array<{campo, direcao}>=} ordenacao — direcao 'ASCENDING'|'DESCENDING'
+ *   (default 'ASCENDING'). Ordena/limita no servidor (evita full-scan + sort em
+ *   memória). Ordenar por um campo só traz docs que possuem esse campo.
+ */
+function fsQuery_(colecao, filtros, limite, ordenacao) {
   const corpo = {
     structuredQuery: {
       from: [{ collectionId: colecao }],
       limit: limite || undefined
     }
   };
+
+  if (ordenacao && ordenacao.length) {
+    corpo.structuredQuery.orderBy = ordenacao.map(function (o) {
+      return {
+        field: { fieldPath: o.campo },
+        direction: o.direcao || 'ASCENDING'
+      };
+    });
+  }
 
   if (filtros && filtros.length === 1) {
     corpo.structuredQuery.where = {
