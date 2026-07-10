@@ -405,10 +405,12 @@
           <div id="trgAreaNao" class="hidden p-3 bg-gray-50 border border-gray-300 rounded-lg">
             <label class="block text-xs font-bold text-gray-700 mb-1">Motivo do Descarte</label>
             <!-- E3: populado via _aplicarConfig() em js_core (config.listas.motivo_descarte) -->
-            <select id="trgMotivoDescarte"
+            <select id="trgMotivoDescarte" onchange="toggleMotivoDescarteOutro()"
                     class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-gray-400 text-gray-800">
               <option value="">Selecione o motivo…</option>
             </select>
+            <input type="text" id="trgMotivoDescarteOutro" placeholder="Descreva o motivo do descarte…"
+                   class="hidden w-full border rounded-lg px-3 py-2 text-sm mt-2 focus:ring-2 focus:ring-gray-400 text-gray-800">
           </div>
           <div class="pt-3 flex justify-end space-x-3 border-t">
             <button type="button" onclick="fecharModalTriagem()"
