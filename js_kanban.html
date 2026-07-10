@@ -229,7 +229,7 @@ function construirCard(caso) {
   const iniciais = (caso.paciente && caso.paciente !== 'N/I') ? caso.paciente : '';
   const idade    = _calcularIdade(caso.data_nascimento || caso.nascimento || '');
   const pacHtml  = (iniciais || idade)
-    ? `<p class="text-[10px] text-gray-500 mt-0.5 truncate">
+    ? `<p class="text-xs text-gray-500 mt-0.5 truncate">
          ${iniciais ? `<span class="font-semibold">${escapeHtml(iniciais)}</span>` : ''}
          ${iniciais && idade ? ' · ' : ''}
          ${idade ? `<span>${escapeHtml(idade)}</span>` : ''}
@@ -240,7 +240,7 @@ function construirCard(caso) {
   const farmaCanonica = getFarmaceuticoPorSetor(caso.setor);
   const farmaNome     = farmaCanonica || caso.farmaceutico || '';
   const farmaHtml     = farmaNome
-    ? `<p class="text-[10px] text-gray-400 mt-1 truncate flex items-center gap-1">
+    ? `<p class="text-xs text-gray-400 mt-1 truncate flex items-center gap-1">
          <i class="fas fa-user-md text-gray-300"></i>
          <span class="font-semibold">${escapeHtml(farmaNome)}</span>
        </p>`
@@ -253,10 +253,10 @@ function construirCard(caso) {
   const base = `
     <div class="kanban-card bg-white p-3 rounded-lg shadow-sm border border-gray-200 fade-in">
       <div class="flex justify-between items-start mb-2">
-        <span class="${tipoCss} text-[10px] font-bold px-2 py-0.5 rounded-full uppercase flex items-center gap-1">
+        <span class="${tipoCss} text-xs font-bold px-2 py-0.5 rounded-full uppercase flex items-center gap-1">
           <i class="fas ${tipoIco}"></i> ${tipo}
         </span>
-        <span class="text-[10px] text-gray-400 font-semibold">${data}</span>
+        <span class="text-xs text-gray-400 font-semibold">${data}</span>
       </div>
       <h3 class="font-bold text-gray-800 text-sm">Pront: <span class="text-teal-700">${pront}</span></h3>
       ${pacHtml}
@@ -283,7 +283,7 @@ function construirCard(caso) {
         <i class="fas fa-pills mr-1"></i>Suspeito: ${med}
       </p>
       ${farmaHtml}
-      <p class="text-[10px] text-gray-400 mt-2 flex items-center gap-1">
+      <p class="text-xs text-gray-400 mt-2 flex items-center gap-1">
         <i class="fas fa-hourglass-half"></i> Em análise desde ${data}
       </p>
       <button data-acao="investigar" data-id="${id}"
@@ -299,14 +299,14 @@ function construirCard(caso) {
   const stsCss      = isDesc ? 'text-gray-500' : 'text-green-700';
   const stsIco      = isDesc ? 'fa-ban'         : 'fa-check-circle';
   const conclusaoHtml = caso.conclusao
-    ? `<p class="text-[10px] text-gray-400 mt-0.5">${escapeHtml(caso.conclusao)}</p>` : '';
+    ? `<p class="text-xs text-gray-400 mt-0.5">${escapeHtml(caso.conclusao)}</p>` : '';
 
   const vigimedHtml = (!isDesc)
     ? (caso.numVigimed
-        ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-2">
+        ? `<span class="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-2">
              <i class="fas fa-check-circle"></i> Importado VigiMed
            </span>`
-        : `<span class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full mt-2">
+        : `<span class="inline-flex items-center gap-1 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full mt-2">
              <i class="fas fa-clock"></i> Pendente Importação VigiMed
            </span>`)
     : '';

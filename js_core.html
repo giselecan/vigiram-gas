@@ -623,7 +623,7 @@ function badgeSLAHtml(caso) {
     SEM:      { cls: 'badge-sla-sem',  ico: 'fa-minus-circle',         label: 'Sem SLA'             }
   };
   const c = cfg[status];
-  return `<span class="${c.cls} text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit">
+  return `<span class="${c.cls} text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit">
     <i class="fas ${c.ico}"></i> ${c.label}
   </span>`;
 }
