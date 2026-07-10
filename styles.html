@@ -208,6 +208,41 @@
     background-size: 200% 100%;
   }
 
+  /* --- Painéis tingidos (info boxes, seções coloridas de modais/admin) ---
+     No claro são fundos -50/-100 com texto -700/-800 casado. No escuro isso
+     ofuscaria, então: fundo vira tint translúcido da mesma cor, texto e borda
+     clareiam — mantendo a semântica (teal=info, red=alerta, etc.) legível. */
+  :root[data-theme="dark"] .bg-blue-50,   :root[data-theme="dark"] .bg-blue-100    { background-color: rgba(59,130,246,.14); }
+  :root[data-theme="dark"] .bg-purple-50, :root[data-theme="dark"] .bg-purple-100  { background-color: rgba(168,85,247,.14); }
+  :root[data-theme="dark"] .bg-red-50,    :root[data-theme="dark"] .bg-red-100     { background-color: rgba(239,68,68,.14); }
+  :root[data-theme="dark"] .bg-amber-50                                            { background-color: rgba(245,158,11,.14); }
+  :root[data-theme="dark"] .bg-orange-50, :root[data-theme="dark"] .bg-orange-100  { background-color: rgba(249,115,22,.14); }
+  :root[data-theme="dark"] .bg-teal-50,   :root[data-theme="dark"] .bg-teal-100    { background-color: rgba(20,184,166,.14); }
+  :root[data-theme="dark"] .bg-emerald-50                                          { background-color: rgba(16,185,129,.14); }
+  :root[data-theme="dark"] .bg-green-50,  :root[data-theme="dark"] .bg-green-100   { background-color: rgba(34,197,94,.14); }
+  :root[data-theme="dark"] .bg-yellow-50                                           { background-color: rgba(250,204,21,.12); }
+  :root[data-theme="dark"] .bg-pink-50                                             { background-color: rgba(236,72,153,.14); }
+
+  :root[data-theme="dark"] .text-blue-600,   :root[data-theme="dark"] .text-blue-700,   :root[data-theme="dark"] .text-blue-800   { color: #93c5fd; }
+  :root[data-theme="dark"] .text-purple-600, :root[data-theme="dark"] .text-purple-700, :root[data-theme="dark"] .text-purple-800 { color: #d8b4fe; }
+  :root[data-theme="dark"] .text-red-600,    :root[data-theme="dark"] .text-red-700,    :root[data-theme="dark"] .text-red-800    { color: #fca5a5; }
+  :root[data-theme="dark"] .text-orange-600, :root[data-theme="dark"] .text-orange-800                                            { color: #fdba74; }
+  :root[data-theme="dark"] .text-amber-600,  :root[data-theme="dark"] .text-amber-700,  :root[data-theme="dark"] .text-amber-800  { color: #fcd34d; }
+  :root[data-theme="dark"] .text-teal-600,   :root[data-theme="dark"] .text-teal-800                                             { color: #5eead4; }
+  :root[data-theme="dark"] .text-green-700,  :root[data-theme="dark"] .text-green-800                                            { color: #86efac; }
+  :root[data-theme="dark"] .text-emerald-700,:root[data-theme="dark"] .text-emerald-800                                          { color: #6ee7b7; }
+  :root[data-theme="dark"] .text-yellow-800                                                                                       { color: #fde047; }
+
+  :root[data-theme="dark"] .border-blue-100,   :root[data-theme="dark"] .border-blue-200   { border-color: rgba(59,130,246,.35); }
+  :root[data-theme="dark"] .border-red-200                                                 { border-color: rgba(239,68,68,.35); }
+  :root[data-theme="dark"] .border-amber-200                                               { border-color: rgba(245,158,11,.35); }
+  :root[data-theme="dark"] .border-orange-200, :root[data-theme="dark"] .border-orange-300 { border-color: rgba(249,115,22,.35); }
+  :root[data-theme="dark"] .border-teal-200,   :root[data-theme="dark"] .border-teal-300   { border-color: rgba(20,184,166,.35); }
+  :root[data-theme="dark"] .border-emerald-200                                             { border-color: rgba(16,185,129,.35); }
+  :root[data-theme="dark"] .border-green-200                                               { border-color: rgba(34,197,94,.35); }
+  :root[data-theme="dark"] .border-yellow-300                                              { border-color: rgba(250,204,21,.35); }
+  :root[data-theme="dark"] .border-pink-200                                                { border-color: rgba(236,72,153,.35); }
+
   /* Botão de tema na navbar (mesmo formato dos pills-action) */
   .btn-tema { transition: transform .15s ease, background-color .15s ease; }
   .btn-tema:hover { transform: translateY(-1px); }
