@@ -4,9 +4,11 @@
   "private": true,
   "description": "Build tooling (dev-only) para pre-compilar o CSS do Tailwind do VigiRAM. Nao faz parte do runtime do Apps Script.",
   "scripts": {
-    "build:css": "tailwindcss -c tailwind.config.js -i tw-input.css -o tw-output.css --minify"
+    "build:css": "tailwindcss -c tailwind.config.js -i tw-input.css -o tw-output.css --minify",
+    "build:icons": "node build-icons.js"
   },
   "devDependencies": {
+    "@fortawesome/fontawesome-free": "^6.5.0",
     "tailwindcss": "^3.4.0"
   }
 }

@@ -56,7 +56,7 @@ function _criarModalConfig() {
           <i class="fas fa-shield-halved text-teal-400"></i>
           <div>
             <p class="text-white font-bold text-sm leading-none">Painel Admin</p>
-            <p class="text-gray-400 text-[10px] mt-1">VigiRAM · Farmacovigilância</p>
+            <p class="text-gray-400 text-xs mt-1">VigiRAM · Farmacovigilância</p>
           </div>
         </div>
         <nav class="flex md:flex-col flex-1 p-2 md:p-3 gap-1 md:gap-1 md:space-y-1">
@@ -77,10 +77,10 @@ function _criarModalConfig() {
           </div>
           <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
             <div class="hidden sm:flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-full pl-1 pr-3 py-1">
-              <div id="cfgAvatarUsuario" class="w-6 h-6 rounded-full bg-teal-700 text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">--</div>
+              <div id="cfgAvatarUsuario" class="w-6 h-6 rounded-full bg-teal-700 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">--</div>
               <div class="leading-tight">
                 <p id="cfgNomeUsuario" class="text-xs font-bold text-gray-700">—</p>
-                <p id="cfgPerfilUsuario" class="text-[10px] text-gray-400 uppercase tracking-wide">Admin</p>
+                <p id="cfgPerfilUsuario" class="text-xs text-gray-400 uppercase tracking-wide">Admin</p>
               </div>
             </div>
             <button onclick="fecharConfiguracoes()"
@@ -195,7 +195,7 @@ function _cardStat(icon, label, valor, corTexto, corFundo) {
         <i class="fas ${icon}"></i>
       </div>
       <div class="min-w-0">
-        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide truncate">${label}</p>
+        <p class="text-xs font-bold text-gray-400 uppercase tracking-wide truncate">${label}</p>
         <p class="text-lg font-bold text-gray-800">${valor}</p>
       </div>
     </div>`;
@@ -260,7 +260,7 @@ function _gatRenderTabela() {
             <div class="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:bg-teal-600 peer-disabled:opacity-50 transition-colors"></div>
             <span class="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform peer-checked:translate-x-5"></span>
           </label>
-          <span class="text-[10px] font-bold uppercase ${g.ativo ? 'text-teal-700' : 'text-gray-400'}">${g.ativo ? 'Ativo' : 'Inativo'}</span>
+          <span class="text-xs font-bold uppercase ${g.ativo ? 'text-teal-700' : 'text-gray-400'}">${g.ativo ? 'Ativo' : 'Inativo'}</span>
         </div>
       </td>
       <td class="px-4 py-3 text-xs text-gray-500">${_fmtDataHora(g.atualizadoEm)}</td>
@@ -461,12 +461,12 @@ function _renderSecaoUsuarios(area) {
             <p class="text-xs text-gray-400">${escapeHtml(u.email)}</p>
           </td>
           <td class="px-4 py-3">
-            <span class="${u.perfil === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} text-[10px] font-bold px-2 py-0.5 rounded-full">
+            <span class="${u.perfil === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} text-xs font-bold px-2 py-0.5 rounded-full">
               ${escapeHtml(u.perfil)}
             </span>
           </td>
           <td class="px-4 py-3">
-            <span class="${ativo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'} text-[10px] font-bold px-2 py-0.5 rounded-full">
+            <span class="${ativo ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'} text-xs font-bold px-2 py-0.5 rounded-full">
               ${ativo ? 'ATIVO' : 'INATIVO'}
             </span>
           </td>
@@ -606,13 +606,13 @@ function _renderSecaoEmails(area) {
         <div class="space-y-4 max-w-xl">
           <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <label class="block text-xs font-bold text-gray-600 mb-1">E-mail da Coordenação</label>
-            <p class="text-[10px] text-gray-400 mb-2">Destinatário dos alertas de SLA vencido e notificações críticas.</p>
+            <p class="text-xs text-gray-400 mb-2">Destinatário dos alertas de SLA vencido e notificações críticas.</p>
             <input type="email" id="cfgEmailCoord" value="${escapeHtml(geral.EMAIL_COORDENACAO || '')}"
                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
           </div>
           <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <label class="block text-xs font-bold text-gray-600 mb-1">Alertas Ativos</label>
-            <p class="text-[10px] text-gray-400 mb-2">Ativar/desativar o envio de todos os e-mails automáticos.</p>
+            <p class="text-xs text-gray-400 mb-2">Ativar/desativar o envio de todos os e-mails automáticos.</p>
             <select id="cfgAlertasAtivos" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none">
               <option value="SIM" ${geral.ALERTAS_ATIVOS === 'SIM' ? 'selected' : ''}>Ativados</option>
               <option value="NAO" ${geral.ALERTAS_ATIVOS === 'NAO' ? 'selected' : ''}>Desativados</option>
@@ -654,7 +654,7 @@ function _renderSecaoSLA(area) {
         <div class="max-w-sm space-y-4">
           <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <label class="block text-xs font-bold text-gray-600 mb-1">Prazo padrão (horas)</label>
-            <p class="text-[10px] text-gray-400 mb-3">Tempo máximo para investigação após o evento. Padrão: 48h.</p>
+            <p class="text-xs text-gray-400 mb-3">Tempo máximo para investigação após o evento. Padrão: 48h.</p>
             <div class="flex items-center gap-3">
               <input type="number" id="cfgSlaHoras" value="${escapeHtml(sla)}" min="1" max="720"
                      class="w-28 border border-gray-300 rounded-lg px-3 py-2 text-sm text-center font-bold focus:ring-2 focus:ring-teal-500 outline-none">

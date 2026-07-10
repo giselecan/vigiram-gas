@@ -142,11 +142,24 @@ function agoraInputDateTimeLocal() {
 // ---------------------------------------------------------
 // INICIALIZAÇÃO E AUTENTICAÇÃO
 // ---------------------------------------------------------
+// Re-dispara uma animação CSS num elemento que estava com display:none.
+// display:none zera o estado da animação, mas trocar a classe não basta —
+// o navegador agrupa remove+add no mesmo frame. O acesso a offsetWidth força
+// um reflow síncrono no meio, reiniciando a animação de fato.
+function _animarEntrada(el, cls) {
+  if (!el) return;
+  cls = cls || 'tela-anim';
+  el.classList.remove(cls);
+  void el.offsetWidth; // reflow — reinicia a animação
+  el.classList.add(cls);
+}
+
 function _mostrarLogin() {
   document.getElementById('view-login').classList.remove('hidden');
   document.getElementById('view-login').classList.add('flex');
   document.getElementById('app-container').classList.add('hidden');
   document.getElementById('app-container').classList.remove('flex');
+  _animarEntrada(document.getElementById('loginCard'), 'login-card-anim');
 }
 
 function inicializar() {
@@ -191,6 +204,7 @@ function iniciarAppSeguro() {
   const containerApp = document.getElementById('app-container');
   containerApp.classList.remove('hidden');
   containerApp.classList.add('flex');
+  _animarEntrada(containerApp, 'tela-anim'); // cross-fade suave login → app
   _configurarAbaAdmin();
   construirNaranjo();
   carregarConfig();
@@ -209,8 +223,9 @@ function realizarLogin(event) {
   const btn    = document.getElementById('btnLogin');
 
   const originalHtml = btn.innerHTML;
-  btn.innerHTML  = '<i class="fas fa-circle-notch fa-spin"></i>';
+  btn.innerHTML  = '<i class="fas fa-circle-notch fa-spin mr-2"></i> Entrando…';
   btn.disabled   = true;
+  btn.classList.add('btn-carregando');
 
   google.script.run
     .withSuccessHandler(res => {
@@ -224,6 +239,7 @@ function realizarLogin(event) {
         // daria para logar de novo.
         btn.innerHTML = originalHtml;
         btn.disabled  = false;
+        btn.classList.remove('btn-carregando');
         document.getElementById('loginSenha').value = '';
         _exibirNomeUsuario(res.nome || '');
         mostrarToast('Bem-vindo(a), ' + res.nome, 'sucesso');
@@ -232,12 +248,14 @@ function realizarLogin(event) {
         mostrarToast(res.erro, 'erro');
         btn.innerHTML = originalHtml;
         btn.disabled  = false;
+        btn.classList.remove('btn-carregando');
       }
     })
     .withFailureHandler(() => {
       mostrarToast('Falha na comunicação com o servidor.', 'erro');
       btn.innerHTML = originalHtml;
       btn.disabled  = false;
+      btn.classList.remove('btn-carregando');
     })
     .autenticarUsuario(email, senha);
 }
@@ -443,7 +461,9 @@ function _popularFiltroFarmaceutico() {
 function alternarAba(aba) {
   ['kanban','dashboard','admin'].forEach(function(v) {
     const el = document.getElementById('view-' + v);
-    if (el) el.classList.toggle('hidden', aba !== v);
+    if (!el) return;
+    el.classList.toggle('hidden', aba !== v);
+    if (aba === v) _animarEntrada(el, 'tela-anim'); // fade suave ao abrir a aba
   });
 
   const barraFiltros = document.getElementById('barraFiltros');
@@ -476,7 +496,10 @@ function alternarAba(aba) {
 // ---------------------------------------------------------
 function carregarCasos() {
   const btn = document.getElementById('btnAtualizar');
-  if (btn) btn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i>';
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i>';
+    btn.classList.add('btn-carregando'); // gira + trava re-clique enquanto sincroniza
+  }
 
   mostrarSkeletons();
 
@@ -502,7 +525,7 @@ function carregarCasos() {
         _mostrarLogin();
       } else {
         mostrarToast('Erro ao carregar casos: ' + msg, 'erro');
-        if (btn) btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+        if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.classList.remove('btn-carregando'); }
       }
     })
     .getTodosOsCasos(tokenSessao);
@@ -512,7 +535,7 @@ function processarDados(casos) {
   casosGlobais = casos;
 
   const btn = document.getElementById('btnAtualizar');
-  if (btn) btn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+  if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.classList.remove('btn-carregando'); }
 
   const selectSetor = document.getElementById('filtroSetor');
   const setorAtual  = selectSetor.value;
@@ -623,7 +646,7 @@ function badgeSLAHtml(caso) {
     SEM:      { cls: 'badge-sla-sem',  ico: 'fa-minus-circle',         label: 'Sem SLA'             }
   };
   const c = cfg[status];
-  return `<span class="${c.cls} text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit">
+  return `<span class="${c.cls} text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit">
     <i class="fas ${c.ico}"></i> ${c.label}
   </span>`;
 }

@@ -190,7 +190,7 @@ function construirNaranjo() {
     row.innerHTML = `
       <p class="text-xs text-gray-700 flex-1 leading-snug select-none">
         <span class="font-bold text-gray-400 mr-1">${q.id}.</span>${escapeHtml(q.pergunta)}
-        <i class="fas fa-info-circle text-gray-300 ml-1 text-[10px]"></i>
+        <i class="fas fa-info-circle text-gray-300 ml-1 text-xs"></i>
       </p>
       <div class="naranjo-toggle-group" data-qid="${q.id}">
         <button type="button" class="naranjo-btn" data-tipo="ns"

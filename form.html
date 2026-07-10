@@ -8,12 +8,13 @@
   <title>Notificação de RAM · VigiRAM</title>
   <!-- Favicon NÃO vai aqui: dentro do iframe do GAS o <link rel=icon> é ignorado
        pela aba. Aplicado no servidor via setFaviconUrl (Router.gs/Favicon.gs). -->
-  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   <!-- Tailwind: CSS pré-compilado embutido via styles.html (npm run build:css) —
        substitui o Play CDN. As classes deste form entram no build porque o scan
        (tailwind.config.js) inclui form.html. -->
   <?!= include('styles'); ?>
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <!-- Ícones: subset solid do Font Awesome embutido (npm run build:icons) —
+       self-contained, sem CDN, sem bloqueio de paint. Ver icons.html. -->
+  <?!= include('icons'); ?>
   <style>
     input[type=number]::-webkit-inner-spin-button,
     input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -34,8 +35,7 @@
   </style>
 </head>
 
-<body class="bg-slate-100 font-sans min-h-screen flex flex-col items-center justify-start py-6 px-4"
-      onload="inicializar()">
+<body class="bg-slate-100 font-sans min-h-screen flex flex-col items-center justify-start py-6 px-4">
 
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
 
@@ -64,21 +64,21 @@
       <div class="flex justify-around mt-2.5">
         <button type="button" onclick="irParaEtapa(1)"
                 class="flex flex-col items-center gap-0.5 group" aria-label="Etapa 1: Paciente">
-          <span id="dot1" class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold
+          <span id="dot1" class="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold
                                   bg-white text-teal-700 shadow">1</span>
-          <span class="text-[9px] text-white font-medium">Paciente</span>
+          <span class="text-xs text-white font-medium">Paciente</span>
         </button>
         <button type="button" onclick="irParaEtapa(2)"
                 class="flex flex-col items-center gap-0.5 group" aria-label="Etapa 2: Evento">
-          <span id="dot2" class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold
+          <span id="dot2" class="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold
                                   bg-teal-600 text-teal-200">2</span>
-          <span class="text-[9px] text-teal-300 font-medium">Evento</span>
+          <span class="text-xs text-teal-300 font-medium">Evento</span>
         </button>
         <button type="button" onclick="irParaEtapa(3)"
                 class="flex flex-col items-center gap-0.5 group" aria-label="Etapa 3: Você">
-          <span id="dot3" class="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold
+          <span id="dot3" class="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold
                                   bg-teal-600 text-teal-200">3</span>
-          <span class="text-[9px] text-teal-300 font-medium">Você</span>
+          <span class="text-xs text-teal-300 font-medium">Você</span>
         </button>
       </div>
     </div>
@@ -122,7 +122,7 @@
                    class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
                           focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
                           outline-none transition-all text-gray-800 tracking-widest">
-            <p class="text-[10px] text-gray-400 mt-1"></p>
+            <p class="text-xs text-gray-400 mt-1"></p>
           </div>
           <div>
             <label class="block text-xs font-bold text-gray-600 mb-1.5 uppercase tracking-wider">
@@ -133,7 +133,7 @@
                    class="w-full px-3 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
                           focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
                           outline-none transition-all text-gray-800">
-            <p id="hintNascimento" aria-live="polite" class="text-[10px] text-gray-400 mt-1"></p>
+            <p id="hintNascimento" aria-live="polite" class="text-xs text-gray-400 mt-1"></p>
           </div>
         </div>
 
@@ -176,7 +176,7 @@
                  class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm bg-gray-50
                         focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
                         outline-none transition-all text-gray-800">
-          <p class="text-[10px] text-teal-600 mt-1 flex items-center gap-1">
+          <p class="text-xs text-teal-600 mt-1 flex items-center gap-1">
             <i class="fas fa-clock"></i> Pré-preenchido com agora — ajuste data e hora se necessário
           </p>
         </div>
@@ -204,8 +204,8 @@
                            focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
                            outline-none transition-all text-gray-800 resize-none"></textarea>
           <div class="flex justify-between mt-1">
-            <p class="text-[10px] text-gray-400">Seja breve — a Farmácia complementa na investigação</p>
-            <p id="contadorDescricao" class="text-[10px] text-gray-400">0/500</p>
+            <p class="text-xs text-gray-400">Seja breve — a Farmácia complementa na investigação</p>
+            <p id="contadorDescricao" class="text-xs text-gray-400">0/500</p>
           </div>
         </div>
 
@@ -342,7 +342,7 @@
                             focus:bg-white focus:ring-2 focus:ring-teal-500 focus:border-teal-500
                             outline-none transition-all text-gray-800">
             </div>
-            <p class="text-[10px] text-gray-400 mt-1 flex items-center gap-1">
+            <p class="text-xs text-gray-400 mt-1 flex items-center gap-1">
               <i class="fas fa-shield-alt"></i>
             </p>
           </div>
@@ -455,6 +455,14 @@
       document.getElementById('iptProntuario').focus();
 
       window.addEventListener('beforeunload', _guardarSaida);
+    }
+
+    // Init no DOMContentLoaded (e não em body onload): não espera o webfont do
+    // Font Awesome baixar para preencher a data, carregar setores e focar o 1º campo.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', inicializar);
+    } else {
+      inicializar();
     }
 
     function carregarSetores() {
@@ -614,7 +622,7 @@
 
       for (let i = 1; i <= TOTAL_ETAPAS; i++) {
         const dot = document.getElementById('dot' + i);
-        dot.className = 'w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ';
+        dot.className = 'w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ';
         if (i < n)        dot.className += 'bg-green-500 text-white';
         else if (i === n) dot.className += 'bg-orange-500 text-white shadow-md ring-2 ring-orange-300';
         else              dot.className += 'bg-gray-200 text-gray-400';
@@ -682,11 +690,11 @@
 
       if (data > hoje) {
         hint.textContent = 'Data no futuro';
-        hint.className   = 'text-[10px] text-red-500 mt-1';
+        hint.className   = 'text-xs text-red-500 mt-1';
         el.classList.add('border-red-400');
       } else if (data < idadeMaxima) {
         hint.textContent = 'Verifique o ano';
-        hint.className   = 'text-[10px] text-red-500 mt-1';
+        hint.className   = 'text-xs text-red-500 mt-1';
         el.classList.add('border-red-400');
       } else {
         hint.textContent = '';
