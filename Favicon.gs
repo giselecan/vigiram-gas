@@ -18,7 +18,10 @@
  * for público, ou qualquer host de imagem. Enquanto estiver vazio, mantém o
  * ícone padrão do Google (sem quebrar nada).
  */
-const FAVICON_URL = ''; // ← cole aqui a URL pública do PNG (vazio = ícone padrão)
+// Hotlink de imagem do Google Drive (arquivo compartilhado como "Qualquer pessoa
+// com o link"). Se o setFaviconUrl recusar por não terminar em .png, troque por
+// um link direto .png (ex.: postimages.org) — o app não quebra de qualquer forma.
+const FAVICON_URL = 'https://lh3.googleusercontent.com/d/1iMAlsxB8dZl_z-UKg1eGxj3sLC4MgwLs';
 
 /**
  * Aplica o favicon num HtmlOutput servido pelo doGet, de forma SEGURA:
