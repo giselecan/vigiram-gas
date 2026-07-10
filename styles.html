@@ -141,6 +141,78 @@
   .badge-vigimed-pend { background: var(--cor-vigimed-pend-bg); color: var(--cor-vigimed-pend-fg); border: 1px solid var(--cor-vigimed-pend-bd); }
 
   /* =====================================================
+     TEMA ESCURO — "skin" sobre o Tailwind (sem rebuild).
+     Ativado por data-theme="dark" no <html> (definido cedo, antes
+     do paint, por um script no <head> que lê localStorage). Reaproveita
+     os tokens de status (sobrescritos abaixo) e remapeia os utilitários
+     de superfície/texto/borda mais usados. A especificidade do seletor
+     (atributo + descendente) vence a classe utilitária simples do
+     Tailwind sem precisar de !important. A navbar/login teal e os botões
+     de ação coloridos permanecem — só as superfícies neutras invertem.
+  ===================================================== */
+  :root[data-theme="dark"] {
+    /* Badges de status/origem/SLA/VigiMed reajustados p/ fundo escuro */
+    --cor-de-bg: rgba(168,85,247,.20); --cor-de-fg: #e9d5ff;
+    --cor-ba-bg: rgba(239,68,68,.20);  --cor-ba-fg: #fecaca;
+    --cor-concluido: #4ade80; --cor-descartado: #94a3b8;
+    --cor-sla-ok-bg:  rgba(16,185,129,.16); --cor-sla-ok-fg:  #6ee7b7; --cor-sla-ok-bd:  rgba(16,185,129,.40);
+    --cor-sla-warn-bg:rgba(234,179,8,.16);  --cor-sla-warn-fg:#fde047; --cor-sla-warn-bd:rgba(234,179,8,.40);
+    --cor-sla-late-bg:rgba(239,68,68,.16);  --cor-sla-late-fg:#fca5a5; --cor-sla-late-bd:rgba(239,68,68,.40);
+    --cor-sla-sem-bg: rgba(148,163,184,.16);--cor-sla-sem-fg: #cbd5e1; --cor-sla-sem-bd: rgba(148,163,184,.35);
+    --cor-vigimed-ok-bg:  rgba(16,185,129,.16); --cor-vigimed-ok-fg:  #6ee7b7; --cor-vigimed-ok-bd:  rgba(16,185,129,.40);
+    --cor-vigimed-pend-bg:rgba(245,158,11,.16); --cor-vigimed-pend-fg:#fcd34d; --cor-vigimed-pend-bd:rgba(245,158,11,.40);
+
+    --dk-bg: #0f172a;        /* fundo do app */
+    --dk-surface: #1e293b;   /* cartões / painéis / modais */
+    --dk-surface-2: #172033; /* inputs / superfícies sutis */
+    --dk-border: #334155;
+    --dk-txt: #e5e7eb;
+    --dk-txt-2: #94a3b8;
+  }
+
+  /* Fundo geral + superfícies */
+  :root[data-theme="dark"] body               { background-color: var(--dk-bg); color: var(--dk-txt); }
+  :root[data-theme="dark"] .bg-gray-100,
+  :root[data-theme="dark"] .bg-slate-100      { background-color: var(--dk-bg); }
+  :root[data-theme="dark"] .bg-white          { background-color: var(--dk-surface); }
+  :root[data-theme="dark"] .bg-gray-50        { background-color: var(--dk-surface-2); }
+  :root[data-theme="dark"] .bg-gray-200       { background-color: #334155; }
+  :root[data-theme="dark"] .bg-gray-300       { background-color: #475569; }
+  :root[data-theme="dark"] .bg-gray-900       { background-color: #020617; }
+
+  /* Texto */
+  :root[data-theme="dark"] .text-gray-800,
+  :root[data-theme="dark"] .text-gray-700     { color: var(--dk-txt); }
+  :root[data-theme="dark"] .text-gray-600,
+  :root[data-theme="dark"] .text-gray-500,
+  :root[data-theme="dark"] .text-gray-400     { color: var(--dk-txt-2); }
+  :root[data-theme="dark"] .text-teal-700     { color: #5eead4; }   /* legível sobre cartão escuro */
+
+  /* Bordas */
+  :root[data-theme="dark"] .border-gray-100,
+  :root[data-theme="dark"] .border-gray-200,
+  :root[data-theme="dark"] .border-gray-300   { border-color: var(--dk-border); }
+  :root[data-theme="dark"] .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--dk-border); }
+  :root[data-theme="dark"] .kanban-card       { border-color: var(--dk-border); }
+
+  /* Hovers de superfície */
+  :root[data-theme="dark"] .hover\:bg-gray-50:hover  { background-color: #233043; }
+  :root[data-theme="dark"] .hover\:bg-gray-100:hover { background-color: #233043; }
+  :root[data-theme="dark"] .hover\:bg-gray-200:hover { background-color: #2b3a52; }
+  :root[data-theme="dark"] .hover\:bg-white:hover    { background-color: var(--dk-surface); }
+  :root[data-theme="dark"] .naranjo-row:hover        { background: #233043; }
+
+  /* Skeleton no escuro */
+  :root[data-theme="dark"] .skeleton {
+    background: linear-gradient(90deg, #1e293b 25%, #273549 50%, #1e293b 75%);
+    background-size: 200% 100%;
+  }
+
+  /* Botão de tema na navbar (mesmo formato dos pills-action) */
+  .btn-tema { transition: transform .15s ease, background-color .15s ease; }
+  .btn-tema:hover { transform: translateY(-1px); }
+
+  /* =====================================================
      CARD KANBAN
   ===================================================== */
   .kanban-card {
