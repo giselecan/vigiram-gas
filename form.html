@@ -2,10 +2,16 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <!-- Sem maximum-scale: bloquear o zoom prejudica acessibilidade (usuários
+       variados da assistência precisam poder ampliar o formulário). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Notificação de RAM · VigiRAM</title>
   <?!= include('Favicon'); ?>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <!-- Tailwind: CSS pré-compilado embutido via styles.html (npm run build:css) —
+       substitui o Play CDN. As classes deste form entram no build porque o scan
+       (tailwind.config.js) inclui form.html. -->
+  <?!= include('styles'); ?>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <style>
     input[type=number]::-webkit-inner-spin-button,
