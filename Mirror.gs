@@ -122,6 +122,34 @@ function espelharCasoNoSheets_(idCaso, dadosObjeto, motivo) {
 }
 
 /**
+ * Espelha VÁRIOS casos novos numa ÚNICA gravação em lote (um setValues sob um
+ * único comTrava_), em vez de um appendRow por caso — cada appendRow é a
+ * escrita mais lenta do Sheets e ainda pegava/soltava o lock por caso. Usado
+ * pelo ETL (handleInsertDB). Semântica de falha idêntica à do caminho único:
+ * se a gravação em lote falhar, cada caso volta para a fila de retry
+ * (processarFilaEspelho relê o Firestore por ID), sem bloquear a resposta ao robô.
+ * @param {Array<{id, objeto}>} itens
+ */
+function espelharCasosEmLote_(itens) {
+  if (!itens || !itens.length) return;
+  try {
+    // Monta as linhas ANTES de pegar o lock — trabalho de CPU não precisa
+    // segurar o LockService, que serializa todas as escritas do sistema.
+    const linhas = itens.map(function (it) { return _construirLinhaCaso_(it.id, it.objeto); });
+
+    comTrava_(function () {
+      const aba = getSheet_(SCHEMA.ABAS.CASOS);
+      if (!aba) throw new Error('Aba ' + SCHEMA.ABAS.CASOS + ' não encontrada.');
+      const inicio = aba.getLastRow() + 1;
+      aba.getRange(inicio, 1, linhas.length, SCHEMA.LARGURA).setValues(linhas);
+    });
+  } catch (e) {
+    console.error('Mirror [espelharCasosEmLote_] falhou para ' + itens.length + ' caso(s): ' + e.message);
+    itens.forEach(function (it) { _enfileirarRetry({ tipo: 'CASO', idCaso: it.id, tentativas: 0 }); });
+  }
+}
+
+/**
  * Espelha um evento de log no DB_Log do Sheets.
  * Chamado dentro de fsRegistrarLog_() após a escrita no Firestore.
  *
@@ -155,7 +183,16 @@ function espelharLogNoSheets_(payload) {
 function _gravarCasoNoSheets(idCaso, doc) {
   const aba = getSheet_(SCHEMA.ABAS.CASOS);
   if (!aba) throw new Error('Aba ' + SCHEMA.ABAS.CASOS + ' não encontrada.');
+  aba.appendRow(_construirLinhaCaso_(idCaso, doc));
+}
 
+/**
+ * Monta a linha posicional (SCHEMA.COL — 46 colunas) de um caso. Extraído de
+ * _gravarCasoNoSheets para que a gravação EM LOTE do ETL (um único setValues,
+ * ver espelharCasosEmLote_) reaproveite exatamente o mesmo mapeamento de
+ * colunas usado no appendRow por caso (fechamento/retry).
+ */
+function _construirLinhaCaso_(idCaso, doc) {
   const tz  = Session.getScriptTimeZone();
 
   // Formata datas
@@ -223,7 +260,7 @@ function _gravarCasoNoSheets(idCaso, doc) {
   // ── Dashboard de Produtividade (revisão 07/2026) ─────────────────────────
   linha[SCHEMA.COL.DATA_TRIAGEM       - 1] = fmtData(doc.dataTriagem);
 
-  aba.appendRow(linha);
+  return linha;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
