@@ -91,7 +91,10 @@ function autenticarUsuario(email, senha) {
         erro: 'Sistema de autenticação indisponível no momento. Contate o administrador (falha de conexão com o banco de identidade).'
       };
     }
-    return { sucesso: false, erro: 'Erro interno: ' + msg };
+    // Mensagem genérica ao usuário — o detalhe técnico (msg/stack) já foi
+    // logado acima (console.error) e no log de auditoria (_registrarLogin_),
+    // então nada se perde para diagnóstico; só não vaza para a tela de login.
+    return { sucesso: false, erro: 'Não foi possível concluir o login. Tente novamente ou contate o administrador.' };
   }
 }
 

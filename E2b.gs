@@ -202,6 +202,12 @@ function _validarCasoParaE2B_(caso) {
   if (!caso.desfecho || !SCHEMA.E2B.DESFECHO_MAP[String(caso.desfecho).toUpperCase()]) {
     avisos.push('Desfecho ausente ou sem mapeamento (SCHEMA.E2B.DESFECHO_MAP) — E.i.7 sairá como "6" (Desconhecido).');
   }
+  // Desfecho ÓBITO sem data de óbito: D.9.1 <deceasedTime> sai OMITIDO do XML
+  // (ver dataObitoE2B em _montarXmlE2B_) — justamente o caso mais grave, sem
+  // qualquer sinal na tela hoje. Avisa explicitamente em vez de omitir em silêncio.
+  if (String(caso.desfecho || '').toUpperCase() === 'ÓBITO' && !caso.dataObito) {
+    avisos.push('Desfecho é ÓBITO mas a data do óbito não foi preenchida — D.9.1 sairá ausente do XML.');
+  }
 
   return avisos;
 }
