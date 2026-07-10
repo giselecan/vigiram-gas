@@ -175,11 +175,27 @@ function alterarStatusUsuario(email, ativo, token) {
 function listarLogsAuditoria(token, limite) {
   return _comAdmin_(token, function () {
     const max = Math.min(Number(limite) || 200, 500);
-    // Ordena e limita no SERVIDOR (orderBy data desc + limit): traz só os `max`
-    // registros mais recentes em um round-trip, em vez de paginar a coleção de
-    // log inteira (cresce a cada login/ETL/ação → dezenas de milhares de docs)
-    // para mapear/ordenar/fatiar tudo em memória.
-    const docs = fsQuery_(SCHEMA.FS.LOG, null, max, [{ campo: 'data', direcao: 'DESCENDING' }]);
+    // Caminho rápido: ordena e limita no SERVIDOR (orderBy data desc + limit) —
+    // traz só os `max` mais recentes em um round-trip, sem paginar a coleção
+    // inteira. PORÉM o orderBy do Firestore (a) EXCLUI docs que não têm o campo
+    // `data` e (b) FALHA se o índice do campo não existir. Em qualquer um dos
+    // casos os logs sumiam do painel. Fallback: varre a coleção e ordena em
+    // memória, garantindo que a auditoria sempre apareça.
+    let docs = null;
+    try {
+      docs = fsQuery_(SCHEMA.FS.LOG, null, max, [{ campo: 'data', direcao: 'DESCENDING' }]);
+    } catch (e) {
+      console.error('listarLogsAuditoria: query ordenada falhou (índice ausente?), usando fallback — ' + e.message);
+    }
+    if (!docs || !docs.length) {
+      docs = fsListarTodos_(SCHEMA.FS.LOG)
+        .sort(function (a, b) {
+          const da = a.data ? new Date(a.data).getTime() : 0;
+          const db = b.data ? new Date(b.data).getTime() : 0;
+          return db - da; // mais recentes primeiro
+        })
+        .slice(0, max);
+    }
     return docs.map(function (d) {
       return {
         data:    d.data || null,
