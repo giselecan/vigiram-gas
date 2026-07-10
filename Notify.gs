@@ -103,13 +103,18 @@ function enviarRelatorioDiarioGatilhos() {
   const cfg = getConfig();
   if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
-  const todosOsCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+  // Filtro composto no SERVIDOR (tipo='BA' AND status=TRIAGEM) em vez de
+  // fsListarTodos_ + filtro em memória: CASOS é o histórico completo do
+  // hospital (só cresce), então buscar a coleção inteira todo dia às 07:00
+  // não escalaria — aqui só trafegam os gatilhos que realmente entram no
+  // e-mail.
+  const casosPendentes = fsQuery_(SCHEMA.FS.CASOS, [
+    { campo: 'tipo',   op: 'EQUAL', valor: 'BA' },
+    { campo: 'status', op: 'EQUAL', valor: SCHEMA.STATUS.TRIAGEM }
+  ]);
   const casosPorSetor = {};
 
-  todosOsCasos.forEach(function (caso) {
-    if (caso.tipo !== 'BA') return;
-    if (caso.status !== SCHEMA.STATUS.TRIAGEM) return;
-
+  casosPendentes.forEach(function (caso) {
     const setor = String(caso.setor || '').toUpperCase().trim();
     if (!setor) return;
     if (!casosPorSetor[setor]) casosPorSetor[setor] = [];

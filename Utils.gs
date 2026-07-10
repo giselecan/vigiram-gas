@@ -65,6 +65,17 @@ function escaparHtml_(texto) {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Converte um valor de data (Date, string, timestamp) para ISO 8601, sem
+ * lançar erro se o valor for inválido/não-parseável — retorna null nesse
+ * caso, em vez de derrubar a função chamadora inteira.
+ */
+function dataParaIsoSegura_(valor) {
+  if (!valor) return null;
+  const data = valor instanceof Date ? valor : new Date(valor);
+  return isNaN(data.getTime()) ? null : data.toISOString();
+}
+
 /** Padroniza a saída das respostas HTTP da API em JSON. */
 function createJsonResponse(obj) {
   return ContentService

@@ -376,10 +376,22 @@ function migrarGatilhosParaFirestore(dryRun) {
     // Coluna D vazia significa ativo. getValues() devolve célula vazia como
     // string "", portanto testar apenas null/undefined marcava todos como
     // inativos. Valores explícitos de negação continuam sendo respeitados.
-    const valorAtivo = String(dados[i][3] || '').trim().toUpperCase();
+    // Normaliza acentos/pontuação/espaços antes de comparar (evita que
+    // "Não.", "NÃO " ou "inativa" escapem de uma lista de negação exata) e
+    // reconhece qualquer valor que COMECE com um marcador de negação
+    // conhecido, em vez de exigir igualdade exata.
+    const valorAtivoBruto = String(dados[i][3] || '').trim();
+    const valorAtivo = valorAtivoBruto
+      .toUpperCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '') // remove acentos
+      .replace(/[^A-Z0-9]/g, ''); // remove pontuação/espaços
+    const NEGACOES = ['NAO', 'FALSE', '0', 'INATIVO', 'INATIVA', 'N', 'X'];
     const ativo = valorAtivo === ''
       ? true
-      : ['NÃO', 'NAO', 'FALSE', '0', 'INATIVO'].indexOf(valorAtivo) === -1;
+      : !NEGACOES.some(function (marcador) { return valorAtivo.indexOf(marcador) === 0; });
+    if (valorAtivo !== '' && ativo) {
+      Logger.log('migrarGatilhosParaFirestore: coluna "ativo" de %s tem valor não reconhecido ("%s") — migrando como ATIVO. Confira manualmente se era a intenção.', medicamento, valorAtivoBruto);
+    }
     const id = medicamento.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
     if (!id) continue;
 

@@ -193,16 +193,30 @@ function listarGatilhos(token) {
         // (medicamento em SNAKE_CASE) quando o campo faltar — nada é ocultado.
         .filter(function (d) { return d._id; })
         .map(function (d) {
-          const nome = (d.medicamento != null && String(d.medicamento).trim())
-            ? String(d.medicamento)
-            : String(d._id).replace(/_/g, ' ');
+          const semMedicamento = d.medicamento == null || !String(d.medicamento).trim();
+          const nome = semMedicamento
+            ? String(d._id).replace(/_/g, ' ')
+            : String(d.medicamento);
+          const medicamento = nome.trim().toUpperCase();
+
+          // Auto-cura: grava o `medicamento` derivado de volta no doc. Sem
+          // isso, o doc continua sem esse campo e handleGetTriggers() (Ingest.gs
+          // — a rota consumida pelo robô PowerShell) segue ignorando esse
+          // gatilho para sempre, mesmo aparecendo ativo aqui no painel. Best
+          // effort: falha na escrita não deve impedir a listagem.
+          if (semMedicamento) {
+            try {
+              fsUpdateDoc_(SCHEMA.FS.GATILHOS, d._id, { medicamento: medicamento });
+            } catch (e) {
+              console.error('listarGatilhos: falha ao auto-curar medicamento do doc ' + d._id + ': ' + e.message);
+            }
+          }
+
           return {
             id:           d._id,
-            medicamento:  nome.trim().toUpperCase(),
+            medicamento:  medicamento,
             ativo:        d.ativo !== false,
-            atualizadoEm: d.atualizadoEm
-              ? new Date(d.atualizadoEm).toISOString()
-              : null
+            atualizadoEm: dataParaIsoSegura_(d.atualizadoEm)
           };
         })
         .sort(function (a, b) { return a.medicamento.localeCompare(b.medicamento); });
