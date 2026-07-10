@@ -139,7 +139,7 @@ function gerarXmlE2B(idCaso, token) {
     caso.idMedicamentoE2B = ids.idMedicamentoE2B;
     caso.safetyReportIdE2B = ids.safetyReportIdE2B;
 
-    const config   = getConfig();
+    const config   = getConfig_();
     const usuario  = _buscarUsuarioAtualParaAssinatura_();
 
     const xml = _montarXmlE2B_(caso, usuario, config);

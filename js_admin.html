@@ -149,7 +149,7 @@ function _renderSecaoVisaoGeral(area) {
   Promise.all([
     _chamarGS('listarUsuarios', tokenSessao),
     _chamarGS('listarGatilhos', tokenSessao),
-    _chamarGS('getConfig'),
+    _chamarGS('getConfig', tokenSessao),
     _chamarGS('listarLogsAuditoria', tokenSessao, 6)
   ]).then(([usuarios, gatilhos, cfg, logs]) => {
     const usuariosAtivos = (usuarios  || []).filter(u => u.ativo === 'SIM').length;
@@ -630,7 +630,7 @@ function _renderSecaoEmails(area) {
           <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <label class="block text-xs font-bold text-gray-600 mb-1">Ver Modelo dos E-mails</label>
             <p class="text-xs text-gray-400 mb-3">Envia um exemplo (com dados fictícios) de cada e-mail automático para o endereço abaixo, só para conferir design e layout.</p>
-            <input type="email" id="cfgEmailTeste" placeholder="seu-email@exemplo.com" value="gisele.can@isgh.org.br"
+            <input type="email" id="cfgEmailTeste" placeholder="seu-email@exemplo.com"
                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-3 focus:ring-2 focus:ring-teal-500 outline-none">
             <div class="flex flex-wrap gap-2">
               <button onclick="_cfgEnviarEmailTeste(this, 'RELATORIO_DIARIO')"
@@ -650,7 +650,7 @@ function _renderSecaoEmails(area) {
         </div>`;
     })
     .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig();
+    .getConfig(tokenSessao);
 }
 
 function _cfgSalvarEmails(btn) {
@@ -746,7 +746,7 @@ function _renderSecaoSLA(area) {
         </div>`;
     })
     .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig();
+    .getConfig(tokenSessao);
 }
 
 function _cfgSalvarSLA(btn) {
@@ -817,7 +817,7 @@ function _renderSecaoSetores(area) {
         </button>`;
     })
     .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig();
+    .getConfig(tokenSessao);
 }
 
 function _cfgAdicionarSetor() {
@@ -919,7 +919,7 @@ function _renderSecaoListas(area) {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${blocos}</div>`;
     })
     .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig();
+    .getConfig(tokenSessao);
 }
 
 function _cfgAdicionarItemLista(campo) {

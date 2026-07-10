@@ -416,7 +416,7 @@ function processarFilaEspelho() {
  */
 function _alertarDescarteFinal_(item, mensagemErro) {
   try {
-    const cfg = getConfig();
+    const cfg = getConfig_();
     const destino = (cfg.geral && cfg.geral.EMAIL_COORDENACAO) || 'farmacia.clinica@hospital.com';
     const idRef = item.idCaso || (item.payload && item.payload.idCaso) || '-';
 

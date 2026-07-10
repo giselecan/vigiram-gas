@@ -60,7 +60,13 @@ function getSegredoETL_() {
   return PropertiesService.getScriptProperties().getProperty(_PROP_ETL_SECRET) || '';
 }
 
-function _verSegredo() {
+// SEGURANÇA: estas 4 funções de setup terminam em "_" DE PROPÓSITO — sem o
+// sufixo, ficariam expostas a google.script.run e QUALQUER visitante anônimo da
+// URL do Web App poderia sobrescrever o ETL_SECRET (quebrando o HMAC do doPost)
+// ou zerar a allowlist de pastas. O "_" as remove do google.script.run mas elas
+// continuam executáveis manualmente pelo editor do Apps Script (que é o único
+// uso pretendido). Ao rodar, selecione a função no editor e clique em Executar.
+function verSegredoETL_() {
   const s = getSegredoETL_();
   Logger.log(s ? ('OK, length=' + s.length) : 'VAZIO — ETL_SECRET não está salvo');
   return s;
@@ -68,9 +74,9 @@ function _verSegredo() {
 
 /**
  * Define o segredo do ETL. Rode UMA vez no editor e guarde o MESMO valor no
- * PowerShell. Ex.: definirSegredoETL('cole-aqui-um-valor-aleatorio-longo')
+ * PowerShell. Ex.: definirSegredoETL_('cole-aqui-um-valor-aleatorio-longo')
  */
-function definirSegredoETL(segredo) {
+function definirSegredoETL_(segredo) {
   if (!segredo || String(segredo).length < 24) {
     throw new Error('Use um segredo com ao menos 24 caracteres aleatórios.');
   }
@@ -79,14 +85,14 @@ function definirSegredoETL(segredo) {
 }
 
 /** Gera um segredo aleatório forte (copie para o PowerShell). */
-function gerarSegredoETL() {
+function gerarSegredoETL_() {
   const s = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
   Logger.log('ETL_SECRET sugerido: %s', s);
   return s;
 }
 
 /** Define a allowlist de pastas do Drive para uploadRaw (CSV de IDs). */
-function definirPastasETL(csvFolderIds) {
+function definirPastasETL_(csvFolderIds) {
   PropertiesService.getScriptProperties()
     .setProperty(_PROP_ETL_FOLDERS, String(csvFolderIds || '').trim());
   return 'Allowlist de pastas atualizada.';
@@ -142,8 +148,8 @@ function validarFolderPermitido_(folderId) {
 // código-fonte (e, por consequência, no backup .md exportado). Segredo em
 // código = segredo comprometido: rotacione IMEDIATAMENTE.
 // Procedimento de rotação:
-//   1. No editor: rode gerarSegredoETL() e copie o valor do log.
-//   2. No editor: rode definirSegredoETL('<valor copiado>') digitando na
+//   1. No editor: rode gerarSegredoETL_() e copie o valor do log.
+//   2. No editor: rode definirSegredoETL_('<valor copiado>') digitando na
 //      janela de execução — NUNCA salve o valor em arquivo .gs.
 //   3. Atualize o mesmo valor no Pipeline_v3.ps1 (lado PowerShell).
-//   4. Confirme com _verSegredo() (loga apenas o tamanho, nunca o valor).
+//   4. Confirme com verSegredoETL_() (loga apenas o tamanho, nunca o valor).

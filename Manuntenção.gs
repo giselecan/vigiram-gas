@@ -2,13 +2,25 @@
  * @fileoverview Manutencao.gs — utilitários administrativos de uso pontual.
  * NÃO é chamado pelo frontend. Rodar manualmente pelo editor do Apps Script.
  *
- * limparCasosAntigos_dryRun() — lista o que SERIA apagado, sem apagar nada.
- * limparCasosAntigos(confirmar) — apaga de fato. Exige confirmar === true.
+ * limparCasosAntigos_dryRun_() — lista o que SERIA apagado, sem apagar nada.
+ * limparCasosAntigos_(confirmar) — apaga de fato. Exige DUAS travas (ver abaixo).
  *
  * Critério: mantém casos_ram cujo data_evento é HOJE (fuso do script).
  * Todo o resto (Firestore + linha espelhada em DB_Casos_RAM) é removido.
  * log_auditoria NÃO é tocado — trilha LGPD/Vigimed preservada.
+ *
+ * SEGURANÇA (crítico — esta função APAGA histórico regulatório):
+ *   1) Todas as funções deste arquivo terminam em "_": sem o sufixo, ficariam
+ *      expostas a google.script.run e um anônimo poderia chamar
+ *      EXECUTAR_LIMPEZA_DE_FATO_() pela URL do Web App e zerar a base. O "_"
+ *      as remove do google.script.run; continuam executáveis pelo editor.
+ *   2) Trava de ambiente: a exclusão real só roda se a Script Property
+ *      PERMITIR_LIMPEZA_MASSA == 'SIM'. Assim, um clique acidental no editor
+ *      em produção falha em vez de apagar tudo. Para rodar de propósito:
+ *      Configurações do projeto → Propriedades do script → adicione
+ *      PERMITIR_LIMPEZA_MASSA = SIM, execute, e REMOVA a propriedade depois.
  */
+const _PROP_PERMITIR_LIMPEZA = 'PERMITIR_LIMPEZA_MASSA';
 
 function _hojeDDMMAAAA_() {
   const hoje = new Date();
@@ -37,7 +49,7 @@ function _casosForaDeHoje_() {
 }
 
 /** PASSO 1 — SEMPRE rodar isto primeiro. Só loga, não apaga nada. */
-function limparCasosAntigos_dryRun() {
+function limparCasosAntigos_dryRun_() {
   const foraDeHoje = _casosForaDeHoje_();
   Logger.log(`Hoje: ${_hojeDDMMAAAA_()}`);
   Logger.log(`Total em casos_ram: ${fsListarTodos_(SCHEMA.FS.CASOS).length}`);
@@ -49,14 +61,22 @@ function limparCasosAntigos_dryRun() {
 }
 
 /**
- * PASSO 2 — apaga de fato. Precisa chamar com confirmar === true.
+ * PASSO 2 — apaga de fato. Precisa chamar com confirmar === true E ter a
+ * Script Property PERMITIR_LIMPEZA_MASSA == 'SIM' (ver cabeçalho do arquivo).
  * Remove do Firestore (casos_ram) e a linha correspondente em DB_Casos_RAM
  * (planilha espelho), casando pelo ID_CASO (SCHEMA.COL.ID).
  */
-function limparCasosAntigos(confirmar) {
+function limparCasosAntigos_(confirmar) {
+  const permitido = PropertiesService.getScriptProperties()
+    .getProperty(_PROP_PERMITIR_LIMPEZA);
+  if (String(permitido).toUpperCase() !== 'SIM') {
+    throw new Error('Limpeza de base BLOQUEADA: defina a Script Property ' +
+                    'PERMITIR_LIMPEZA_MASSA = SIM antes de executar (e remova-a depois). ' +
+                    'Isto evita apagar o histórico regulatório por engano em produção.');
+  }
   if (confirmar !== true) {
-    throw new Error('Chame limparCasosAntigos(true) explicitamente para confirmar a exclusão. ' +
-                     'Rode limparCasosAntigos_dryRun() antes para conferir o que será apagado.');
+    throw new Error('Chame limparCasosAntigos_(true) explicitamente para confirmar a exclusão. ' +
+                     'Rode limparCasosAntigos_dryRun_() antes para conferir o que será apagado.');
   }
 
   const foraDeHoje = _casosForaDeHoje_();
@@ -105,8 +125,8 @@ function limparCasosAntigos(confirmar) {
 /** * PASSO 3 — Função auxiliar para disparar a limpeza pelo Editor.
  * Selecione esta função no menu superior e clique em Executar.
  */
-function EXECUTAR_LIMPEZA_DE_FATO() {
+function EXECUTAR_LIMPEZA_DE_FATO_() {
   // Passa o parâmetro "true" exigido pela trava de segurança
-  limparCasosAntigos(true);
+  limparCasosAntigos_(true);
 }
 

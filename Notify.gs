@@ -55,7 +55,7 @@ function resolverEmailsPorSetor_() {
   }
 
   // 2) Canônico (DB_Setores via getConfig) — tem prioridade, já migrado
-  const cfg = getConfig();
+  const cfg = getConfig_();
   (cfg.setores || []).forEach(function (s) {
     if (s.setor && s.email) map[s.setor.toUpperCase().trim()] = s.email;
   });
@@ -100,7 +100,7 @@ function _montarEmailBase_(corDestaque, titulo, subtitulo, corpoHtml, linkSistem
  * gatilho pendente não recebem e-mail.
  */
 function enviarRelatorioDiarioGatilhos() {
-  const cfg = getConfig();
+  const cfg = getConfig_();
   if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
   // Filtro composto no SERVIDOR (tipo='BA' AND status=TRIAGEM) em vez de
@@ -192,7 +192,7 @@ function _montarEmailRelatorioDiario_(setor, listaCasos, linkSistema) {
  */
 function notificarNovaDemandaEspontanea_(caso) {
   try {
-    const cfg = getConfig();
+    const cfg = getConfig_();
     if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
     const setor = String(caso.setor || '').toUpperCase().trim();
@@ -259,7 +259,7 @@ function notificarInvestigacaoConcluida_(caso) {
     const emailNotificador = String(notificador.email || '').trim();
     if (!emailNotificador) return;
 
-    const cfg = getConfig();
+    const cfg = getConfig_();
     if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
     const LINK_FORM = ScriptApp.getService().getUrl() + '?page=form';

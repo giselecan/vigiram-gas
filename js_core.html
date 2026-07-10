@@ -386,7 +386,7 @@ function carregarConfig() {
       console.warn('getConfig falhou:', e.message);
       carregarCasos();
     })
-    .getConfig();
+    .getConfig(tokenSessao);
 }
 
 function aplicarConfig(cfg) {
