@@ -10,6 +10,19 @@
 
 ---
 
+## Ferramenta operacional — reset da base antes do go-live
+
+Adicionada em `Manuntenção.gs` (não é um item da auditoria, é um utilitário
+administrativo pontual): `zerarBaseCasosParaProducao_dryRun_()` +
+`zerarBaseCasosParaProducao_(confirmar)` apagam todos os casos de teste
+(`casos_ram` no Firestore + linhas de `DB_Casos_RAM` no Sheets), preservando
+usuários, setores, listas, Naranjo, gatilhos, configuração geral e o log de
+auditoria. Protegida por três travas (Script Property dedicada +
+confirmação por string exata + sufixo `_`, nunca exposta ao frontend). Ver
+o bloco de comentários no próprio arquivo para o passo a passo de execução.
+
+---
+
 ## A. Diagnóstico de Tipos e Datas
 
 ### 🔴 Crítico — risco de perda de dados / corrupção regulatória
