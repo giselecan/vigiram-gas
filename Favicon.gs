@@ -18,12 +18,13 @@
  * for público, ou qualquer host de imagem. Enquanto estiver vazio, mantém o
  * ícone padrão do Google (sem quebrar nada).
  */
-// GitHub raw: serve o favicon.png da raiz do repo como arquivo estático puro
-// (Content-Type: image/png, sem redirecionamento). Testado e confirmado — ao
-// contrário dos endpoints do Drive (/thumbnail, /uc?id=, lh3...), que não são
-// hotlink oficial e podem devolver uma página de aviso em vez da imagem quando
-// o pedido não parece navegação normal (é exatamente o caso do favicon).
-const FAVICON_URL = 'https://raw.githubusercontent.com/giselecan/vigiram-gas/main/favicon.png';
+// GitHub raw: serve o PNG do logo (triângulo + cruz) da raiz do repo como
+// arquivo estático puro (Content-Type: image/png, sem redirecionamento).
+// Testado e confirmado — ao contrário dos endpoints do Drive (/thumbnail,
+// /uc?id=, lh3...), que não são hotlink oficial e podem devolver uma página
+// de aviso em vez da imagem quando o pedido não parece navegação normal
+// (é exatamente o caso do favicon).
+const FAVICON_URL = 'https://raw.githubusercontent.com/giselecan/vigiram-gas/main/Design_sem_nome__5_-removebg-preview.png';
 
 /**
  * Aplica o favicon num HtmlOutput servido pelo doGet, de forma SEGURA:
