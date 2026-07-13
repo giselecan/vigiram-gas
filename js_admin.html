@@ -108,7 +108,9 @@ function _criarModalConfig() {
     if (!btn) return;
     const acao  = btn.getAttribute('data-acao');
     const email = btn.getAttribute('data-email');
-    if (acao === 'reset-senha') {
+    if (acao === 'editar') {
+      _cfgEditarUsuario(email);
+    } else if (acao === 'reset-senha') {
       _cfgResetSenha(email);
     } else if (acao === 'alterar-status') {
       const ativoAtual = btn.getAttribute('data-ativo') === '1';
@@ -497,15 +499,20 @@ function _abrirSubConfig(id) {
 // ─────────────────────────────────────────────────────────
 // CONFIGURAÇÕES · USUÁRIOS
 // ─────────────────────────────────────────────────────────
+let _usuariosCache = [];
+
 function _renderSecaoUsuarios(area) {
   google.script.run
     .withSuccessHandler(usuarios => {
-      const linhas = (usuarios || []).map(u => {
+      _usuariosCache = usuarios || [];
+      const linhas = _usuariosCache.map(u => {
         const ativo = u.ativo === 'SIM';
+        const setores = u.setores || [];
         return `<tr class="border-b border-gray-100 hover:bg-gray-50 text-sm">
           <td class="px-4 py-3">
             <p class="font-semibold text-gray-800">${escapeHtml(u.nome)}</p>
             <p class="text-xs text-gray-400">${escapeHtml(u.email)}</p>
+            ${setores.length ? `<p class="text-xs text-teal-600 mt-0.5">${escapeHtml(setores.join(', '))}</p>` : ''}
           </td>
           <td class="px-4 py-3">
             <span class="${u.perfil === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'} text-xs font-bold px-2 py-0.5 rounded-full">
@@ -519,6 +526,10 @@ function _renderSecaoUsuarios(area) {
           </td>
           <td class="px-4 py-3">
             <div class="flex gap-2">
+              <button data-acao="editar" data-email="${escapeHtml(u.email)}"
+                      class="text-xs bg-teal-50 hover:bg-teal-100 text-teal-700 font-semibold px-2.5 py-1.5 rounded-lg transition">
+                <i class="fas fa-pen mr-1"></i>Editar
+              </button>
               <button data-acao="reset-senha" data-email="${escapeHtml(u.email)}"
                       class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
                 <i class="fas fa-key mr-1"></i>Senha
@@ -562,53 +573,176 @@ function _renderSecaoUsuarios(area) {
     .listarUsuarios(tokenSessao);
 }
 
-function _cfgNovoUsuario() {
-  _cfgAbrirSubModal('Novo Usuário', `
-    <div class="space-y-4">
-      <div>
-        <label class="block text-xs font-bold text-gray-600 mb-1">E-mail *</label>
-        <input type="email" id="cfgNuEmail" placeholder="usuario@isgh.org.br"
-               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-gray-600 mb-1">Nome completo *</label>
-        <input type="text" id="cfgNuNome"
-               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-gray-600 mb-1">Senha (mín. 8 caracteres) *</label>
-        <input type="password" id="cfgNuSenha"
-               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
-      </div>
-      <div>
-        <label class="block text-xs font-bold text-gray-600 mb-1">Perfil *</label>
-        <select id="cfgNuPerfil" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none">
-          <option value="FARMACEUTICO">Farmacêutico</option>
-          <option value="ADMIN">Administrador</option>
-        </select>
-      </div>
-    </div>`,
-    'Criar Usuário', () => {
-      const dados = {
-        email:  document.getElementById('cfgNuEmail').value.trim(),
-        nome:   document.getElementById('cfgNuNome').value.trim(),
-        senha:  document.getElementById('cfgNuSenha').value.trim(),
-        perfil: document.getElementById('cfgNuPerfil').value
-      };
-      if (!dados.email || !dados.nome || !dados.senha) { mostrarToast('Preencha todos os campos.', 'erro'); return; }
-      if (dados.senha.length < 8) { mostrarToast('Senha deve ter ao menos 8 caracteres.', 'erro'); return; }
+/**
+ * Monta o HTML da lista de setores (checkbox por setor + campo para
+ * adicionar um setor novo na hora) usada tanto no cadastro quanto na
+ * edição de usuário. `selecionados` marca os setores já atribuídos.
+ */
+function _cfgHtmlCheckboxesSetores(distintos, selecionados) {
+  const marcados = new Set((selecionados || []).map(s => String(s).toUpperCase()));
+  distintos.forEach(s => marcados.add(s)); // garante que setores só do usuário também apareçam
+  const todos = Array.from(marcados).sort((a, b) => a.localeCompare(b));
 
-      const btn = document.getElementById('cfgSubModalBtn');
-      _iniciarCarregando(btn);
-      google.script.run
-        .withSuccessHandler(res => {
-          _pararCarregando(btn);
-          mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
-          if (res.sucesso) { _fecharSubModal(); _abrirSubConfig('usuarios'); }
-        })
-        .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
-        .criarUsuario(dados, tokenSessao);
-    });
+  const itens = todos.map(s => `
+    <label class="flex items-center gap-2 text-sm py-1 cursor-pointer">
+      <input type="checkbox" class="cfgUsSetorChk" value="${escapeHtml(s)}"
+             ${(selecionados || []).map(x => String(x).toUpperCase()).includes(s) ? 'checked' : ''}>
+      ${escapeHtml(s)}
+    </label>`).join('');
+
+  return `
+    <div id="cfgUsSetoresLista" class="max-h-32 overflow-y-auto border border-gray-200 rounded-lg px-3 py-1 mb-2">
+      ${itens || '<p class="text-xs text-gray-400 py-1">Nenhum setor cadastrado ainda.</p>'}
+    </div>
+    <div class="flex gap-2">
+      <input type="text" id="cfgUsNovoSetor" placeholder="Adicionar setor novo…"
+             class="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:ring-2 focus:ring-teal-500 outline-none">
+      <button type="button" onclick="_cfgUsAdicionarSetorNaLista()"
+              class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-3 py-1.5 rounded-lg transition">
+        <i class="fas fa-plus"></i>
+      </button>
+    </div>`;
+}
+
+/** Adiciona um checkbox novo (já marcado) à lista do modal de usuário, sem precisar salvar antes na aba Setores. */
+function _cfgUsAdicionarSetorNaLista() {
+  const input = document.getElementById('cfgUsNovoSetor');
+  const nome = (input.value || '').trim().toUpperCase();
+  if (!nome) return;
+
+  const lista = document.getElementById('cfgUsSetoresLista');
+  const existentes = Array.from(lista.querySelectorAll('.cfgUsSetorChk')).map(c => c.value);
+  if (existentes.includes(nome)) { input.value = ''; return; }
+
+  const vazio = lista.querySelector('p');
+  if (vazio) vazio.remove();
+
+  const label = document.createElement('label');
+  label.className = 'flex items-center gap-2 text-sm py-1 cursor-pointer';
+  label.innerHTML = `<input type="checkbox" class="cfgUsSetorChk" value="${escapeHtml(nome)}" checked> ${escapeHtml(nome)}`;
+  lista.appendChild(label);
+  input.value = '';
+}
+
+function _cfgSetoresSelecionados() {
+  return Array.from(document.querySelectorAll('.cfgUsSetorChk:checked')).map(c => c.value);
+}
+
+/** Busca os nomes distintos de setor já cadastrados (aba Setores) para montar as checkboxes. */
+function _cfgSetoresDistintos(callback) {
+  google.script.run
+    .withSuccessHandler(cfg => {
+      const nomes = Array.from(new Set((cfg.setores || []).map(s => String(s.setor || '').toUpperCase()))).filter(Boolean);
+      callback(nomes);
+    })
+    .withFailureHandler(() => callback([]))
+    .getConfig(tokenSessao);
+}
+
+function _cfgNovoUsuario() {
+  _cfgSetoresDistintos(distintos => {
+    _cfgAbrirSubModal('Novo Usuário', `
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">E-mail *</label>
+          <input type="email" id="cfgNuEmail" placeholder="usuario@isgh.org.br"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Nome completo *</label>
+          <input type="text" id="cfgNuNome"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Senha (mín. 8 caracteres) *</label>
+          <input type="password" id="cfgNuSenha"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Perfil *</label>
+          <select id="cfgNuPerfil" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none">
+            <option value="FARMACEUTICO">Farmacêutico</option>
+            <option value="ADMIN">Administrador</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Setores que é responsável</label>
+          <p class="text-xs text-gray-400 mb-2">O nome deste usuário migra automaticamente para a aba Setores — não precisa digitar de novo lá.</p>
+          ${_cfgHtmlCheckboxesSetores(distintos, [])}
+        </div>
+      </div>`,
+      'Criar Usuário', () => {
+        const dados = {
+          email:   document.getElementById('cfgNuEmail').value.trim(),
+          nome:    document.getElementById('cfgNuNome').value.trim(),
+          senha:   document.getElementById('cfgNuSenha').value.trim(),
+          perfil:  document.getElementById('cfgNuPerfil').value,
+          setores: _cfgSetoresSelecionados()
+        };
+        if (!dados.email || !dados.nome || !dados.senha) { mostrarToast('Preencha todos os campos.', 'erro'); return; }
+        if (dados.senha.length < 8) { mostrarToast('Senha deve ter ao menos 8 caracteres.', 'erro'); return; }
+
+        const btn = document.getElementById('cfgSubModalBtn');
+        _iniciarCarregando(btn);
+        google.script.run
+          .withSuccessHandler(res => {
+            _pararCarregando(btn);
+            mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
+            if (res.sucesso) { _fecharSubModal(); _abrirSubConfig('usuarios'); }
+          })
+          .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
+          .criarUsuario(dados, tokenSessao);
+      });
+  });
+}
+
+function _cfgEditarUsuario(email) {
+  const usuario = _usuariosCache.find(u => u.email === email);
+  if (!usuario) { mostrarToast('Usuário não encontrado.', 'erro'); return; }
+
+  _cfgSetoresDistintos(distintos => {
+    _cfgAbrirSubModal('Editar Usuário', `
+      <div class="space-y-4">
+        <p class="text-xs text-gray-400">${escapeHtml(usuario.email)}</p>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Nome completo *</label>
+          <input type="text" id="cfgEuNome" value="${escapeHtml(usuario.nome)}"
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Perfil *</label>
+          <select id="cfgEuPerfil" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none">
+            <option value="FARMACEUTICO" ${usuario.perfil === 'FARMACEUTICO' ? 'selected' : ''}>Farmacêutico</option>
+            <option value="ADMIN" ${usuario.perfil === 'ADMIN' ? 'selected' : ''}>Administrador</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Setores que é responsável</label>
+          <p class="text-xs text-gray-400 mb-2">O nome deste usuário migra automaticamente para a aba Setores — não precisa digitar de novo lá.</p>
+          ${_cfgHtmlCheckboxesSetores(distintos, usuario.setores)}
+        </div>
+      </div>`,
+      'Salvar', () => {
+        const dados = {
+          email:   usuario.email,
+          nome:    document.getElementById('cfgEuNome').value.trim(),
+          perfil:  document.getElementById('cfgEuPerfil').value,
+          setores: _cfgSetoresSelecionados()
+        };
+        if (!dados.nome) { mostrarToast('Informe o nome.', 'erro'); return; }
+
+        const btn = document.getElementById('cfgSubModalBtn');
+        _iniciarCarregando(btn);
+        google.script.run
+          .withSuccessHandler(res => {
+            _pararCarregando(btn);
+            mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
+            if (res.sucesso) { _fecharSubModal(); _abrirSubConfig('usuarios'); }
+          })
+          .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
+          .editarUsuario(dados, tokenSessao);
+      });
+  });
 }
 
 function _cfgResetSenha(email) {
