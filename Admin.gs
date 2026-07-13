@@ -55,7 +55,11 @@ function listarUsuarios(token) {
         return {
           email:  String(u.email || '').trim(),
           nome:   String(u.nome || '').trim(),
-          ativo:  String(u.ativo || 'SIM').trim().toUpperCase(),
+          // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #7): u.ativo
+          // pode vir como boolean (novo padrão) ou string legada — normaliza
+          // via _ativoComoBooleano_ antes de reconverter para o contrato
+          // 'SIM'/'NÃO' que o frontend (js_admin.html) já consome.
+          ativo:  _ativoComoBooleano_(u.ativo) ? 'SIM' : 'NÃO',
           perfil: String(u.perfil || '').trim().toUpperCase()
         };
       });
@@ -101,7 +105,7 @@ function criarUsuario(dados, token) {
       email: email,
       senhaHash: hashSenha,
       nome: nome,
-      ativo: 'SIM',
+      ativo: true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
       perfil: perfil
     });
 
@@ -151,7 +155,7 @@ function trocarSenhaUsuario(email, novaSenha, token) {
  * Alterna o status ATIVO/INATIVO de um usuário.
  * Impede que o ADMIN desative a própria conta.
  * @param {string} email
- * @param {boolean} ativo — true = SIM, false = NÃO
+ * @param {boolean} ativo
  */
 function alterarStatusUsuario(email, ativo, token) {
   return _comAdmin_(token, function () {
@@ -164,8 +168,8 @@ function alterarStatusUsuario(email, ativo, token) {
     const existente = fsGetDoc_(SCHEMA.FS.USUARIOS, emailAlvo);
     if (!existente) return { sucesso: false, mensagem: 'Usuário não encontrado.' };
 
-    const novoStatus = ativo ? 'SIM' : 'NÃO';
-    fsUpdateDoc_(SCHEMA.FS.USUARIOS, emailAlvo, { ativo: novoStatus });
+    // CORREÇÃO #7: grava boolean direto, não mais 'SIM'/'NÃO'.
+    fsUpdateDoc_(SCHEMA.FS.USUARIOS, emailAlvo, { ativo: !!ativo });
 
     fsRegistrarLog_(
       ativo ? 'ADMIN_ATIVAR_USUARIO' : 'ADMIN_DESATIVAR_USUARIO',

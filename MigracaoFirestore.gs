@@ -75,7 +75,9 @@ function migrarSetoresParaFirestore(dryRun) {
     const setor = String(linha[CS.SETOR - 1] || '').trim();
     if (!setor) continue;
 
-    const ativo        = String(linha[CS.ATIVO - 1] || 'SIM').trim().toUpperCase();
+    // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #7): grava boolean,
+    // não mais a string 'SIM'/'NÃO' — mesmo padrão do resto do sistema.
+    const ativo        = _ativoComoBooleano_(String(linha[CS.ATIVO - 1] || 'SIM').trim());
     const farmaceutico = String(linha[CS.FARMACEUTICO_RESPONSAVEL - 1] || '').trim();
     const email         = String(linha[CS.EMAIL_RESPONSAVEL - 1] || '').trim();
 
@@ -223,7 +225,9 @@ function migrarUsuariosParaFirestore(dryRun) {
       email: email,
       senhaHash: String(cel(dados[i], CU.SENHA) || '').trim(),
       nome: String(cel(dados[i], CU.NOME) || '').trim(),
-      ativo: String(cel(dados[i], CU.ATIVO) || 'SIM').trim().toUpperCase(),
+      // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #7): boolean,
+      // não mais a string 'SIM'/'NÃO'.
+      ativo: _ativoComoBooleano_(String(cel(dados[i], CU.ATIVO) || 'SIM').trim()),
       perfil: String(cel(dados[i], CU.PERFIL) || '').trim().toUpperCase()
     };
 
@@ -523,4 +527,64 @@ function migrarDataCasosParaTimestamp_(dryRun) {
 /** Wrapper para execução manual no editor — aplica de fato o backfill acima. */
 function _aplicarMigracaoDataCasos() {
   migrarDataCasosParaTimestamp_(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKFILL — normaliza `ativo` de usuarios/setores para boolean real
+// (auditoria_qa_datas_tipagem_2026-07-13.md, achado #7)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Usuários e setores gravados ANTES da correção em Admin.gs/Config write.gs
+ * podem ter `ativo` como string ('SIM'/'NÃO') em vez de boolean. Login
+ * (Auth.gs) e leitura de setores (Config.gs) já aceitam os dois formatos
+ * via _ativoComoBooleano_ (Utils.gs) — este backfill é só para deixar o
+ * dado em si consistente daqui pra frente, não é bloqueante para nada
+ * funcionar. Idempotente: docs que já têm `ativo` boolean são pulados.
+ *
+ * dryRun=true (padrão): só loga o que faria. dryRun=false: aplica de fato.
+ */
+function migrarAtivoParaBooleano_(dryRun) {
+  const simular = dryRun !== false;
+  Logger.log('=== Backfill ativo→boolean (usuarios/setores) — modo %s ===', simular ? 'DRY-RUN' : 'APLICADO');
+
+  const resultado = {};
+
+  [
+    { colecao: SCHEMA.FS.USUARIOS, nome: 'usuarios', chaveId: 'email' },
+    { colecao: SCHEMA.FS.SETORES,  nome: 'setores',  chaveId: 'setor' }
+  ].forEach(function (alvo) {
+    const docs = fsListarTodos_(alvo.colecao);
+    let jaEraBoolean = 0, convertidos = 0;
+
+    docs.forEach(function (doc) {
+      if (typeof doc.ativo === 'boolean') { jaEraBoolean++; return; }
+
+      const novoValor = _ativoComoBooleano_(doc.ativo);
+      if (simular) {
+        Logger.log('Converteria %s/%s | ativo=%s → %s', alvo.nome, doc._id, JSON.stringify(doc.ativo), novoValor);
+      } else {
+        fsUpdateDoc_(alvo.colecao, doc._id, { ativo: novoValor });
+      }
+      convertidos++;
+    });
+
+    Logger.log(
+      '%s — %s: %s já era boolean, %s convertido(s).',
+      simular ? 'DRY-RUN' : 'APLICADO', alvo.nome, jaEraBoolean, convertidos
+    );
+    resultado[alvo.nome] = { jaEraBoolean: jaEraBoolean, convertidos: convertidos };
+  });
+
+  if (!simular) {
+    invalidarConfig(); // setores fazem parte do getConfig() cacheado (Config.gs)
+  }
+
+  resultado.simulado = simular;
+  return resultado;
+}
+
+/** Wrapper para execução manual no editor — aplica de fato o backfill acima. */
+function _aplicarMigracaoAtivoBooleano() {
+  migrarAtivoParaBooleano_(false);
 }

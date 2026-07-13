@@ -371,21 +371,29 @@ spinner. Três exceções reais:
       `_normalizarNumeroE2B_` (E2b.gs) já trata `Number` via `String()`
       corretamente — os dois já tratavam `0` como valor válido antes desta
       mudança, então nenhum consumidor precisou ser alterado.
-- [ ] **#7 — AVALIADO, NÃO aplicado nesta rodada (risco maior).**
-      Padronizar `ativo` como um único tipo (boolean) em todas as coleções.
-      Diferente de #6/#8, aqui **não há bug ativo hoje** — cada coleção lê
-      seu próprio `ativo` de forma consistente dentro de si mesma, sem
-      código genérico cruzando as duas convenções. E o campo mais sensível,
-      `usuarios.ativo` (string `'SIM'/'NÃO'`), é lido por
-      `autenticarUsuario()` (Auth.gs) — **o próprio login**. Mudar o tipo
-      sem migrar os documentos já existentes (usuários reais já cadastrados
-      antes do go-live) arrisca bloquear login se a checagem não aceitar os
-      dois formatos durante a transição. Dado que o sistema entra em
-      produção amanhã, prefiro não mexer nisso sem confirmação explícita —
-      ver conversa. Se decidido seguir, o caminho seguro é: escrever sempre
-      boolean a partir de agora, ler aceitando string OU boolean
-      (equivalente ao `_parseDataFlexivel_` usado para datas), e só depois
-      rodar uma migração de backfill como a de `data`/casos_ram.
+- [x] **#7 — CORRIGIDO em 2026-07-13 (caminho seguro, sem quebrar login).**
+      `usuarios.ativo` e `setores.ativo` passam a ser gravados como
+      `boolean` a partir de agora (`Admin.gs`, `Config write.gs`,
+      migrações `migrarUsuariosParaFirestore`/`migrarSetoresParaFirestore`
+      em `MigracaoFirestore.gs`). TODA leitura (`Auth.gs` — login,
+      `Admin.gs` — `listarUsuarios`, `Config.gs` — `lerSetoresFirestore_`)
+      passa a usar o novo helper `_ativoComoBooleano_` (`Utils.gs`), que
+      aceita boolean OU a string legada `'SIM'/'NÃO'/'NAO'` — nenhum
+      documento gravado antes desta correção deixa de funcionar, inclusive
+      contas de usuário já cadastradas. O contrato `google.script.run` para
+      o frontend (`js_admin.html`) foi mantido idêntico (`listarUsuarios`
+      continua devolvendo `'SIM'/'NÃO'`) — zero mudança no frontend.
+      Gatilhos (já boolean) não precisaram de nenhuma alteração.
+      `config_geral.ALERTAS_ATIVOS` foi deixado de fora de propósito: é um
+      valor dentro de um dicionário chave/valor genérico onde TODO valor é
+      string por design (mesmo padrão de `SLA_PADRAO_HORAS`, `TITULO_SISTEMA`
+      etc.) — não é o mesmo tipo de achado que um campo "ativo" por registro.
+      **Migração de backfill disponível, não executada automaticamente:**
+      `migrarAtivoParaBooleano_(dryRun)` em `MigracaoFirestore.gs` converte
+      os documentos já existentes de `usuarios`/`setores` para boolean —
+      idempotente, roda manualmente no editor quando quiser (dry-run
+      primeiro). Enquanto não rodar, tudo continua funcionando pela
+      tolerância de leitura acima.
 - [ ] **Seção B** — padronizar contrato de retorno
       (`respostaOk_`/`respostaErro_`) em todas as funções expostas a
       `google.script.run`; começar por `salvarDemandaEspontanea` (exemplo

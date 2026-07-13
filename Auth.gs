@@ -40,7 +40,6 @@ function autenticarUsuario(email, senha) {
     }
 
     const senhaDb = String(usuario.senhaHash || '').trim();
-    const ativo   = String(usuario.ativo || '').trim().toUpperCase();
 
     const res = verificarSenha_(senha, senhaDb);
     if (!res.ok) {
@@ -48,7 +47,12 @@ function autenticarUsuario(email, senha) {
       return { sucesso: false, erro: 'Credenciais inválidas.' };
     }
 
-    if (ativo === 'NÃO' || ativo === 'NAO') {
+    // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #7): usuarios.ativo
+    // está em transição de string ('SIM'/'NÃO') para boolean — _ativoComoBooleano_
+    // (Utils.gs) aceita os dois formatos, então o login continua funcionando
+    // para contas gravadas antes OU depois da correção, sem precisar migrar
+    // nada primeiro.
+    if (!_ativoComoBooleano_(usuario.ativo)) {
       _registrarLogin_(emailNormalizado, false, 'Usuário inativo');
       return { sucesso: false, erro: 'Usuário inativo. Contate o administrador.' };
     }
