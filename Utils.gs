@@ -77,6 +77,40 @@ function dataParaIsoSegura_(valor) {
 }
 
 /**
+ * Converte o valor de um <input type="number"> (sempre formato numérico
+ * nativo do browser — ponto decimal, nunca vírgula) para Number antes de
+ * persistir no Firestore. Vazio/nulo/não-parseável vira '' (não `null` nem
+ * `0`), preservando o mesmo comportamento de "não preenchido" que o campo
+ * já tinha como string vazia — leitores existentes (_mapearCasoCompleto_,
+ * _normalizarNumeroE2B_) já tratam tanto Number quanto String de forma
+ * segura, inclusive o valor 0 (não é tratado como "vazio").
+ * Ver auditoria_qa_datas_tipagem_2026-07-13.md, achado #8.
+ */
+function _paraNumeroOuVazio_(v) {
+  if (v === '' || v == null) return '';
+  const n = Number(v);
+  return isNaN(n) ? '' : n;
+}
+
+/**
+ * Interpreta um valor de flag "ativo" em QUALQUER uma das convenções que
+ * coexistem no projeto durante a transição documentada em
+ * auditoria_qa_datas_tipagem_2026-07-13.md (achado #7): boolean (novo
+ * padrão, a partir de 2026-07-13 — ver Admin.gs/Config write.gs) ou string
+ * 'SIM'/'NÃO'/'NAO' (legado — ainda presente em qualquer documento gravado
+ * ANTES desta correção, até rodar a migração de backfill). Campo ausente
+ * é tratado como ativo — mesmo default "SIM" que o projeto já tinha antes.
+ * NUNCA comparar `doc.ativo === 'SIM'` nem `doc.ativo === true` direto:
+ * sempre passar por aqui, para funcionar com os dois tipos ao mesmo tempo.
+ */
+function _ativoComoBooleano_(valor) {
+  if (valor === undefined || valor === null || valor === '') return true;
+  if (typeof valor === 'boolean') return valor;
+  const s = String(valor).trim().toUpperCase();
+  return s !== 'NAO' && s !== 'NÃO' && s !== 'FALSE' && s !== '0';
+}
+
+/**
  * Interpreta um valor de data em qualquer um dos formatos usados
  * historicamente pelo projeto — Date real, "dd/MM/yyyy[ HH:mm[:ss]]" (BR)
  * ou "yyyy-MM-dd[ T]HH:mm[:ss]" (ISO, inclusive o que <input type=

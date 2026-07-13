@@ -97,7 +97,7 @@ function salvarSetores(setores, token) {
       idsNovos[id] = true;
       fsSetDoc_(SCHEMA.FS.SETORES, id, {
         setor:                    setor,
-        ativo:                    'SIM',
+        ativo:                    true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
         farmaceuticoResponsavel:  String(s.farmaceutico || '').trim(),
         emailResponsavel:         String(s.email        || '').trim()
       });

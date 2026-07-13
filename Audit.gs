@@ -1,5 +1,5 @@
 /**
- * @fileoverview Audit.gs — Trilha de auditoria (LGPD).
+ * @fileoverview Audit.gs — Identidade do usuário atual (LGPD).
  *
  * FASE 7 (#1): usuarioAtual_() passou a priorizar o e-mail resolvido do token
  * de sessão (__emailSessaoAtual, publicado por comAutenticacao_ em Auth.gs).
@@ -14,8 +14,17 @@
  *   2) Session.getActiveUser().getEmail() (caso o deploy o forneça)
  *   3) "sistema" (fallback)
  *
- * Origens explícitas continuam tendo precedência quando passadas diretamente
- * a carimbarAuditoria_(): "ETL" (Ingest) e "Formulário Assistência" (form DE).
+ * CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #6): as funções
+ * carimbarAuditoria_() e registrarLog_() que existiam aqui gravavam DIRETO
+ * no Sheets (Date real, sem trava de concorrência) e já não tinham nenhum
+ * chamador — todo o sistema migrou para fsCarimbarAuditoria_()/
+ * fsRegistrarLog_() (Firestore.gs), que gravam no Firestore como fonte
+ * única e espelham no Sheets como string formatada (Mirror.gs), sob
+ * comTrava_(). A última chamadora remanescente (Admin.gs) foi migrada para
+ * fsRegistrarLog_() junto com esta limpeza — era a causa raiz de DB_Log
+ * misturar Date real (ações de Admin) e string (todo o resto) na mesma
+ * coluna. Removidas por serem código morto e por manter viva uma rota de
+ * escrita sem trava para o mesmo arquivo que Mirror.gs protege.
  */
 
 /** Retorna o e-mail do usuário atual (token > sessão > "sistema"). */
@@ -26,34 +35,5 @@ function usuarioAtual_() {
     return email ? email : 'sistema';
   } catch (e) {
     return 'sistema';
-  }
-}
-
-/**
- * Carimba auditoria (quem/quando) numa linha do DB_Casos_RAM.
- * @param {Sheet} planilha
- * @param {number} linha - linha 1-based
- * @param {string=} origem - opcional; se ausente, usa usuarioAtual_()
- */
-function carimbarAuditoria_(planilha, linha, origem) {
-  const quem = origem || usuarioAtual_();
-  planilha.getRange(linha, SCHEMA.COL.ATUALIZADO_POR).setValue(quem);
-  planilha.getRange(linha, SCHEMA.COL.ATUALIZADO_EM).setValue(new Date());
-}
-
-/**
- * Registra um evento na aba de log (se existir). Não interrompe o fluxo
- * principal em caso de erro.
- * @param {string} acao
- * @param {string} idCaso
- * @param {string=} detalhe
- */
-function registrarLog_(acao, idCaso, detalhe) {
-  try {
-    const plan = getSheet_(SCHEMA.ABAS.LOG);
-    if (!plan) return; // log é opcional
-    plan.appendRow([new Date(), usuarioAtual_(), acao, idCaso || '', detalhe || '']);
-  } catch (e) {
-    console.error('Falha ao registrar log: ' + e.message);
   }
 }

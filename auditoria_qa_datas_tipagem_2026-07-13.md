@@ -281,17 +281,20 @@ O padrão geral do frontend é **bom**: quase todo botão de escrita segue
 `disabled=true → chamada → reabilita em success E em failure`, com
 spinner. Três exceções reais:
 
-1. **`js_admin.html:367-379` `_gatExcluir`** — é a única ação de escrita
-   do painel admin sem `_iniciarCarregando`/`_pararCarregando`. O botão
-   "Excluir" gatilho fica clicável durante toda a chamada — clique duplo
-   dispara duas exclusões/logs de auditoria concorrentes.
-2. **`js_notificacao_interna.html:144-158`** — chama
-   `salvarDemandaEspontanea` **sem** `idempotencyKey`, diferente de
-   `form.html`, que gera e reenvia a mesma chave em retry por timeout. O
-   comentário em `Cases.gs:266-283` documenta que essa era **exatamente**
-   a causa de duplicação de casos antes da idempotência existir — a
-   notificação interna (usada pelo próprio farmacêutico, pelo Kanban)
-   reabre esse bug já corrigido em outro lugar.
+1. **[x] CORRIGIDO em 2026-07-13 — `js_admin.html` `_gatExcluir`** — era a
+   única ação de escrita do painel admin sem estado de carregamento; o
+   botão "Excluir" gatilho ficava clicável durante toda a chamada, e um
+   clique duplo disparava duas exclusões/logs de auditoria concorrentes.
+   Agora recebe o próprio elemento do botão (`this`), desabilita e mostra
+   spinner durante a chamada, restaurando em falha (em sucesso a tabela
+   inteira é re-renderizada, então o botão específico some).
+2. **[x] CORRIGIDO em 2026-07-13 — `js_notificacao_interna.html`** —
+   chamava `salvarDemandaEspontanea` **sem** `idempotencyKey`, diferente
+   de `form.html`, que gera e reenvia a mesma chave em retry por timeout.
+   Reabria exatamente a causa de duplicação de casos que a idempotência já
+   havia corrigido em `Cases.gs`. Agora gera/reutiliza `_niIdempotencyKeyAtual`
+   no mesmo padrão do `form.html`: mantém a chave em caso de falha (retry
+   seguro) e zera ao abrir o modal para um caso novo.
 3. **`js_investigacao.html:346-360`** — `_mostrarCarregandoInvestigacao`
    referencia `#invCarregandoDetalhe`/`#formInvestigacaoCampos`, elementos
    que **não existem** em `index.html` (o próprio comentário admite ser
@@ -299,6 +302,9 @@ spinner. Três exceções reais:
    formulário e mostra o modal vazio, sem spinner, até
    `getCasoDetalhado` retornar — para um caso com histórico clínico
    extenso, isso pode ser vários segundos de tela em branco sem feedback.
+   **Ainda pendente** — exige inserir markup novo no modal em `index.html`
+   (maior risco de efeito colateral visual que os dois itens acima, por
+   isso deixado fora desta rodada).
 
 ---
 
@@ -331,17 +337,63 @@ spinner. Três exceções reais:
         indevida de casos pelo `Manuntenção.gs`): uma vez migrados, os
         casos passam a ter `data` como `Date` real, formato que
         `_casosForaDeHoje_` já sabe interpretar corretamente.
-- [ ] **#2** `E2b.gs:391-398` — normalizar `exame-valor`/`refMin`/`refMax`
-      com a mesma lógica de `_normalizarDoseE2B_` (distinguir separador de
-      milhar vs. decimal BR) antes de ir para o XML regulatório.
-- [ ] **#3** `E2b.gs:654` — trocar `.replace(/[^0-9.]/g, '')` por
-      `_normalizarDoseE2B_`-like para `numeroDosesIntervalo`.
-- [ ] **#6** Unificar `DB_Log` para sempre gravar `Date` real (ou sempre
-      string) — hoje mistura os dois na mesma coluna.
-- [ ] **#7** Padronizar `ativo` como um único tipo (recomendo boolean) em
-      todas as coleções.
-- [ ] **#8** Persistir `pesoKg`/`alturaCm`/`numeroDosesIntervalo` como
-      `Number` no Firestore, não `String`.
+- [x] **#2/#3/#8 (parcial) — CORRIGIDO em 2026-07-13.** Corrupção numérica
+      no XML E2B(R3) regulatório. Aplicado:
+      - `E2b.gs` — `_normalizarDoseE2B_` renomeada/generalizada para
+        `_normalizarNumeroE2B_` (mesma lógica de disambiguação BR
+        milhar-vs-decimal, agora documentada para uso genérico).
+      - `_montarComponenteExameE2B_` — `exame.valor`/`refMin`/`refMax`
+        passam por `_normalizarNumeroE2B_` antes do `Number()`. Antes,
+        `"150.000"` (plaquetas, convenção BR de milhar) virava
+        `Number("150.000")=150` — 1000× menor no laudo — e
+        `"1.234,56"` virava `NaN` e era descartado em silêncio.
+      - `numeroDosesIntervaloE2B` — trocado `.replace(/[^0-9.]/g,'')`
+        (que apagava a vírgula: `"2,5"` → `"25"`, 10× maior) por
+        `_normalizarNumeroE2B_`.
+      - `pesoKgE2B`/`alturaCmE2B` — trocado `.replace(',', '.')` isolado
+        (não tratava separador de milhar) por `_normalizarNumeroE2B_`,
+        mesmo cinto de segurança que a dose já tinha (achado #8, só a
+        camada de exportação E2B — ver nota abaixo sobre o Firestore).
+- [x] **#6 — CORRIGIDO em 2026-07-13.** `Admin.gs` era o único arquivo que
+      ainda chamava o `registrarLog_()` legado (Audit.gs — gravava `Date`
+      real direto no Sheets, sem trava). Trocado pelas 3 chamadas
+      (`criarUsuario`, `trocarSenhaUsuario`, `alterarStatusUsuario`) para
+      `fsRegistrarLog_()` (Firestore.gs), o mesmo caminho usado pelo resto
+      do sistema (grava no Firestore, espelha no Sheets como string
+      formatada via Mirror.gs, sob `comTrava_`). `registrarLog_()` e
+      `carimbarAuditoria_()` (Audit.gs) ficaram sem nenhum chamador —
+      removidas por serem código morto (mantido só `usuarioAtual_()`).
+- [x] **#8 — CORRIGIDO em 2026-07-13.** `pesoKg`/`alturaCm`/
+      `numeroDosesIntervalo` agora persistem como `Number` no Firestore
+      (`Cases.gs`, via novo helper `_paraNumeroOuVazio_` em `Utils.gs`).
+      Não reintroduz o bug de "zero falsy": `_mapearCasoCompleto_` (leitura
+      para o frontend) já convertia com `!= null` + `String()`, e
+      `_normalizarNumeroE2B_` (E2b.gs) já trata `Number` via `String()`
+      corretamente — os dois já tratavam `0` como valor válido antes desta
+      mudança, então nenhum consumidor precisou ser alterado.
+- [x] **#7 — CORRIGIDO em 2026-07-13 (caminho seguro, sem quebrar login).**
+      `usuarios.ativo` e `setores.ativo` passam a ser gravados como
+      `boolean` a partir de agora (`Admin.gs`, `Config write.gs`,
+      migrações `migrarUsuariosParaFirestore`/`migrarSetoresParaFirestore`
+      em `MigracaoFirestore.gs`). TODA leitura (`Auth.gs` — login,
+      `Admin.gs` — `listarUsuarios`, `Config.gs` — `lerSetoresFirestore_`)
+      passa a usar o novo helper `_ativoComoBooleano_` (`Utils.gs`), que
+      aceita boolean OU a string legada `'SIM'/'NÃO'/'NAO'` — nenhum
+      documento gravado antes desta correção deixa de funcionar, inclusive
+      contas de usuário já cadastradas. O contrato `google.script.run` para
+      o frontend (`js_admin.html`) foi mantido idêntico (`listarUsuarios`
+      continua devolvendo `'SIM'/'NÃO'`) — zero mudança no frontend.
+      Gatilhos (já boolean) não precisaram de nenhuma alteração.
+      `config_geral.ALERTAS_ATIVOS` foi deixado de fora de propósito: é um
+      valor dentro de um dicionário chave/valor genérico onde TODO valor é
+      string por design (mesmo padrão de `SLA_PADRAO_HORAS`, `TITULO_SISTEMA`
+      etc.) — não é o mesmo tipo de achado que um campo "ativo" por registro.
+      **Migração de backfill disponível, não executada automaticamente:**
+      `migrarAtivoParaBooleano_(dryRun)` em `MigracaoFirestore.gs` converte
+      os documentos já existentes de `usuarios`/`setores` para boolean —
+      idempotente, roda manualmente no editor quando quiser (dry-run
+      primeiro). Enquanto não rodar, tudo continua funcionando pela
+      tolerância de leitura acima.
 - [ ] **Seção B** — padronizar contrato de retorno
       (`respostaOk_`/`respostaErro_`) em todas as funções expostas a
       `google.script.run`; começar por `salvarDemandaEspontanea` (exemplo

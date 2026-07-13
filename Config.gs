@@ -170,9 +170,11 @@ function lerSetoresFirestore_() {
     const lista = [];
     docs.forEach(function (doc) {
       const setor = String(doc.setor || '').trim();
-      const ativo = String(doc.ativo || 'SIM').trim().toUpperCase();
       if (!setor) return;
-      if (ativo === 'NAO' || ativo === 'NÃO') return;
+      // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #7): doc.ativo
+      // pode ser boolean (novo padrão) ou string legada — _ativoComoBooleano_
+      // aceita os dois.
+      if (!_ativoComoBooleano_(doc.ativo)) return;
 
       lista.push({
         setor: setor,

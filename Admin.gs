@@ -8,6 +8,14 @@
  * (Sheets) enquanto Auth.gs já lia de Firestore — causa raiz de login falhando
  * para usuários criados/alterados via painel Admin após a Fase 4.
  *
+ * CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #6): a auditoria das
+ * ações deste arquivo usava registrarLog_() (Audit.gs — grava só no Sheets,
+ * com Date real). Todo o resto do sistema já usa fsRegistrarLog_()
+ * (Firestore.gs — grava no Firestore e espelha no Sheets como string
+ * formatada via Mirror.gs). Isso fazia a coluna de data de DB_Log misturar
+ * dois tipos diferentes (Date real vs. string) dependendo de quem escreveu
+ * a linha. Trocado para fsRegistrarLog_() — mesmo padrão do resto do sistema.
+ *
  * Funções expostas ao frontend (google.script.run):
  *   listarUsuarios(token)                        → array de objetos (sem senha)
  *   criarUsuario(dados, token)                   → { sucesso, mensagem }
@@ -47,7 +55,11 @@ function listarUsuarios(token) {
         return {
           email:  String(u.email || '').trim(),
           nome:   String(u.nome || '').trim(),
-          ativo:  String(u.ativo || 'SIM').trim().toUpperCase(),
+          // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #7): u.ativo
+          // pode vir como boolean (novo padrão) ou string legada — normaliza
+          // via _ativoComoBooleano_ antes de reconverter para o contrato
+          // 'SIM'/'NÃO' que o frontend (js_admin.html) já consome.
+          ativo:  _ativoComoBooleano_(u.ativo) ? 'SIM' : 'NÃO',
           perfil: String(u.perfil || '').trim().toUpperCase()
         };
       });
@@ -93,11 +105,11 @@ function criarUsuario(dados, token) {
       email: email,
       senhaHash: hashSenha,
       nome: nome,
-      ativo: 'SIM',
+      ativo: true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
       perfil: perfil
     });
 
-    registrarLog_('ADMIN_CRIAR_USUARIO', email, `Criado por ${__emailSessaoAtual} — perfil: ${perfil}`);
+    fsRegistrarLog_('ADMIN_CRIAR_USUARIO', email, `Criado por ${__emailSessaoAtual} — perfil: ${perfil}`);
     return { sucesso: true, mensagem: `Usuário "${nome}" criado com sucesso.` };
   });
 }
@@ -130,7 +142,7 @@ function trocarSenhaUsuario(email, novaSenha, token) {
       senhaHash: gerarHashArmazenavel_(senha)
     });
 
-    registrarLog_('ADMIN_TROCAR_SENHA', emailAlvo, `Alterado por ${__emailSessaoAtual}`);
+    fsRegistrarLog_('ADMIN_TROCAR_SENHA', emailAlvo, `Alterado por ${__emailSessaoAtual}`);
     return { sucesso: true, mensagem: `Senha de "${emailAlvo}" atualizada.` };
   });
 }
@@ -143,7 +155,7 @@ function trocarSenhaUsuario(email, novaSenha, token) {
  * Alterna o status ATIVO/INATIVO de um usuário.
  * Impede que o ADMIN desative a própria conta.
  * @param {string} email
- * @param {boolean} ativo — true = SIM, false = NÃO
+ * @param {boolean} ativo
  */
 function alterarStatusUsuario(email, ativo, token) {
   return _comAdmin_(token, function () {
@@ -156,10 +168,10 @@ function alterarStatusUsuario(email, ativo, token) {
     const existente = fsGetDoc_(SCHEMA.FS.USUARIOS, emailAlvo);
     if (!existente) return { sucesso: false, mensagem: 'Usuário não encontrado.' };
 
-    const novoStatus = ativo ? 'SIM' : 'NÃO';
-    fsUpdateDoc_(SCHEMA.FS.USUARIOS, emailAlvo, { ativo: novoStatus });
+    // CORREÇÃO #7: grava boolean direto, não mais 'SIM'/'NÃO'.
+    fsUpdateDoc_(SCHEMA.FS.USUARIOS, emailAlvo, { ativo: !!ativo });
 
-    registrarLog_(
+    fsRegistrarLog_(
       ativo ? 'ADMIN_ATIVAR_USUARIO' : 'ADMIN_DESATIVAR_USUARIO',
       emailAlvo,
       `Alterado por ${__emailSessaoAtual}`
