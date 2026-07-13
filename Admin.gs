@@ -8,6 +8,14 @@
  * (Sheets) enquanto Auth.gs já lia de Firestore — causa raiz de login falhando
  * para usuários criados/alterados via painel Admin após a Fase 4.
  *
+ * CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #6): a auditoria das
+ * ações deste arquivo usava registrarLog_() (Audit.gs — grava só no Sheets,
+ * com Date real). Todo o resto do sistema já usa fsRegistrarLog_()
+ * (Firestore.gs — grava no Firestore e espelha no Sheets como string
+ * formatada via Mirror.gs). Isso fazia a coluna de data de DB_Log misturar
+ * dois tipos diferentes (Date real vs. string) dependendo de quem escreveu
+ * a linha. Trocado para fsRegistrarLog_() — mesmo padrão do resto do sistema.
+ *
  * Funções expostas ao frontend (google.script.run):
  *   listarUsuarios(token)                        → array de objetos (sem senha)
  *   criarUsuario(dados, token)                   → { sucesso, mensagem }
@@ -97,7 +105,7 @@ function criarUsuario(dados, token) {
       perfil: perfil
     });
 
-    registrarLog_('ADMIN_CRIAR_USUARIO', email, `Criado por ${__emailSessaoAtual} — perfil: ${perfil}`);
+    fsRegistrarLog_('ADMIN_CRIAR_USUARIO', email, `Criado por ${__emailSessaoAtual} — perfil: ${perfil}`);
     return { sucesso: true, mensagem: `Usuário "${nome}" criado com sucesso.` };
   });
 }
@@ -130,7 +138,7 @@ function trocarSenhaUsuario(email, novaSenha, token) {
       senhaHash: gerarHashArmazenavel_(senha)
     });
 
-    registrarLog_('ADMIN_TROCAR_SENHA', emailAlvo, `Alterado por ${__emailSessaoAtual}`);
+    fsRegistrarLog_('ADMIN_TROCAR_SENHA', emailAlvo, `Alterado por ${__emailSessaoAtual}`);
     return { sucesso: true, mensagem: `Senha de "${emailAlvo}" atualizada.` };
   });
 }
@@ -159,7 +167,7 @@ function alterarStatusUsuario(email, ativo, token) {
     const novoStatus = ativo ? 'SIM' : 'NÃO';
     fsUpdateDoc_(SCHEMA.FS.USUARIOS, emailAlvo, { ativo: novoStatus });
 
-    registrarLog_(
+    fsRegistrarLog_(
       ativo ? 'ADMIN_ATIVAR_USUARIO' : 'ADMIN_DESATIVAR_USUARIO',
       emailAlvo,
       `Alterado por ${__emailSessaoAtual}`

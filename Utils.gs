@@ -77,6 +77,22 @@ function dataParaIsoSegura_(valor) {
 }
 
 /**
+ * Converte o valor de um <input type="number"> (sempre formato numérico
+ * nativo do browser — ponto decimal, nunca vírgula) para Number antes de
+ * persistir no Firestore. Vazio/nulo/não-parseável vira '' (não `null` nem
+ * `0`), preservando o mesmo comportamento de "não preenchido" que o campo
+ * já tinha como string vazia — leitores existentes (_mapearCasoCompleto_,
+ * _normalizarNumeroE2B_) já tratam tanto Number quanto String de forma
+ * segura, inclusive o valor 0 (não é tratado como "vazio").
+ * Ver auditoria_qa_datas_tipagem_2026-07-13.md, achado #8.
+ */
+function _paraNumeroOuVazio_(v) {
+  if (v === '' || v == null) return '';
+  const n = Number(v);
+  return isNaN(n) ? '' : n;
+}
+
+/**
  * Interpreta um valor de data em qualquer um dos formatos usados
  * historicamente pelo projeto — Date real, "dd/MM/yyyy[ HH:mm[:ss]]" (BR)
  * ou "yyyy-MM-dd[ T]HH:mm[:ss]" (ISO, inclusive o que <input type=

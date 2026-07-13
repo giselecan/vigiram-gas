@@ -510,10 +510,17 @@ function registrarInvestigacao(dados, token) {
           indicacaoUso:             dados.indicacaoUso             || '',
           dataFimAdministracao:     _normalizarDataHoraInput_(dados.dataFimAdministracao) || null,
           dataFimReacao:            _normalizarDataHoraInput_(dados.dataFimReacao)         || null,
-          pesoKg:                   dados.pesoKg                   || '',
-          alturaCm:                 dados.alturaCm                 || '',
+          // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #8): pesoKg/
+          // alturaCm/numeroDosesIntervalo agora persistem como Number (não
+          // String) — os campos são <input type="number"> (Utilities.gs
+          // _paraNumeroOuVazio_ só formaliza o que o browser já garante).
+          // Leitores existentes (_mapearCasoCompleto_ abaixo, E2b.gs
+          // _normalizarNumeroE2B_) já tratam Number e String igualmente,
+          // inclusive o valor 0 — não reintroduz o bug de "zero falsy".
+          pesoKg:                   _paraNumeroOuVazio_(dados.pesoKg),
+          alturaCm:                 _paraNumeroOuVazio_(dados.alturaCm),
           formaFarmaceutica:        dados.formaFarmaceutica        || '',
-          numeroDosesIntervalo:     dados.numeroDosesIntervalo     || '',
+          numeroDosesIntervalo:     _paraNumeroOuVazio_(dados.numeroDosesIntervalo),
           unidadeIntervalo:         dados.unidadeIntervalo         || '',
           // F2-09 — array já vem pronto do frontend (subtabela repetível);
           // filtra qualquer linha totalmente vazia antes de persistir.

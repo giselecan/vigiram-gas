@@ -354,18 +354,38 @@ spinner. Três exceções reais:
         (não tratava separador de milhar) por `_normalizarNumeroE2B_`,
         mesmo cinto de segurança que a dose já tinha (achado #8, só a
         camada de exportação E2B — ver nota abaixo sobre o Firestore).
-- [ ] **#6** Unificar `DB_Log` para sempre gravar `Date` real (ou sempre
-      string) — hoje mistura os dois na mesma coluna.
-- [ ] **#7** Padronizar `ativo` como um único tipo (recomendo boolean) em
-      todas as coleções.
-- [ ] **#8 (restante)** `pesoKg`/`alturaCm`/`numeroDosesIntervalo` ainda são
-      persistidos como `String` no Firestore, não `Number` — a normalização
-      acima cobre o ponto de exportação (E2B), que é onde o dado regulatório
-      sai errado hoje. Converter o tipo na gravação (`Cases.gs`) exige
-      também ajustar toda leitura que hoje faz `caso.pesoKg || ''` (ex.:
-      `js_investigacao.html`) para não reintroduzir o bug clássico de
-      "zero falsy" (`0 || '' → ''`) num campo que passaria a ser number —
-      deixado para uma rodada dedicada por esse motivo.
+- [x] **#6 — CORRIGIDO em 2026-07-13.** `Admin.gs` era o único arquivo que
+      ainda chamava o `registrarLog_()` legado (Audit.gs — gravava `Date`
+      real direto no Sheets, sem trava). Trocado pelas 3 chamadas
+      (`criarUsuario`, `trocarSenhaUsuario`, `alterarStatusUsuario`) para
+      `fsRegistrarLog_()` (Firestore.gs), o mesmo caminho usado pelo resto
+      do sistema (grava no Firestore, espelha no Sheets como string
+      formatada via Mirror.gs, sob `comTrava_`). `registrarLog_()` e
+      `carimbarAuditoria_()` (Audit.gs) ficaram sem nenhum chamador —
+      removidas por serem código morto (mantido só `usuarioAtual_()`).
+- [x] **#8 — CORRIGIDO em 2026-07-13.** `pesoKg`/`alturaCm`/
+      `numeroDosesIntervalo` agora persistem como `Number` no Firestore
+      (`Cases.gs`, via novo helper `_paraNumeroOuVazio_` em `Utils.gs`).
+      Não reintroduz o bug de "zero falsy": `_mapearCasoCompleto_` (leitura
+      para o frontend) já convertia com `!= null` + `String()`, e
+      `_normalizarNumeroE2B_` (E2b.gs) já trata `Number` via `String()`
+      corretamente — os dois já tratavam `0` como valor válido antes desta
+      mudança, então nenhum consumidor precisou ser alterado.
+- [ ] **#7 — AVALIADO, NÃO aplicado nesta rodada (risco maior).**
+      Padronizar `ativo` como um único tipo (boolean) em todas as coleções.
+      Diferente de #6/#8, aqui **não há bug ativo hoje** — cada coleção lê
+      seu próprio `ativo` de forma consistente dentro de si mesma, sem
+      código genérico cruzando as duas convenções. E o campo mais sensível,
+      `usuarios.ativo` (string `'SIM'/'NÃO'`), é lido por
+      `autenticarUsuario()` (Auth.gs) — **o próprio login**. Mudar o tipo
+      sem migrar os documentos já existentes (usuários reais já cadastrados
+      antes do go-live) arrisca bloquear login se a checagem não aceitar os
+      dois formatos durante a transição. Dado que o sistema entra em
+      produção amanhã, prefiro não mexer nisso sem confirmação explícita —
+      ver conversa. Se decidido seguir, o caminho seguro é: escrever sempre
+      boolean a partir de agora, ler aceitando string OU boolean
+      (equivalente ao `_parseDataFlexivel_` usado para datas), e só depois
+      rodar uma migração de backfill como a de `data`/casos_ram.
 - [ ] **Seção B** — padronizar contrato de retorno
       (`respostaOk_`/`respostaErro_`) em todas as funções expostas a
       `google.script.run`; começar por `salvarDemandaEspontanea` (exemplo
