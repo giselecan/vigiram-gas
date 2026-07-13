@@ -19,9 +19,20 @@
  * Funções expostas ao frontend (google.script.run):
  *   listarUsuarios(token)                        → array de objetos (sem senha)
  *   criarUsuario(dados, token)                   → { sucesso, mensagem }
+ *   editarUsuario(dados, token)                  → { sucesso, mensagem }
  *   trocarSenhaUsuario(email, novaSenha, token)  → { sucesso, mensagem }
  *   alterarStatusUsuario(email, ativo, token)    → { sucesso, mensagem }
  *   listarLogsAuditoria(token, limite)           → array de { data, usuario, acao, idCaso, detalhe }
+ *
+ * SETORES DO USUÁRIO (cadastro/edição):
+ *   `dados.setores` (array de nomes de setor) grava a lista no próprio
+ *   documento do usuário E espelha em SCHEMA.FS.SETORES (farmaceuticoResponsavel/
+ *   emailResponsavel = nome/e-mail do usuário), via _sincronizarSetoresUsuario_.
+ *   Isso elimina a digitação manual e duplicada do nome do farmacêutico na
+ *   aba "Setores" — o nome migra automaticamente a partir do cadastro do
+ *   usuário. Como o ID do documento em SETORES é setor+e-mail (_idDocSetor_,
+ *   Utils.gs), múltiplos usuários podem ser responsáveis pelo mesmo setor
+ *   sem que um sobrescreva o outro.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,7 +71,8 @@ function listarUsuarios(token) {
           // via _ativoComoBooleano_ antes de reconverter para o contrato
           // 'SIM'/'NÃO' que o frontend (js_admin.html) já consome.
           ativo:  _ativoComoBooleano_(u.ativo) ? 'SIM' : 'NÃO',
-          perfil: String(u.perfil || '').trim().toUpperCase()
+          perfil: String(u.perfil || '').trim().toUpperCase(),
+          setores: Array.isArray(u.setores) ? u.setores : []
         };
       });
   });
@@ -72,7 +84,7 @@ function listarUsuarios(token) {
 
 /**
  * Cria um novo usuário já com senha em hash.
- * @param {{email,nome,senha,perfil}} dados
+ * @param {{email,nome,senha,perfil,setores?}} dados
  */
 function criarUsuario(dados, token) {
   return _comAdmin_(token, function () {
@@ -80,6 +92,7 @@ function criarUsuario(dados, token) {
     const nome   = String(dados.nome   || '').trim();
     const senha  = String(dados.senha  || '').trim();
     const perfil = String(dados.perfil || 'FARMACEUTICO').trim().toUpperCase();
+    const setores = _normalizarSetoresLista_(dados.setores);
 
     if (!email || !nome || !senha) {
       return { sucesso: false, mensagem: 'E-mail, nome e senha são obrigatórios.' };
@@ -106,12 +119,100 @@ function criarUsuario(dados, token) {
       senhaHash: hashSenha,
       nome: nome,
       ativo: true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
-      perfil: perfil
+      perfil: perfil,
+      setores: setores
     });
+
+    _sincronizarSetoresUsuario_(email, nome, [], setores);
 
     fsRegistrarLog_('ADMIN_CRIAR_USUARIO', email, `Criado por ${__emailSessaoAtual} — perfil: ${perfil}`);
     return { sucesso: true, mensagem: `Usuário "${nome}" criado com sucesso.` };
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EDIÇÃO (ADMIN)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Edita nome, perfil e/ou setores de um usuário já cadastrado. E-mail não
+ * pode ser alterado (é o ID do documento). Senha é trocada só por
+ * trocarSenhaUsuario().
+ * @param {{email,nome,perfil,setores?}} dados
+ */
+function editarUsuario(dados, token) {
+  return _comAdmin_(token, function () {
+    const email = String((dados && dados.email) || '').trim().toLowerCase();
+    const nome  = String((dados && dados.nome)   || '').trim();
+    const perfil = String((dados && dados.perfil) || '').trim().toUpperCase();
+    const setores = _normalizarSetoresLista_(dados && dados.setores);
+
+    if (!email || !nome || !perfil) {
+      return { sucesso: false, mensagem: 'Nome e perfil são obrigatórios.' };
+    }
+
+    const existente = fsGetDoc_(SCHEMA.FS.USUARIOS, email);
+    if (!existente) return { sucesso: false, mensagem: 'Usuário não encontrado.' };
+
+    const setoresAntigos = Array.isArray(existente.setores) ? existente.setores : [];
+
+    fsUpdateDoc_(SCHEMA.FS.USUARIOS, email, {
+      nome: nome,
+      perfil: perfil,
+      setores: setores
+    });
+
+    _sincronizarSetoresUsuario_(email, nome, setoresAntigos, setores);
+
+    fsRegistrarLog_('ADMIN_EDITAR_USUARIO', email, `Alterado por ${__emailSessaoAtual} — perfil: ${perfil}`);
+    return { sucesso: true, mensagem: `Usuário "${nome}" atualizado com sucesso.` };
+  });
+}
+
+/** Limpa/dedup a lista de nomes de setor recebida do frontend. */
+function _normalizarSetoresLista_(setores) {
+  if (!Array.isArray(setores)) return [];
+  const vistos = {};
+  const limpos = [];
+  setores.forEach(function (s) {
+    const nome = String(s || '').trim().toUpperCase();
+    if (!nome || vistos[nome]) return;
+    vistos[nome] = true;
+    limpos.push(nome);
+  });
+  return limpos;
+}
+
+/**
+ * Mantém a coleção SCHEMA.FS.SETORES em sincronia com os setores atribuídos
+ * a um usuário: cria/atualiza um documento (setor+e-mail deste usuário) para
+ * cada setor atribuído, com farmaceuticoResponsavel/emailResponsavel = dados
+ * do usuário — e remove só os documentos deste MESMO usuário para setores
+ * que saíram da lista (nunca mexe no documento de outro responsável do
+ * mesmo setor, já que o ID inclui o e-mail — ver _idDocSetor_ em Utils.gs).
+ * @param {string} email
+ * @param {string} nome
+ * @param {string[]} setoresAntigos
+ * @param {string[]} setoresNovos
+ */
+function _sincronizarSetoresUsuario_(email, nome, setoresAntigos, setoresNovos) {
+  const novosSet = {};
+  setoresNovos.forEach(function (setor) {
+    novosSet[setor] = true;
+    fsSetDoc_(SCHEMA.FS.SETORES, _idDocSetor_(setor, email), {
+      setor: setor,
+      ativo: true,
+      farmaceuticoResponsavel: nome,
+      emailResponsavel: email
+    });
+  });
+
+  setoresAntigos.forEach(function (setor) {
+    if (novosSet[setor]) return; // continua atribuído, não remove
+    fsDeleteDoc_(SCHEMA.FS.SETORES, _idDocSetor_(setor, email));
+  });
+
+  if (setoresNovos.length || setoresAntigos.length) invalidarConfig();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

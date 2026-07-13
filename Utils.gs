@@ -153,6 +153,29 @@ function _parseDataFlexivel_(valor) {
   return null;
 }
 
+/**
+ * Gera o ID do documento da coleção `setores` (SCHEMA.FS.SETORES) a partir
+ * do NOME do setor + e-mail do farmacêutico responsável.
+ *
+ * Setores como "TODOS" podem ter múltiplos farmacêuticos responsáveis
+ * (mesmo setor, pessoas diferentes) — usar só o nome do setor como ID
+ * causa colisão: o segundo responsável cadastrado sobrescreve o primeiro
+ * silenciosamente (era exatamente o bug de "cada vez que preencho apaga o
+ * anterior"). Setor+e-mail garante 1 documento por PAR setor/responsável.
+ * Mesma regra usada pela migração original — ver migrarSetoresParaFirestore
+ * em MigracaoFirestore.gs. Sem e-mail, cai de volta no ID legado (só setor).
+ * @param {string} setor
+ * @param {string} email
+ * @returns {string}
+ */
+function _idDocSetor_(setor, email) {
+  const slugSetor = String(setor || '').trim().toUpperCase()
+    .replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+  const slugEmail = String(email || '').trim().toLowerCase()
+    .replace(/[^a-z0-9]/g, '_');
+  return slugEmail ? (slugSetor + '__' + slugEmail) : slugSetor;
+}
+
 /** Padroniza a saída das respostas HTTP da API em JSON. */
 function createJsonResponse(obj) {
   return ContentService

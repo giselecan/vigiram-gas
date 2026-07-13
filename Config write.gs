@@ -67,7 +67,9 @@ function salvarConfigGeral(dados, token) {
 /**
  * Substitui todos os documentos da coleção setores.
  * Estratégia: exclui todos os docs existentes e reinsere.
- * ID do documento = setor em SNAKE_CASE para evitar caracteres inválidos.
+ * ID do documento = setor + e-mail do responsável (ver _idDocSetor_ em
+ * Utils.gs) — permite MAIS DE UM farmacêutico responsável pelo mesmo setor
+ * (ex.: "TODOS") sem que o segundo cadastrado apague o primeiro.
  * @param {Array<{setor, farmaceutico, email}>} setores
  */
 function salvarSetores(setores, token) {
@@ -93,13 +95,14 @@ function salvarSetores(setores, token) {
     setores.forEach(function (s) {
       const setor = String(s.setor || '').trim().toUpperCase();
       if (!setor) return;
-      const id = setor.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
+      const email = String(s.email || '').trim();
+      const id = _idDocSetor_(setor, email);
       idsNovos[id] = true;
       fsSetDoc_(SCHEMA.FS.SETORES, id, {
         setor:                    setor,
         ativo:                    true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
         farmaceuticoResponsavel:  String(s.farmaceutico || '').trim(),
-        emailResponsavel:         String(s.email        || '').trim()
+        emailResponsavel:         email
       });
       upserts++;
     });
