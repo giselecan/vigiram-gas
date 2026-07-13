@@ -57,10 +57,13 @@ function obterDadosFiltradosDash() {
     }
 
     // 3. Filtro de Período (Mês/Data)
+    // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #9): antes só
+    // reconhecia dd/MM/yyyy — data_evento em formato ISO (casos DE com data
+    // preenchida manualmente) escapava do filtro em vez de ser incluído/
+    // excluído corretamente. parseDataFlexivel (js_core.html) trata os dois.
     if (dataDe || dataAte) {
-      const p = (c.data_evento || "").match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-      if (p) {
-        const dEv = new Date(parseInt(p[3]), parseInt(p[2]) - 1, parseInt(p[1]));
+      const dEv = parseDataFlexivel(c.data_evento);
+      if (dEv) {
         if (dataDe && dEv < new Date(dataDe)) return false;
         if (dataAte && dEv > new Date(dataAte)) return false;
       }
@@ -73,20 +76,12 @@ function obterDadosFiltradosDash() {
 // ---------------------------------------------------------
 // HELPERS DE DATA — parsing tolerante para métricas de SLA
 // ---------------------------------------------------------
-
-/** Parseia "dd/MM/yyyy HH:mm" (data_evento) → Date | null */
-function _parseDataEventoBR(str) {
-  if (!str) return null;
-  const m = String(str).match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
-  if (m) {
-    return new Date(
-      parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]),
-      parseInt(m[4] || 0), parseInt(m[5] || 0)
-    );
-  }
-  const d = new Date(str);
-  return isNaN(d) ? null : d;
-}
+// _parseDataEventoBR foi removida (auditoria_qa_datas_tipagem_2026-07-13.md
+// #10): só reconhecia BR e caía num fallback `new Date(str)` que é NaN no
+// Safari/iOS para "yyyy-MM-dd HH:mm" (com espaço) — a métrica de SLA do
+// dashboard sumia silenciosamente nesses aparelhos para casos ISO. Todos os
+// usos agora chamam parseDataFlexivel (js_core.html), que trata BR e ISO
+// com o mesmo parse manual (sem depender de new Date(string)).
 
 /** Parseia o ISO retornado por _mapearCasoResumo_ para dataTriagem → Date | null */
 function _parseDataTriagemISO(str) {
@@ -183,7 +178,7 @@ function desenharGraficos() {
 
     // NOVO — Tempo de análise (triagem) e atraso, só Busca Ativa já triada
     if (c.tipo === 'BA' && c.dataTriagem && c.status !== STATUS.TRIAGEM) {
-      const dEvento = _parseDataEventoBR(c.data_evento);
+      const dEvento = parseDataFlexivel(c.data_evento);
       const dTriagem = _parseDataTriagemISO(c.dataTriagem);
       if (dEvento && dTriagem) {
         const horas = (dTriagem.getTime() - dEvento.getTime()) / 3600000;

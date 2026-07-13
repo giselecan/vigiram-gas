@@ -291,10 +291,7 @@ function salvarDemandaEspontanea(formDados) {
       throw new Error('Preencha os campos obrigatórios: prontuário, iniciais, setor e medicamento.');
     }
 
-    const agora        = new Date();
-    const tz           = Session.getScriptTimeZone();
-    const dataInclusao = Utilities.formatDate(agora, tz, 'dd/MM/yyyy HH:mm:ss');
-
+    const agora  = new Date();
     const idCaso = `ESP-${prontuario}-${agora.getTime().toString().slice(-6)}`;
 
     const nomeNotif  = String(formDados.notificador           || 'N/I').trim();
@@ -315,9 +312,15 @@ function salvarDemandaEspontanea(formDados) {
       console.warn('Não foi possível resolver o farmacêutico do setor: ' + e.message);
     }
 
-    const dataEventoValida = formDados.dataEvento
-      ? _normalizarDataHoraInput_(formDados.dataEvento)
-      : dataInclusao;
+    // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #4): `data` agora é
+    // SEMPRE um Date real (Timestamp no Firestore), nunca string pré-formatada.
+    // Antes esta função gravava dd/MM/yyyy HH:mm:ss OU yyyy-MM-dd HH:mm
+    // dependendo do ramo — os dois formatos escapavam do filtro de período
+    // do Kanban/Dashboard (regex só reconhecia dd/MM/yyyy) e do critério
+    // "caso de hoje" de Manuntenção.gs. _parseDataFlexivel_ interpreta o
+    // valor do <input type="datetime-local"> ("yyyy-MM-ddTHH:mm"); se vier
+    // vazio ou não-parseável, cai no timestamp de inclusão (`agora`).
+    const dataEventoValida = _parseDataFlexivel_(formDados.dataEvento) || agora;
 
     const objetoCaso = {
       id: idCaso,

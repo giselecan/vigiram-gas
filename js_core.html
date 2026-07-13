@@ -110,6 +110,47 @@ function formatarDataExibicao(valor) {
 }
 
 // ---------------------------------------------------------
+// PARSER ÚNICO DE DATA — Date real (não string) a partir de qualquer
+// formato usado pelo backend para data_evento: BR "dd/MM/yyyy[ HH:mm[:ss]]"
+// ou ISO "yyyy-MM-dd[ T]HH:mm[:ss]" (inclusive o valor do próprio
+// <input type="datetime-local">). Componentes extraídos manualmente e
+// passados a `new Date(ano, mes, dia, ...)` — nunca `new Date(string)` —
+// porque "yyyy-MM-dd HH:mm" (com espaço) é NaN no Safari/iOS.
+//
+// Substitui 3 implementações que haviam divergido (calcularSLA aqui,
+// _parseDataEventoBR em js_dashboard.html, e o regex inline do filtro de
+// período em js_kanban.html): a de js_dashboard.html só cobria BR e caía
+// no fallback quebrado do Safari para ISO; a de js_kanban.html não tinha
+// fallback nenhum — quando o regex BR não batia, o caso simplesmente
+// escapava do filtro de período em vez de ser corretamente incluído ou
+// excluído (ver auditoria_qa_datas_tipagem_2026-07-13.md, achado #9).
+// ---------------------------------------------------------
+function parseDataFlexivel(valor) {
+  if (!valor) return null;
+  const s = String(valor).trim();
+
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (br) {
+    const d = new Date(
+      parseInt(br[3], 10), parseInt(br[2], 10) - 1, parseInt(br[1], 10),
+      parseInt(br[4] || '0', 10), parseInt(br[5] || '0', 10), parseInt(br[6] || '0', 10)
+    );
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (iso) {
+    const d = new Date(
+      parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10),
+      parseInt(iso[4] || '0', 10), parseInt(iso[5] || '0', 10), parseInt(iso[6] || '0', 10)
+    );
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------
 // CONVERSÃO PARA INPUTS type="datetime-local"
 // value exigido pelo browser: "yyyy-MM-ddTHH:mm".
 // Aceita os formatos armazenados (com/sem hora, BR/ISO, "T" ou espaço).
@@ -628,7 +669,7 @@ function calcularSLA(caso) {
   if (!caso.data_evento || caso.data_evento === 'Data N/I')
     return { status: 'SEM', restanteH: null };
 
-  // Memoiza SÓ o parse (regex + new Date) da data do evento — a parte cara.
+  // Memoiza SÓ o parse (parseDataFlexivel) da data do evento — a parte cara.
   // calcularSLA é chamada 3x por card a cada render (comparador de ordenação
   // 2x + badgeSLAHtml), e processarFiltros dispara render a cada tecla da
   // busca. restanteH continua recalculado com Date.now() em toda chamada, então
@@ -636,26 +677,8 @@ function calcularSLA(caso) {
   // string data_evento mudar (novo objeto de caso ou edição).
   let evtMs = caso.__slaEvtMs;
   if (evtMs === undefined || caso.__slaEvtSrc !== caso.data_evento) {
-    let dataEvento = null;
-    const m = caso.data_evento.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
-    if (m) {
-      dataEvento = new Date(
-        parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]),
-        parseInt(m[4]), parseInt(m[5])
-      );
-    } else {
-      const iso = caso.data_evento.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
-      if (iso) {
-        // Parse manual — "yyyy-MM-dd HH:mm" (espaço) é NaN no Safari/iOS.
-        dataEvento = new Date(
-          parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3]),
-          parseInt(iso[4] || '0'), parseInt(iso[5] || '0')
-        );
-      } else {
-        dataEvento = new Date(caso.data_evento);
-      }
-    }
-    evtMs = dataEvento.getTime(); // NaN se a data for inválida
+    const dataEvento = parseDataFlexivel(caso.data_evento);
+    evtMs = dataEvento ? dataEvento.getTime() : NaN;
     caso.__slaEvtMs  = evtMs;
     caso.__slaEvtSrc = caso.data_evento;
   }

@@ -78,9 +78,16 @@ function handleInsertDB(e) {
       if (existente) return;
 
       const agora = new Date();
+      // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #5): grava `data`
+      // como Date real sempre que o robô PowerShell mandar um formato
+      // reconhecível (BR ou ISO — ver _parseDataFlexivel_, Utils.gs), em vez
+      // da string bruta. Fallback para a string original se o formato não
+      // for reconhecido: nunca bloqueia/descarta a inserção do ETL por causa
+      // disso, só perde a formatação garantida nesse caso raro.
+      const dataEventoBA = _parseDataFlexivel_(caso.data_evento) || caso.data_evento;
       const objetoCaso = {
         id: idLimpo,
-        data: caso.data_evento,
+        data: dataEventoBA,
         tipo: 'BA',
         prontuario: caso.prontuario,
         iniciais: caso.iniciais_paciente,
