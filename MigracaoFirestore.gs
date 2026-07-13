@@ -462,3 +462,65 @@ function migrarSchemaDataTriagem_v1(dryRun) {
   Logger.log('Cabeçalho gravado.');
   return { alterado: true };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BACKFILL — normaliza `data` de casos_ram para Date/Timestamp real
+// (auditoria_qa_datas_tipagem_2026-07-13.md, achados #1/#4/#5/#9)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Casos criados ANTES da correção em Cases.gs/Ingest.gs podem ter `data`
+ * gravado como string (dd/MM/yyyy... ou yyyy-MM-dd...) em vez de Timestamp.
+ * Isso quebra o filtro de período do Kanban/Dashboard para esses casos
+ * antigos e o critério "caso de hoje" de Manuntenção.gs. Este backfill
+ * converte, um por um, todo `data` que ainda for string e for interpretável
+ * por _parseDataFlexivel_ (Utils.gs) para um Date real — mesma conversão
+ * que os pontos de escrita já fazem para casos novos a partir de agora.
+ *
+ * Casos cujo `data` não for interpretável (formato desconhecido/corrompido)
+ * são LISTADOS mas NÃO alterados — não arrisca gravar uma data errada;
+ * revise manualmente no Firestore Console os IDs reportados como
+ * "NÃO INTERPRETÁVEL".
+ *
+ * dryRun=true (padrão): só loga o que faria. dryRun=false: aplica de fato.
+ * Idempotente: docs que já têm `data` como Date são pulados (contam em
+ * `jaEraDate`, não são regravados) — pode rodar de novo sem risco.
+ */
+function migrarDataCasosParaTimestamp_(dryRun) {
+  const simular = dryRun !== false;
+  Logger.log('=== Backfill data→Timestamp (casos_ram) — modo %s ===', simular ? 'DRY-RUN' : 'APLICADO');
+
+  const docs = fsListarTodos_(SCHEMA.FS.CASOS);
+  let jaEraDate = 0, convertidos = 0, naoInterpretaveis = 0;
+
+  docs.forEach(function (doc) {
+    if (doc.data instanceof Date) { jaEraDate++; return; }
+
+    const dataConvertida = _parseDataFlexivel_(doc.data);
+    if (!dataConvertida) {
+      naoInterpretaveis++;
+      Logger.log('NÃO INTERPRETÁVEL — %s | data bruta = %s', doc._id, JSON.stringify(doc.data));
+      return;
+    }
+
+    if (simular) {
+      Logger.log('Converteria %s | "%s" → %s', doc._id, doc.data, dataConvertida.toISOString());
+    } else {
+      fsUpdateDoc_(SCHEMA.FS.CASOS, doc._id, { data: dataConvertida });
+    }
+    convertidos++;
+  });
+
+  if (!simular) invalidarCasosCache_(); // P1.1 — Kanban precisa refletir a conversão imediatamente
+
+  Logger.log(
+    '%s — casos_ram: %s já eram Date, %s convertido(s), %s não-interpretável(is) (revisar manualmente).',
+    simular ? 'DRY-RUN' : 'APLICADO', jaEraDate, convertidos, naoInterpretaveis
+  );
+  return { jaEraDate: jaEraDate, convertidos: convertidos, naoInterpretaveis: naoInterpretaveis, simulado: simular };
+}
+
+/** Wrapper para execução manual no editor — aplica de fato o backfill acima. */
+function _aplicarMigracaoDataCasos() {
+  migrarDataCasosParaTimestamp_(false);
+}

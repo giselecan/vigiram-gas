@@ -291,29 +291,44 @@ spinner. Três exceções reais:
 
 ## Checklist de Prioridade (para retomar depois)
 
-- [ ] **#1** `Manuntenção.gs` — corrigir `_casosForaDeHoje_` para não
-      depender de prefixo de string (bloqueante: risco de apagar casos DE
-      do dia). Só é acionado manualmente (dupla trava
-      `PERMITIR_LIMPEZA_MASSA` + `confirmar===true`), mas a lógica está
-      quebrada e precisa ser corrigida antes de qualquer próxima execução.
+- [x] **#4/#5/#9/#10 — CORRIGIDO em 2026-07-13.** Causa raiz do "filtro de
+      período não funciona" no Kanban/Dashboard. Aplicado:
+      - `Utils.gs` — novo `_parseDataFlexivel_(valor)`: interpreta Date,
+        BR (`dd/MM/yyyy...`) ou ISO (`yyyy-MM-dd...`) e sempre devolve um
+        `Date` real ou `null`.
+      - `Cases.gs` (`salvarDemandaEspontanea`) e `Ingest.gs`
+        (`handleInsertDB`) — `data` agora é **sempre** gravado como `Date`
+        (Timestamp no Firestore), nunca mais como string pré-formatada.
+      - `js_core.html` — novo `parseDataFlexivel(valor)` (equivalente
+        client-side), substitui as 3 implementações divergentes que
+        existiam (`calcularSLA` aqui, `_parseDataEventoBR` em
+        `js_dashboard.html`, regex inline em `js_kanban.html`).
+      - `js_kanban.html`/`js_dashboard.html` — filtro de período e
+        ordenação por data do evento agora usam `parseDataFlexivel`,
+        reconhecendo BR e ISO igualmente (antes só BR era reconhecido —
+        casos ISO escapavam do filtro sem serem incluídos nem excluídos).
+      - `MigracaoFirestore.gs` — novo `migrarDataCasosParaTimestamp_(dryRun)`
+        + wrapper `_aplicarMigracaoDataCasos()`: backfill dos casos já
+        existentes no Firestore com `data` ainda em string. **Precisa ser
+        rodado manualmente uma vez no editor do Apps Script** (dry-run
+        primeiro) para que casos antigos também passem a respeitar o
+        filtro corretamente — casos novos já nascem corrigidos, mesmo sem
+        rodar a migração.
+      - Isso também resolve a causa raiz do achado **#1** (crítico, exclusão
+        indevida de casos pelo `Manuntenção.gs`): uma vez migrados, os
+        casos passam a ter `data` como `Date` real, formato que
+        `_casosForaDeHoje_` já sabe interpretar corretamente.
 - [ ] **#2** `E2b.gs:391-398` — normalizar `exame-valor`/`refMin`/`refMax`
       com a mesma lógica de `_normalizarDoseE2B_` (distinguir separador de
       milhar vs. decimal BR) antes de ir para o XML regulatório.
 - [ ] **#3** `E2b.gs:654` — trocar `.replace(/[^0-9.]/g, '')` por
       `_normalizarDoseE2B_`-like para `numeroDosesIntervalo`.
-- [ ] **#4/#5** Padronizar `data`/`data_evento` como `Date`/Timestamp real
-      em todos os pontos de escrita (`Cases.gs`, `Ingest.gs`) — resolve a
-      causa raiz de #1, #9 e #10.
 - [ ] **#6** Unificar `DB_Log` para sempre gravar `Date` real (ou sempre
       string) — hoje mistura os dois na mesma coluna.
 - [ ] **#7** Padronizar `ativo` como um único tipo (recomendo boolean) em
       todas as coleções.
 - [ ] **#8** Persistir `pesoKg`/`alturaCm`/`numeroDosesIntervalo` como
       `Number` no Firestore, não `String`.
-- [ ] **#9/#10** Frontend: unificar o parser de data BR/ISO num único
-      helper compartilhado (hoje há 3+ implementações divergentes entre
-      `js_core.html`, `js_kanban.html`, `js_dashboard.html`,
-      `js_investigacao.html`) e usar em todos os arquivos.
 - [ ] **Seção B** — padronizar contrato de retorno
       (`respostaOk_`/`respostaErro_`) em todas as funções expostas a
       `google.script.run`; começar por `salvarDemandaEspontanea` (exemplo

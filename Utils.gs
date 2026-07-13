@@ -76,6 +76,49 @@ function dataParaIsoSegura_(valor) {
   return isNaN(data.getTime()) ? null : data.toISOString();
 }
 
+/**
+ * Interpreta um valor de data em qualquer um dos formatos usados
+ * historicamente pelo projeto — Date real, "dd/MM/yyyy[ HH:mm[:ss]]" (BR)
+ * ou "yyyy-MM-dd[ T]HH:mm[:ss]" (ISO, inclusive o que <input type=
+ * "datetime-local"> envia) — e devolve sempre um Date real, ou null se não
+ * for possível interpretar com segurança.
+ *
+ * Existe para dar fim à causa raiz documentada em
+ * auditoria_qa_datas_tipagem_2026-07-13.md (achados #1/#4/#5/#9): o campo
+ * `data`/`data_evento` era gravado em formatos concorrentes conforme a
+ * origem do caso (ETL, Demanda Espontânea com/sem data preenchida), o que
+ * quebrava silenciosamente o filtro de período do Kanban/Dashboard e o
+ * critério de "caso de hoje" de Manuntenção.gs. Componentes são extraídos
+ * e passados a `new Date(ano, mes, dia, ...)` (nunca `new Date(string)`)
+ * para evitar ambiguidade de fuso/locale na hora do parse.
+ */
+function _parseDataFlexivel_(valor) {
+  if (!valor) return null;
+  if (valor instanceof Date) return isNaN(valor.getTime()) ? null : valor;
+
+  const s = String(valor).trim();
+
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (br) {
+    const d = new Date(
+      parseInt(br[3], 10), parseInt(br[2], 10) - 1, parseInt(br[1], 10),
+      parseInt(br[4] || '0', 10), parseInt(br[5] || '0', 10), parseInt(br[6] || '0', 10)
+    );
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (iso) {
+    const d = new Date(
+      parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10),
+      parseInt(iso[4] || '0', 10), parseInt(iso[5] || '0', 10), parseInt(iso[6] || '0', 10)
+    );
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  return null;
+}
+
 /** Padroniza a saída das respostas HTTP da API em JSON. */
 function createJsonResponse(obj) {
   return ContentService

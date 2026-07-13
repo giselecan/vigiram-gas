@@ -92,10 +92,15 @@ function processarFiltros() {
     // afetada/escondida por este filtro.
     if (slaFiltro !== 'TODOS' && c.status === STATUS.TRIAGEM && calcularSLA(c).status !== slaFiltro) return false;
 
+    // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #9): antes, o
+    // regex só reconhecia dd/MM/yyyy — um data_evento em formato ISO (comum
+    // em casos de Demanda Espontânea com data preenchida manualmente) não
+    // batia, e o caso ESCAPAVA do filtro (nem incluído nem excluído
+    // corretamente, só ignorado). parseDataFlexivel (js_core.html) trata
+    // BR e ISO da mesma forma, então o filtro agora vale para todos os casos.
     if (dataDe || dataAte) {
-      const p = (c.data_evento || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-      if (p) {
-        const dEv = new Date(parseInt(p[3]), parseInt(p[2]) - 1, parseInt(p[1]));
+      const dEv = parseDataFlexivel(c.data_evento);
+      if (dEv) {
         if (dataDe && dEv < new Date(dataDe)) return false;
         if (dataAte && dEv > new Date(dataAte)) return false;
       }
@@ -110,11 +115,13 @@ function processarFiltros() {
   });
 
   // B2 — Investigação ordena por data do evento (mais antigo primeiro),
-  // já que não existe mais ranking por SLA nesta coluna.
+  // já que não existe mais ranking por SLA nesta coluna. parseDataFlexivel
+  // trata BR e ISO igual (antes só BR era reconhecido — casos ISO caíam
+  // sempre no início/fim da ordenação por virarem "Invalid Date").
   const ordenarPorDataEvento = lista => lista.slice().sort((a, b) => {
-    const pa = new Date((a.data_evento || '').replace(/^(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'));
-    const pb = new Date((b.data_evento || '').replace(/^(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1'));
-    return (isNaN(pa) ? 0 : pa) - (isNaN(pb) ? 0 : pb);
+    const pa = parseDataFlexivel(a.data_evento);
+    const pb = parseDataFlexivel(b.data_evento);
+    return (pa ? pa.getTime() : 0) - (pb ? pb.getTime() : 0);
   });
 
   casosFiltrados.triagem      = ordenarPorSLA(casosFiltradosLocal.filter(c => c.status === STATUS.TRIAGEM));
