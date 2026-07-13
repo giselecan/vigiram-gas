@@ -18,10 +18,13 @@
  * for público, ou qualquer host de imagem. Enquanto estiver vazio, mantém o
  * ícone padrão do Google (sem quebrar nada).
  */
-// Hotlink de imagem do Google Drive via endpoint /thumbnail (o mais confiável
-// para servir imagem pública do Drive em <img>/favicon; redimensiona no servidor).
-// Arquivo confirmado público (Qualquer pessoa com o link, Leitor) e image/png.
-const FAVICON_URL = 'https://drive.google.com/thumbnail?id=1iMAlsxB8dZl_z-UKg1eGxj3sLC4MgwLs&sz=w128-h128';
+// GitHub raw: serve o PNG do logo (triângulo + cruz) da raiz do repo como
+// arquivo estático puro (Content-Type: image/png, sem redirecionamento).
+// Testado e confirmado — ao contrário dos endpoints do Drive (/thumbnail,
+// /uc?id=, lh3...), que não são hotlink oficial e podem devolver uma página
+// de aviso em vez da imagem quando o pedido não parece navegação normal
+// (é exatamente o caso do favicon).
+const FAVICON_URL = 'https://raw.githubusercontent.com/giselecan/vigiram-gas/main/Design_sem_nome__5_-removebg-preview.png';
 
 /**
  * Aplica o favicon num HtmlOutput servido pelo doGet, de forma SEGURA:
