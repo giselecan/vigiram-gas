@@ -19,6 +19,15 @@
 //             tokenSessao, getFarmaceuticoPorSetor, configGlobal)
 // =========================================================
 
+// CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md, Seção C #2): esta tela
+// chama salvarDemandaEspontanea() igual ao form.html, mas sem idempotencyKey
+// — reabria exatamente o bug já documentado em Cases.gs (se a gravação
+// tiver sucesso mas a resposta se perder na rede, um retry sem a mesma
+// chave cria um SEGUNDO caso duplicado, pois idCaso usa timestamp). Mesmo
+// padrão do form.html: gera a chave uma vez por tentativa, reenvia a MESMA
+// chave em caso de falha (retry), só zera ao abrir o modal para um caso novo.
+let _niIdempotencyKeyAtual = null;
+
 // ---------------------------------------------------------
 // ABRIR MODAL
 // ---------------------------------------------------------
@@ -29,6 +38,7 @@ function abrirNotificacaoInterna() {
   // Reset completo do formulário
   document.getElementById('formNotificacaoInterna').reset();
   document.getElementById('niAreaErro').classList.add('hidden');
+  _niIdempotencyKeyAtual = null; // novo caso → nova chave na próxima tentativa
 
   // Pré-preencher setor pelo filtro ativo do Kanban
   const filtroSetorAtivo = document.getElementById('filtroSetor')?.value;
@@ -139,6 +149,15 @@ function enviarNotificacaoInterna(event) {
   btn.innerHTML = '<i class="fas fa-circle-notch fa-spin mr-2"></i> Enviando…';
   btn.disabled  = true;
 
+  // Idempotência (mesmo padrão de form.html): gera a chave uma única vez
+  // por tentativa e REUTILIZA a mesma no retry — evita duplicar o caso se a
+  // gravação tiver sucesso mas a resposta se perder na rede.
+  if (!_niIdempotencyKeyAtual) {
+    _niIdempotencyKeyAtual = (crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : ('id_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+  }
+
   // Monta payload compatível com salvarDemandaEspontanea()
   // Campo extra "origem: KANBAN" para rastreabilidade no log
   const dados = {
@@ -154,13 +173,15 @@ function enviarNotificacaoInterna(event) {
     notificador:           farmaceutico || sessionStorage.getItem('vigi_nome') || '',
     categoriaProfissional: 'Farmacêutico',
     // Marca de origem para diferenciar no log
-    origem:                'KANBAN'
+    origem:                'KANBAN',
+    idempotencyKey:        _niIdempotencyKeyAtual
   };
 
   google.script.run
     .withSuccessHandler(() => {
       btn.innerHTML = originalHtml;
       btn.disabled  = false;
+      _niIdempotencyKeyAtual = null; // sucesso completo → próxima chamada usa chave nova
       fecharNotificacaoInterna();
       mostrarToast(`Caso DE registrado para prontuário ${prontuario}. Já em investigação.`, 'sucesso');
       carregarCasos();
@@ -168,6 +189,7 @@ function enviarNotificacaoInterna(event) {
     .withFailureHandler(err => {
       btn.innerHTML = originalHtml;
       btn.disabled  = false;
+      // _niIdempotencyKeyAtual É MANTIDA — um clique de retry reenvia com a mesma chave
       const elErro  = document.getElementById('niAreaErro');
       elErro.textContent = 'Erro ao enviar: ' + (err.message || err);
       elErro.classList.remove('hidden');

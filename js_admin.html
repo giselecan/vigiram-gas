@@ -293,7 +293,7 @@ function _gatRenderTabela() {
                   class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
             <i class="fas fa-pen mr-1"></i>Editar
           </button>
-          <button onclick="_gatExcluir('${g.id}')"
+          <button onclick="_gatExcluir('${g.id}', this)"
                   class="text-xs bg-red-50 hover:bg-red-100 text-red-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
             <i class="fas fa-trash mr-1"></i>Excluir
           </button>
@@ -364,17 +364,41 @@ function _gatAbrirModal(id) {
     });
 }
 
-function _gatExcluir(id) {
+// CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md, Seção C #1): era a
+// única ação de escrita do painel admin sem estado de carregamento — o
+// botão "Excluir" ficava clicável durante toda a chamada, permitindo um
+// duplo clique disparar duas exclusões/logs de auditoria concorrentes para
+// o mesmo gatilho.
+function _gatExcluir(id, btn) {
   const item = _gatCache.find(x => x.id === id);
   const nome = item ? item.medicamento : id;
   if (!confirm(`Confirma excluir o gatilho "${nome}"? Esta ação não pode ser desfeita.`)) return;
 
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>';
+    btn.disabled  = true;
+  }
+
   google.script.run
     .withSuccessHandler(res => {
+      // Em sucesso a tabela inteira é re-renderizada (_renderSecaoGatilhos),
+      // então este botão específico deixa de existir — nada para restaurar.
       mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
-      if (res.sucesso) _renderSecaoGatilhos(document.getElementById('cfgConteudo'));
+      if (res.sucesso) {
+        _renderSecaoGatilhos(document.getElementById('cfgConteudo'));
+      } else if (btn) {
+        btn.innerHTML = originalHtml;
+        btn.disabled  = false;
+      }
     })
-    .withFailureHandler(e => mostrarToast(e.message, 'erro'))
+    .withFailureHandler(e => {
+      if (btn) {
+        btn.innerHTML = originalHtml;
+        btn.disabled  = false;
+      }
+      mostrarToast(e.message, 'erro');
+    })
     .excluirGatilho(id, tokenSessao);
 }
 

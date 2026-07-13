@@ -299,17 +299,24 @@ function _agoraE2B_() {
 }
 
 /**
- * Normaliza a dose para um número decimal com ponto (formato PQ/UCUM do E2B),
- * interpretando as convenções numéricas BR de forma determinística:
+ * Normaliza um valor numérico digitado livremente (dose, peso, altura,
+ * resultado/faixa de referência de exame, nº de doses no intervalo) para um
+ * decimal com ponto (formato PQ/UCUM do E2B), interpretando as convenções
+ * numéricas BR de forma determinística:
  *   "2,5"      → "2.5"    (vírgula = decimal)
  *   "5.000"    → "5000"   (ponto agrupando 3 dígitos = separador de milhar)
  *   "1.000.000"→ "1000000"
  *   "1.000,5"  → "1000.5" (ponto = milhar, vírgula = decimal)
  *   "2.5"      → "2.5"    (ponto isolado sem grupo de milhar = decimal)
- * Evita o value="5.000" (≈5, 1000× menor) e o "1.000.5" (dois pontos → inválido)
- * que o strip simples anterior produzia. Só o campo de dose usa este helper.
+ * Evita o value="5.000" (≈5, 1000× menor) e o "1.000.5" (dois pontos →
+ * inválido) que um strip simples (/[^0-9.]/) ou um `.replace(',', '.')`
+ * isolado produziriam — ver auditoria_qa_datas_tipagem_2026-07-13.md,
+ * achados #2/#3/#8. NUNCA usar Number()/parseFloat() direto nesses campos
+ * antes de passar por aqui: "150.000" (plaquetas, convenção BR de milhar)
+ * vira Number("150.000")=150 — 1000× menor — sem lançar erro nem NaN.
+ * Retorna '' se o valor vier vazio/nulo (chamador decide se omite o campo).
  */
-function _normalizarDoseE2B_(bruto) {
+function _normalizarNumeroE2B_(bruto) {
   let s = String(bruto == null ? '' : bruto).trim();
   if (!s) return '';
 
@@ -389,11 +396,16 @@ function _montarComponenteExameE2B_(exame) {
   const dataExame = _formatarDataE2B_(exame && exame.data);
   const unidade  = escaparHtml_(String((exame && exame.unidade) || '').trim());
   const valorRaw = String((exame && exame.valor) || '').trim();
-  const valorNum = valorRaw.replace(',', '.');
-  const ehNumerico = valorRaw !== '' && unidade !== '' && !isNaN(Number(valorNum));
+  // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #2): valorRaw="150.000"
+  // (ex.: plaquetas, convenção BR de milhar) virava Number("150.000")=150 —
+  // 1000× menor no laudo regulatório — e "1.234,56" virava "1.234.56" (dois
+  // pontos) → NaN → o campo era descartado em silêncio. _normalizarNumeroE2B_
+  // trata as duas convenções (mesma lógica já usada para dose/peso/altura).
+  const valorNum = _normalizarNumeroE2B_(valorRaw);
+  const ehNumerico = valorNum !== '' && unidade !== '' && !isNaN(Number(valorNum));
 
-  const refMin = String((exame && exame.refMin) || '').trim().replace(',', '.');
-  const refMax = String((exame && exame.refMax) || '').trim().replace(',', '.');
+  const refMin = _normalizarNumeroE2B_(exame && exame.refMin);
+  const refMax = _normalizarNumeroE2B_(exame && exame.refMax);
   const temRefMin = ehNumerico && refMin !== '' && !isNaN(Number(refMin));
   const temRefMax = ehNumerico && refMax !== '' && !isNaN(Number(refMax));
 
@@ -562,8 +574,12 @@ function _montarXmlE2B_(caso, usuario, config) {
   const idadeReacaoAnos = _calcularIdadeAnosE2B_(dataNascimento, dataInicioReacao);
 
   // F2-06 — D.3/D.4 Peso (kg) e Altura (cm). Só emite se numérico.
-  const pesoKgE2B   = String(caso.pesoKg   || '').trim().replace(',', '.');
-  const alturaCmE2B = String(caso.alturaCm || '').trim().replace(',', '.');
+  // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #8): só tratava
+  // vírgula decimal — um valor com separador de milhar (ex.: peso digitado
+  // como "1.700" por engano) não tinha o mesmo cinto de segurança já usado
+  // na dose. _normalizarNumeroE2B_ cobre os dois casos.
+  const pesoKgE2B   = _normalizarNumeroE2B_(caso.pesoKg);
+  const alturaCmE2B = _normalizarNumeroE2B_(caso.alturaCm);
 
   // F2-13 — D.6 DUM. Gestante/Lactante não têm elemento próprio no core
   // do E2B(R3) — confirmado: ausentes tanto no exemplo oficial quanto na
@@ -634,9 +650,9 @@ function _montarXmlE2B_(caso, usuario, config) {
   // antigo (/[^0-9.]/) → "25" — dose 10× maior num relatório REGULATÓRIO.
   // O strip anterior também mantinha o PONTO usado como separador de MILHAR:
   // "5.000" (5000 UI, convenção BR) virava value="5.000" ≈ 5 (1000× menor) e
-  // "1.000,5" virava "1.000.5" (dois pontos → PQ inválido). _normalizarDoseE2B_
+  // "1.000,5" virava "1.000.5" (dois pontos → PQ inválido). _normalizarNumeroE2B_
   // resolve as convenções BR de forma determinística (ver helper).
-  const dose          = _normalizarDoseE2B_(caso.doseMedicamento);
+  const dose          = _normalizarNumeroE2B_(caso.doseMedicamento);
   const doseUnidade   = escaparHtml_(String(caso.doseUnidade || '').toLowerCase()) || 'mg';
   const lote          = escaparHtml_(String(caso.lote || '').toUpperCase());
   // F0-09 — G.k.3.3 Nome do detentor/fabricante.
@@ -651,7 +667,11 @@ function _montarXmlE2B_(caso, usuario, config) {
   // F2-08 — G.k.4.r.2/3 Nº de doses no intervalo + unidade (token UCUM).
   // Só forma o bloco de periodicidade se AMBOS os dados baterem — período
   // sem unidade (ou vice-versa) não é um PIVL_TS válido.
-  const numeroDosesIntervaloE2B = String(caso.numeroDosesIntervalo || '').replace(/[^0-9.]/g, '');
+  // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #3): o strip antigo
+  // (/[^0-9.]/) REMOVIA a vírgula em vez de convertê-la — "2,5" virava "25"
+  // (10× maior) no XML de posologia. _normalizarNumeroE2B_ trata a vírgula
+  // decimal e o ponto de milhar corretamente (mesma lógica de dose/peso/altura).
+  const numeroDosesIntervaloE2B = _normalizarNumeroE2B_(caso.numeroDosesIntervalo);
   const unidadeIntervaloE2B = SCHEMA.E2B.UNIDADE_INTERVALO_MAP[String(caso.unidadeIntervalo || '').toUpperCase()] || '';
 
   // F2-03 — G.k.7.r.1 Indicação de uso (texto livre, sem MedDRA — mesmo
