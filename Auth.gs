@@ -32,7 +32,7 @@ const _SESSAO_TTL_SEG  = 21600; // 6h (máximo do GAS) — inalterado
 function autenticarUsuario(email, senha) {
   const emailNormalizado = String(email || '').trim().toLowerCase();
   try {
-    _hashSecurityGISELE_(); // Security.gs — trip-wire de autoria (Fase 8)
+    _hashSecurityGISELE_();
     const usuario = fsGetDoc_(SCHEMA.FS.USUARIOS, emailNormalizado);
 
     if (!usuario) {

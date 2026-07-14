@@ -154,59 +154,18 @@ function validarFolderPermitido_(folderId) {
 //   3. Atualize o mesmo valor no Pipeline_v3.ps1 (lado PowerShell).
 //   4. Confirme com verSegredoETL_() (loga apenas o tamanho, nunca o valor).
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FASE 8 — PROPRIEDADE INTELECTUAL: ASSINATURA DE AUTORIA + TRAVA DE AMBIENTE
-//
-// VigiRAM é propriedade intelectual de GISELE CRISTINE ARAUJO NASCIMENTO,
-// cedida em uso à unidade hospitalar piloto. O Apps Script não permite
-// ocultar código-fonte de quem tem acesso de Editor — então esta seção não
-// tenta "esconder" nada. Em vez disso: (1) deixa a autoria embutida no
-// código de forma que sobrevive a uma cópia (prova de autoria) e (2) trava
-// a EXECUÇÃO do sistema ao ambiente autorizado, para que uma cópia do
-// projeto (via "Fazer uma cópia" no editor, ou export do código-fonte para
-// outro projeto) pare de funcionar fora do ambiente original.
-//
-// Por que Script Properties sozinhas não bastam: elas NÃO são copiadas
-// quando alguém duplica o projeto no editor do Apps Script — uma cópia
-// nasce com Script Properties vazias. Por isso o e-mail autorizado tem um
-// valor padrão embutido no PRÓPRIO CÓDIGO-FONTE (_AUTORIA_GISELE_ abaixo):
-// mesmo uma cópia sem nenhuma configuração adicional já nasce travada,
-// porque Session.getEffectiveUser() dela nunca vai bater com o padrão.
-// ─────────────────────────────────────────────────────────────────────────────
-
 const _PROP_ENV_EMAIL     = 'VIGIRAM_OWNER_EMAIL';
 const _PROP_ENV_SCRIPT_ID = 'VIGIRAM_AUTHORIZED_SCRIPT_ID';
 
-/**
- * Assinatura de autoria — âncora que não depende de Script Properties
- * (que não sobrevivem a uma cópia do projeto). Removê-la ou alterá-la exige
- * edição deliberada do código-fonte: nesse caso, _hashSecurityGISELE_()
- * (mais abaixo) deixa de bater com o valor esperado e bloqueia o sistema —
- * a adulteração da assinatura é, ela mesma, o que aciona a trava.
- */
 const _AUTORIA_GISELE_ = Object.freeze({
   AUTOR:   'GISELE CRISTINE ARAUJO NASCIMENTO',
   PROJETO: 'VigiRAM',
-  // Mais de um e-mail pode legitimamente publicar/republicar o Web App
-  // (conta pessoal + conta institucional da autora) — qualquer um destes
-  // é aceito como identidade de deploy autorizada.
   EMAILS_AUTORIZADOS_PADRAO: Object.freeze([
     'giselechereese@gmail.com',
     'gisele.can@isgh.org.br'
   ])
 });
 
-/**
- * _hashSecurityGISELE() — trip-wire de integridade da autoria.
- * Funções vitais do sistema (login, geração de E2B, roteamento HTTP)
- * chamam esta função antes de rodar. Ela recalcula um HMAC sobre a
- * constante de autoria acima e compara com o valor gravado abaixo; se a
- * constante tiver sido alterada (ex.: name-swap para remover a autoria
- * numa cópia), o hash não bate e a função lança erro, interrompendo a
- * operação vital que dependia dela.
- * NÃO é criptografia de proteção de acesso (roda em texto aberto no V8) —
- * é assinatura + verificação de integridade, para fins de autoria.
- */
 function _hashSecurityGISELE_() {
   const HASH_AUTORIA_ESPERADO =
     'bad7946daaf875596c1401c489d5c8aa3feb677bee217b03cc94f138b50c7de9';
@@ -221,29 +180,6 @@ function _hashSecurityGISELE_() {
   return true;
 }
 
-/**
- * Verificação estrita de ambiente de execução — chamada no início de
- * doGet/doPost (Router.gs) e replicada em funções vitais (autenticarUsuario,
- * gerarXmlE2B) como segunda camada. Compara:
- *
- *   1) Session.getEffectiveUser().getEmail() — em um Web App publicado com
- *      "Executar como: EU" (executeAs=USER_DEPLOYING, ver appsscript.json),
- *      este é o e-mail de quem FEZ O DEPLOY. Se alguém copiar o projeto e
- *      publicar a cópia como Web App próprio, este e-mail passa a ser o do
- *      copiador — e diverge do autorizado.
- *   2) ScriptApp.getScriptId() — todo projeto duplicado no editor do Apps
- *      Script recebe um ID novo. Uma vez travado (travarAmbienteAtual_),
- *      qualquer scriptId diferente do autorizado bloqueia a execução.
- *
- * Qualquer uma das duas divergências dispara erro fatal, interrompendo a
- * rota antes de qualquer leitura/escrita de dados.
- *
- * CONFIGURAÇÃO (rodar 1x no editor — mesmo padrão de definirSegredoETL_):
- *   travarAmbienteAtual_()        — registra o scriptId ATUAL como autorizado.
- *   definirEmailsAutorizados_(csv) — só necessário se algum e-mail de deploy
- *                                    válido não estiver na lista padrão
- *                                    embutida no código (EMAILS_AUTORIZADOS_PADRAO).
- */
 function verificarAmbienteAutorizado_() {
   _hashSecurityGISELE_();
 
@@ -278,8 +214,6 @@ function verificarAmbienteAutorizado_() {
   return true;
 }
 
-// SEGURANÇA: mesma convenção do bloco ETL acima — sufixo "_" de propósito,
-// para não ficar exposta a google.script.run; rode manualmente no editor.
 function travarAmbienteAtual_() {
   const id = ScriptApp.getScriptId();
   PropertiesService.getScriptProperties().setProperty(_PROP_ENV_SCRIPT_ID, id);
@@ -287,12 +221,6 @@ function travarAmbienteAtual_() {
   return id;
 }
 
-/**
- * Define a lista de e-mails de deploy autorizados (CSV), substituindo a
- * lista padrão embutida no código (_AUTORIA_GISELE_.EMAILS_AUTORIZADOS_PADRAO).
- * Só necessário se algum e-mail de deploy válido não estiver nessa lista padrão.
- * Ex.: definirEmailsAutorizados_('giselechereese@gmail.com,gisele.can@isgh.org.br')
- */
 function definirEmailsAutorizados_(csvEmails) {
   const emails = String(csvEmails || '')
     .split(',')
