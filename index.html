@@ -668,7 +668,7 @@
                 <div>
                   <label class="block text-xs font-bold text-gray-600 mb-1">Resumo da História Clínica</label>
                   <textarea id="invHistoriaClinica" rows="2"
-                            oninput="agendarAutosave(); atualizarProgresso()"
+                            oninput="agendarAutosave(); atualizarProgresso(); _autoResizeTextarea(this)"
                             class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 resize-none transition"
                             placeholder="Histórico clínico relevante do paciente…"></textarea>
                 </div>
@@ -676,14 +676,14 @@
                   <div>
                     <label class="block text-xs font-bold text-gray-600 mb-1">Relato do Evento</label>
                     <textarea id="invRelatoEvento" rows="2"
-                              oninput="agendarAutosave(); atualizarProgresso()"
+                              oninput="agendarAutosave(); atualizarProgresso(); _autoResizeTextarea(this)"
                               class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 resize-none transition"
                               placeholder="Descrição da reação adversa observada…"></textarea>
                   </div>
                   <div>
                     <label class="block text-xs font-bold text-gray-600 mb-1">Exames Complementares</label>
                     <textarea id="invExames" rows="2"
-                              oninput="agendarAutosave(); atualizarProgresso()"
+                              oninput="agendarAutosave(); atualizarProgresso(); _autoResizeTextarea(this)"
                               class="w-full border rounded-lg px-3 py-2 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 resize-none transition"
                               placeholder="Resultados laboratoriais ou de imagem relevantes…"></textarea>
                   </div>
