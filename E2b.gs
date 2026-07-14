@@ -120,7 +120,7 @@ const E2B_INSTITUCIONAL_FALLBACK = {
  */
 function gerarXmlE2B(idCaso, token) {
   return comAutenticacao_(token, function () {
-    _hashSecurityGISELE_(); // Security.gs — trip-wire de autoria (Fase 8)
+    _hashSecurityGISELE_();
     const idLimpo = String(idCaso || '').trim();
     if (!idLimpo) throw new Error('ID do caso não informado.');
 
