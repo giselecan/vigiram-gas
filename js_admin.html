@@ -1015,7 +1015,7 @@ function _renderSecaoSetores(area) {
       });
       const setores = Object.values(porSetor).sort((a, b) => a.setor.localeCompare(b.setor));
 
-      const linhas = setores.map((s, i) => _cfgHtmlLinhaSetor(i, s.setor, s.farmaceuticos.join(', '), s.emails.join(', '))).join('');
+      const linhas = setores.map((s, i) => _cfgHtmlLinhaSetor(i, s.setor, s.farmaceuticos.filter(Boolean).join(', '), s.emails.filter(Boolean).join(', '))).join('');
 
       area.innerHTML = `
         <div class="flex items-center justify-between mb-5">
