@@ -89,7 +89,7 @@ function listarUsuarios(token) {
 function criarUsuario(dados, token) {
   return _comAdmin_(token, function () {
     const email  = String(dados.email  || '').trim().toLowerCase();
-    const nome   = String(dados.nome   || '').trim();
+    const nome   = String(dados.nome   || '').trim().toUpperCase();
     const senha  = String(dados.senha  || '').trim();
     const perfil = String(dados.perfil || 'FARMACEUTICO').trim().toUpperCase();
     const setores = _normalizarSetoresLista_(dados.setores);
@@ -143,7 +143,7 @@ function criarUsuario(dados, token) {
 function editarUsuario(dados, token) {
   return _comAdmin_(token, function () {
     const email = String((dados && dados.email) || '').trim().toLowerCase();
-    const nome  = String((dados && dados.nome)   || '').trim();
+    const nome  = String((dados && dados.nome)   || '').trim().toUpperCase();
     const perfil = String((dados && dados.perfil) || '').trim().toUpperCase();
     const setores = _normalizarSetoresLista_(dados && dados.setores);
 

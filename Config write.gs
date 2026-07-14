@@ -8,6 +8,8 @@
  * Funções expostas ao frontend (google.script.run):
  *   salvarConfigGeral(dados, token)          → { sucesso, mensagem }
  *   salvarSetores(setores, token)            → { sucesso, mensagem }
+ *   diagnosticarSetoresDuplicados(token)     → { totalSetores, totalGrupos, duplicados }
+ *   mesclarSetoresDuplicados(grupos, token)  → { sucesso, mensagem }
  *   salvarListas(listas, token)              → { sucesso, mensagem }
  *   listarGatilhos(token)                    → Array<{id, medicamento, ativo, atualizadoEm}>
  *   salvarGatilho(dados, token)              → { sucesso, mensagem }
@@ -101,7 +103,7 @@ function salvarSetores(setores, token) {
       fsSetDoc_(SCHEMA.FS.SETORES, id, {
         setor:                    setor,
         ativo:                    true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
-        farmaceuticoResponsavel:  String(s.farmaceutico || '').trim(),
+        farmaceuticoResponsavel:  String(s.farmaceutico || '').trim().toUpperCase(),
         emailResponsavel:         email
       });
       upserts++;
@@ -127,6 +129,151 @@ function salvarSetores(setores, token) {
 
     return { sucesso: true, mensagem: upserts + ' setor(es) salvos com sucesso.' };
   });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIAGNÓSTICO + MESCLAGEM DE SETORES DUPLICADOS
+//
+// Duplicata real (mesmo setor físico, mesmo responsável) só surge quando o
+// MESMO par (setor, e-mail) foi salvo com grafias levemente diferentes em
+// edições distintas — cada grafia gera um ID de documento próprio
+// (_idDocSetor_ é determinístico por string exata), então nunca se
+// auto-mescla sozinho. Ver painel Admin → Setores → "Verificar Duplicados".
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Agrupa os documentos de `setores` por (nome normalizado para comparação +
+ * e-mail do responsável) e devolve só os grupos com MAIS DE UMA grafia —
+ * candidatos a duplicata. Só leitura, não altera nada.
+ * @returns {{ totalSetores: number, totalGrupos: number, duplicados: Array<Array<object>> }}
+ */
+function diagnosticarSetoresDuplicados(token) {
+  return _comAdmin_(token, function () {
+    const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+    const grupos = {};
+
+    docs.forEach(function (doc) {
+      const chave = _normalizarSetorComparacao_(doc.setor) + '__' + String(doc.emailResponsavel || '').trim().toLowerCase();
+      if (!grupos[chave]) grupos[chave] = [];
+      grupos[chave].push({
+        id:           doc._id,
+        setor:        String(doc.setor || '').trim(),
+        farmaceutico: String(doc.farmaceuticoResponsavel || '').trim(),
+        email:        String(doc.emailResponsavel || '').trim(),
+        ativo:        doc.ativo
+      });
+    });
+
+    const duplicados = Object.keys(grupos)
+      .map(function (chave) { return grupos[chave]; })
+      .filter(function (grupo) { return grupo.length > 1; })
+      .sort(function (a, b) { return b.length - a.length; });
+
+    return {
+      totalSetores: docs.length,
+      totalGrupos:  Object.keys(grupos).length,
+      duplicados:   duplicados
+    };
+  });
+}
+
+/**
+ * Mescla grupos de setores duplicados já revisados pelo admin no painel.
+ * Para cada grupo: upsert do documento canônico (grafia escolhida), remove
+ * as demais grafias, e atualiza usuarios.setores que ainda apontem pra
+ * grafia antiga — sem isso, a próxima edição desse usuário recriaria a
+ * duplicata (_sincronizarSetoresUsuario_ usa usuarios.setores como base).
+ * NÃO toca em casos_ram — histórico de casos já normaliza (maiúsculo/trim)
+ * toda vez que lê pra agrupar por setor, então não quebra com grafia antiga.
+ * @param {Array<{email, farmaceutico, nomeCanonico, idsAntigos: string[], grafias: string[]}>} grupos
+ */
+function mesclarSetoresDuplicados(grupos, token) {
+  return _comAdmin_(token, function () {
+    if (!Array.isArray(grupos) || !grupos.length) {
+      return { sucesso: false, mensagem: 'Nenhum grupo para mesclar.' };
+    }
+
+    let mesclados = 0, removidos = 0, usuariosAtualizados = 0;
+
+    grupos.forEach(function (g) {
+      const email        = String(g.email || '').trim();
+      const nomeCanonico = String(g.nomeCanonico || '').trim().toUpperCase();
+      const idsAntigos    = Array.isArray(g.idsAntigos) ? g.idsAntigos : [];
+      const farmaceutico  = String(g.farmaceutico || '').trim();
+      if (!email || !nomeCanonico || !idsAntigos.length) return;
+
+      const idCanonico = _idDocSetor_(nomeCanonico, email);
+
+      fsSetDoc_(SCHEMA.FS.SETORES, idCanonico, {
+        setor:                    nomeCanonico,
+        ativo:                    true,
+        farmaceuticoResponsavel:  farmaceutico,
+        emailResponsavel:         email
+      });
+      mesclados++;
+
+      idsAntigos.forEach(function (id) {
+        if (id === idCanonico) return; // já é o canônico, acabou de ser upsertado
+        fsDeleteDoc_(SCHEMA.FS.SETORES, id);
+        removidos++;
+      });
+
+      const grafiasAntigas = Array.isArray(g.grafias) && g.grafias.length ? g.grafias : [nomeCanonico];
+      usuariosAtualizados += _atualizarUsuariosParaSetorCanonico_(grafiasAntigas, nomeCanonico);
+    });
+
+    invalidarConfig();
+    fsRegistrarLog_('SETORES_MESCLADOS', 'setores',
+      mesclados + ' grupo(s) mesclado(s), ' + removidos + ' documento(s) removido(s), ' +
+      usuariosAtualizados + ' usuário(s) atualizado(s) | Por: ' + __emailSessaoAtual);
+
+    return {
+      sucesso: true,
+      mensagem: mesclados + ' setor(es) mesclado(s), ' + removidos + ' duplicata(s) removida(s)' +
+        (usuariosAtualizados ? ', ' + usuariosAtualizados + ' usuário(s) realinhado(s).' : '.')
+    };
+  });
+}
+
+/**
+ * Troca, no array `setores` de cada usuário, qualquer grafia antiga (após
+ * normalizar maiúsculo/trim) pela grafia canônica — e dedup o array
+ * resultante (dois nomes antigos do mesmo grupo podiam coexistir no mesmo
+ * usuário). Só grava (fsUpdateDoc_) os usuários que realmente mudaram.
+ * @returns {number} quantidade de usuários atualizados
+ */
+function _atualizarUsuariosParaSetorCanonico_(grafiasAntigas, nomeCanonico) {
+  const antigasNormalizadas = {};
+  grafiasAntigas.forEach(function (s) {
+    const up = String(s || '').trim().toUpperCase();
+    if (up && up !== nomeCanonico) antigasNormalizadas[up] = true;
+  });
+  if (!Object.keys(antigasNormalizadas).length) return 0;
+
+  const usuarios = fsListarTodos_(SCHEMA.FS.USUARIOS);
+  let atualizados = 0;
+
+  usuarios.forEach(function (u) {
+    const atuais = Array.isArray(u.setores) ? u.setores : [];
+    if (!atuais.length) return;
+
+    let mudou = false;
+    const vistos = {};
+    const novo = [];
+    atuais.forEach(function (s) {
+      const up = String(s || '').trim().toUpperCase();
+      const final = antigasNormalizadas[up] ? nomeCanonico : up;
+      if (antigasNormalizadas[up]) mudou = true;
+      if (!vistos[final]) { vistos[final] = true; novo.push(final); }
+    });
+
+    if (mudou) {
+      fsUpdateDoc_(SCHEMA.FS.USUARIOS, u._id, { setores: novo });
+      atualizados++;
+    }
+  });
+
+  return atualizados;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

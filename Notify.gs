@@ -3,8 +3,8 @@
  * conclusão de investigação). Fase 4/9: Firestore.
  *
  * MIGRAÇÃO: a única função que tocava Sheets diretamente era
- * resolverEmailsPorSetor_() (lia a aba legada DB_Config_Emails). Todo o
- * resto deste arquivo já depende exclusivamente de getConfig() — que foi
+ * resolverFarmaceuticosPorSetor_() (lia a aba legada DB_Config_Emails). Todo
+ * o resto deste arquivo já depende exclusivamente de getConfig() — que foi
  * migrado na Fase 4 anterior e já lê do Firestore.
  *
  * O e-mail legado (DB_Config_Emails) não fazia parte do plano de migração
@@ -21,8 +21,11 @@
  *  1) enviarRelatorioDiarioGatilhos() — job diário (07:00) que substitui o
  *     alerta imediato por inserção: agrega os gatilhos (casos tipo 'BA')
  *     AINDA PENDENTES DE TRIAGEM (status TRIAGEM, sem limite de tempo) por
- *     setor e manda 1 e-mail por setor para o farmacêutico responsável.
- *     Instalar com instalarTriggerRelatorioDiario().
+ *     setor e depois por FARMACÊUTICO — 1 e-mail por farmacêutico
+ *     responsável, com uma seção por setor (a mesma pessoa pode responder
+ *     por vários). EMAIL_COORDENACAO só entra como fallback quando um setor
+ *     não tem nenhum farmacêutico cadastrado. Instalar com
+ *     instalarTriggerRelatorioDiario().
  *  2) notificarNovaDemandaEspontanea_(idCaso) — disparado na hora pela
  *     criação de uma Demanda Espontânea (salvarDemandaEspontanea, Cases.gs),
  *     avisa o farmacêutico do setor que há uma nova DE aguardando investigação.
@@ -33,34 +36,68 @@
  */
 
 /**
- * Monta o mapa SETOR(maiúsculo) -> e-mail, unificando as fontes:
+ * Monta o mapa SETOR(maiúsculo) -> [e-mails], unificando as fontes:
  *  1) config_emails_legado (Firestore — equivalente a DB_Config_Emails)
- *  2) DB_Setores via getConfig() (canônico — sobrescreve o legado)
+ *  2) DB_Setores via getConfig() (canônico — tem prioridade sobre o legado)
+ *
+ * Um setor pode ter MAIS DE UM farmacêutico responsável (ex.: "TODOS") —
+ * por isso o valor é sempre um array, e todos os e-mails cadastrados para
+ * aquele setor recebem o alerta (nenhum é descartado por sobrescrita).
  */
-function resolverEmailsPorSetor_() {
+function resolverFarmaceuticosPorSetor_() {
   const map = {};
+  const adicionar = function (setor, email) {
+    if (!setor || !email) return;
+    if (!map[setor]) map[setor] = [];
+    if (map[setor].indexOf(email) === -1) map[setor].push(email);
+  };
 
   // 1) Legado (Firestore) — opcional, pode não ter sido migrado/existir
   try {
     const legado = fsListarTodos_(SCHEMA.FS.EMAILS_LEGADO);
     legado.forEach(function (doc) {
-      const setor = String(doc.setor || doc._id || '').toUpperCase().trim();
-      const email = String(doc.email || '').trim();
-      if (setor && email) map[setor] = email;
+      adicionar(String(doc.setor || doc._id || '').toUpperCase().trim(), String(doc.email || '').trim());
     });
   } catch (e) {
     // Coleção pode não existir ainda — comportamento idêntico ao Sheets
     // quando a aba DB_Config_Emails não existia (getSheet_ retornava null).
-    console.warn('resolverEmailsPorSetor_: config_emails_legado indisponível (ok se nunca migrado): ' + e.message);
+    console.warn('resolverFarmaceuticosPorSetor_: config_emails_legado indisponível (ok se nunca migrado): ' + e.message);
   }
 
-  // 2) Canônico (DB_Setores via getConfig) — tem prioridade, já migrado
+  // 2) Canônico (DB_Setores via getConfig) — um documento por (setor, e-mail)
   const cfg = getConfig_();
   (cfg.setores || []).forEach(function (s) {
-    if (s.setor && s.email) map[s.setor.toUpperCase().trim()] = s.email;
+    if (s.setor && s.email) adicionar(s.setor.toUpperCase().trim(), s.email);
   });
 
   return map;
+}
+
+/**
+ * Resolve a URL do sistema a usar nos links dos e-mails. Prioriza
+ * cfg.geral.URL_SISTEMA (configurável no painel Admin → E-mails de Alerta)
+ * porque ScriptApp.getService().getUrl() é instável quando chamado fora de
+ * uma requisição web (ex.: no trigger diário) — pode resolver para uma
+ * implantação (deployment) antiga em vez da URL de produção atual. Sem
+ * URL_SISTEMA configurada, cai no comportamento dinâmico de antes.
+ */
+function _resolverLinkSistema_(cfg) {
+  return (cfg.geral && cfg.geral.URL_SISTEMA) || ScriptApp.getService().getUrl();
+}
+
+/**
+ * Formata a data de um caso para exibição no e-mail (dd/MM/yyyy HH:mm).
+ * caso.data normalmente chega como objeto Date (Firestore timestamp
+ * desserializado — ver Firestore.gs:fsDeValorFs_) — sem isso, o e-mail
+ * mostrava o Date.toString() cru (ex.: "Mon Jul 13 2026 05:46:21 GMT-0300
+ * (Brasilia Standard Time)"). Guarda para o caso raro de ainda chegar como
+ * texto (_parseDataFlexivel_ pode falhar e manter a string original).
+ */
+function _formatarDataEmail_(data) {
+  if (data instanceof Date && !isNaN(data.getTime())) {
+    return Utilities.formatDate(data, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+  }
+  return String(data == null ? '' : data);
 }
 
 /**
@@ -94,10 +131,17 @@ function _montarEmailBase_(corDestaque, titulo, subtitulo, corpoHtml, linkSistem
 /**
  * Job diário (instalar via instalarTriggerRelatorioDiario(), 07:00): agrupa
  * por setor os gatilhos (casos tipo 'BA') AINDA PENDENTES DE TRIAGEM (status
- * TRIAGEM) e manda 1 e-mail de resumo por setor para o farmacêutico
- * responsável. Não usa janela de tempo — um caso só sai da lista quando é
- * triado (muda de status), não porque "envelheceu" 24h. Setores sem nenhum
- * gatilho pendente não recebem e-mail.
+ * TRIAGEM) e depois reagrupa por FARMACÊUTICO — já que a mesma pessoa pode
+ * ser responsável por vários setores, ela recebe 1 único e-mail com uma
+ * seção por setor, em vez de um e-mail por setor. Não usa janela de tempo —
+ * um caso só sai da lista quando é triado (muda de status), não porque
+ * "envelheceu" 24h. Setores sem nenhum gatilho pendente não entram no
+ * e-mail de ninguém.
+ *
+ * Destinatários: SOMENTE os farmacêuticos cadastrados para cada setor
+ * (resolverFarmaceuticosPorSetor_) — se um setor tiver mais de um
+ * farmacêutico responsável, todos recebem. EMAIL_COORDENACAO só é usado
+ * como fallback quando o setor não tem NENHUM farmacêutico cadastrado.
  */
 function enviarRelatorioDiarioGatilhos() {
   const cfg = getConfig_();
@@ -121,43 +165,69 @@ function enviarRelatorioDiarioGatilhos() {
     casosPorSetor[setor].push(caso);
   });
 
-  const DIRETORIO = resolverEmailsPorSetor_();
+  const FARMACEUTICOS_POR_SETOR = resolverFarmaceuticosPorSetor_();
   const EMAIL_COORDENACAO = cfg.geral.EMAIL_COORDENACAO || "farmacia.clinica@hospital.com";
-  const LINK_SISTEMA = ScriptApp.getService().getUrl();
+  const LINK_SISTEMA = _resolverLinkSistema_(cfg);
 
+  // Inverte o agrupamento: e-mail -> { SETOR: [casos] }. Um farmacêutico
+  // responsável por N setores acumula todos aqui e recebe 1 e-mail só.
+  const setoresPorEmail = {};
   for (const setor in casosPorSetor) {
-    const emailDestino = DIRETORIO[setor] || EMAIL_COORDENACAO;
-    const listaCasos = casosPorSetor[setor];
-    const { assunto, html } = _montarEmailRelatorioDiario_(setor, listaCasos, LINK_SISTEMA);
+    const destinatarios = FARMACEUTICOS_POR_SETOR[setor] && FARMACEUTICOS_POR_SETOR[setor].length
+      ? FARMACEUTICOS_POR_SETOR[setor]
+      : [EMAIL_COORDENACAO];
+
+    destinatarios.forEach(function (email) {
+      if (!setoresPorEmail[email]) setoresPorEmail[email] = {};
+      setoresPorEmail[email][setor] = casosPorSetor[setor];
+    });
+  }
+
+  for (const email in setoresPorEmail) {
+    const { assunto, html } = _montarEmailRelatorioDiarioAgrupado_(setoresPorEmail[email], LINK_SISTEMA);
 
     try {
-      MailApp.sendEmail({ to: emailDestino, subject: assunto, htmlBody: html });
+      MailApp.sendEmail({ to: email, name: 'VigiRAM', subject: assunto, htmlBody: html });
     } catch (e) {
-      console.error('Falha ao enviar relatório diário para ' + setor + ' (' + emailDestino + '): ' + e.message);
+      console.error('Falha ao enviar relatório diário para ' + email + ': ' + e.message);
     }
   }
 }
 
-/** Monta assunto + HTML do relatório diário para um setor — usado no envio real e no e-mail de teste. */
-function _montarEmailRelatorioDiario_(setor, listaCasos, linkSistema) {
-  const setorSeguro = escaparHtml_(setor);
-  const assunto = `📋 VigiRAM: Relatório Diário — ${listaCasos.length} Gatilho(s) em ${setor}`;
+/**
+ * Monta assunto + HTML do relatório diário agrupado — 1 e-mail por
+ * farmacêutico, com uma seção (cabeçalho + tabela) por setor. Usado no
+ * envio real e no e-mail de teste.
+ * @param {{ [setor: string]: Array<object> }} setoresComCasos
+ */
+function _montarEmailRelatorioDiarioAgrupado_(setoresComCasos, linkSistema) {
+  const nomesSetores = Object.keys(setoresComCasos);
+  const totalCasos = nomesSetores.reduce(function (soma, s) { return soma + setoresComCasos[s].length; }, 0);
 
-  let linhas = "";
-  listaCasos.forEach(function (c) {
-    linhas += `
-      <tr>
-        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.prontuario)}</td>
-        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.iniciais)}</td>
-        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;color:#c2410c;font-weight:bold;">${escaparHtml_(c.medicamento)}</td>
-        <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(c.data)}</td>
-      </tr>`;
-  });
+  const assunto = nomesSetores.length === 1
+    ? `📋 VigiRAM: Relatório Diário — ${totalCasos} Gatilho(s) em ${nomesSetores[0]}`
+    : `📋 VigiRAM: Relatório Diário — ${totalCasos} Gatilho(s) em ${nomesSetores.length} setores`;
 
-  const corpo = `
+  let corpo = `
     <p style="color:#374151;font-size:16px;">Olá,</p>
-    <p style="color:#374151;font-size:16px;">Estes são os gatilhos rastreados pelo <b>VigiRAM</b> ainda <b>aguardando triagem</b> no seu setor (<strong>${setorSeguro}</strong>).</p>
-    <table style="width:100%;border-collapse:collapse;margin-top:15px;">
+    <p style="color:#374151;font-size:16px;">Estes são os gatilhos rastreados pelo <b>VigiRAM</b> ainda <b>aguardando triagem</b> no${nomesSetores.length > 1 ? 's seus setores' : ' seu setor'}.</p>`;
+
+  nomesSetores.forEach(function (setor) {
+    const listaCasos = setoresComCasos[setor];
+    let linhas = "";
+    listaCasos.forEach(function (c) {
+      linhas += `
+        <tr>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.prontuario)}</td>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;">${escaparHtml_(c.iniciais)}</td>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;color:#c2410c;font-weight:bold;">${escaparHtml_(c.medicamento)}</td>
+          <td style="padding:10px;border-bottom:1px solid #ddd;text-align:center;font-size:12px;">${escaparHtml_(_formatarDataEmail_(c.data))}</td>
+        </tr>`;
+    });
+
+    corpo += `
+    <h3 style="color:#c2410c;font-size:15px;margin:25px 0 8px 0;border-bottom:2px solid #fed7aa;padding-bottom:6px;">${escaparHtml_(setor)} <span style="color:#9ca3af;font-weight:normal;font-size:13px;">(${listaCasos.length})</span></h3>
+    <table style="width:100%;border-collapse:collapse;">
       <thead>
         <tr style="background-color:#f9fafb;">
           <th style="padding:10px;text-align:center;font-size:12px;color:#6b7280;">Prontuário</th>
@@ -168,6 +238,7 @@ function _montarEmailRelatorioDiario_(setor, listaCasos, linkSistema) {
       </thead>
       <tbody>${linhas}</tbody>
     </table>`;
+  });
 
   const html = _montarEmailBase_(
     '#f97316',
@@ -196,14 +267,14 @@ function notificarNovaDemandaEspontanea_(caso) {
     if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
     const setor = String(caso.setor || '').toUpperCase().trim();
-    const DIRETORIO = resolverEmailsPorSetor_();
+    const DIRETORIO = resolverFarmaceuticosPorSetor_();
     const EMAIL_COORDENACAO = cfg.geral.EMAIL_COORDENACAO || "farmacia.clinica@hospital.com";
-    const emailDestino = DIRETORIO[setor] || EMAIL_COORDENACAO;
-    const LINK_SISTEMA = ScriptApp.getService().getUrl();
+    const emailsDestino = (DIRETORIO[setor] && DIRETORIO[setor].length) ? DIRETORIO[setor] : [EMAIL_COORDENACAO];
+    const LINK_SISTEMA = _resolverLinkSistema_(cfg);
 
     const { assunto, html } = _montarEmailNovaDemandaEspontanea_(caso, LINK_SISTEMA);
 
-    MailApp.sendEmail({ to: emailDestino, subject: assunto, htmlBody: html });
+    MailApp.sendEmail({ to: emailsDestino.join(','), name: 'VigiRAM', subject: assunto, htmlBody: html });
   } catch (e) {
     console.error('notificarNovaDemandaEspontanea_: falha ao enviar e-mail: ' + e.message);
   }
@@ -262,10 +333,10 @@ function notificarInvestigacaoConcluida_(caso) {
     const cfg = getConfig_();
     if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
-    const LINK_FORM = ScriptApp.getService().getUrl() + '?page=form';
+    const LINK_FORM = _resolverLinkSistema_(cfg) + '?page=form';
     const { assunto, html } = _montarEmailInvestigacaoConcluida_(caso, LINK_FORM);
 
-    MailApp.sendEmail({ to: emailNotificador, subject: assunto, htmlBody: html });
+    MailApp.sendEmail({ to: emailNotificador, name: 'VigiRAM', subject: assunto, htmlBody: html });
   } catch (e) {
     console.error('notificarInvestigacaoConcluida_: falha ao enviar e-mail: ' + e.message);
   }
@@ -321,15 +392,23 @@ function enviarEmailTeste(tipo, destinatario, token) {
     const email = String(destinatario || '').trim();
     if (!email) throw new Error('Informe um e-mail de destino para o teste.');
 
-    const LINK_SISTEMA = ScriptApp.getService().getUrl();
+    const cfg = getConfig_();
+    const LINK_SISTEMA = _resolverLinkSistema_(cfg);
     const agora = new Date();
     let montado;
 
     if (tipo === 'RELATORIO_DIARIO') {
-      montado = _montarEmailRelatorioDiario_('UTI ADULTO', [
-        { prontuario: '123456', iniciais: 'J.S.', medicamento: 'VANCOMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy') },
-        { prontuario: '654321', iniciais: 'M.A.', medicamento: 'GENTAMICINA', data: Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy') }
-      ], LINK_SISTEMA);
+      // Farmacêutico fictício com 2 setores, para já visualizar o e-mail
+      // agrupado (1 e-mail, 2 seções) antes de confiar no envio automático.
+      montado = _montarEmailRelatorioDiarioAgrupado_({
+        'UTI ADULTO': [
+          { prontuario: '123456', iniciais: 'J.S.', medicamento: 'VANCOMICINA', data: agora },
+          { prontuario: '654321', iniciais: 'M.A.', medicamento: 'GENTAMICINA', data: agora }
+        ],
+        'PS INFANTIL': [
+          { prontuario: '111222', iniciais: 'F.J.R.', medicamento: 'PROMETAZINA 25MG/ML - 2ML - AMP', data: agora }
+        ]
+      }, LINK_SISTEMA);
     } else if (tipo === 'NOVA_DEMANDA') {
       montado = _montarEmailNovaDemandaEspontanea_({
         setor: 'UTI ADULTO', prontuario: '789012', iniciais: 'P.R.', medicamento: 'INSULINA',
@@ -344,7 +423,7 @@ function enviarEmailTeste(tipo, destinatario, token) {
       throw new Error('Tipo de e-mail de teste inválido: ' + tipo);
     }
 
-    MailApp.sendEmail({ to: email, subject: '[TESTE] ' + montado.assunto, htmlBody: montado.html });
+    MailApp.sendEmail({ to: email, name: 'VigiRAM', subject: '[TESTE] ' + montado.assunto, htmlBody: montado.html });
     return { sucesso: true, mensagem: 'E-mail de teste enviado para ' + email + '.' };
   });
 }

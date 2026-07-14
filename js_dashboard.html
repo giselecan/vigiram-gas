@@ -61,11 +61,19 @@ function obterDadosFiltradosDash() {
     // reconhecia dd/MM/yyyy — data_evento em formato ISO (casos DE com data
     // preenchida manualmente) escapava do filtro em vez de ser incluído/
     // excluído corretamente. parseDataFlexivel (js_core.html) trata os dois.
+    //
+    // CORREÇÃO (mesma data início/fim não retornava nada): os limites eram
+    // `new Date(dataDe)`/`new Date(dataAte)` — string "yyyy-MM-dd" vira
+    // meia-noite UTC, não local, e o limite superior nunca cobria o dia
+    // inteiro. parseDataFiltroLimite (js_core.html) usa hora local e
+    // estende "até" para o fim do dia (23:59:59.999).
     if (dataDe || dataAte) {
       const dEv = parseDataFlexivel(c.data_evento);
       if (dEv) {
-        if (dataDe && dEv < new Date(dataDe)) return false;
-        if (dataAte && dEv > new Date(dataAte)) return false;
+        const limiteDe  = parseDataFiltroLimite(dataDe, false);
+        const limiteAte = parseDataFiltroLimite(dataAte, true);
+        if (limiteDe  && dEv < limiteDe)  return false;
+        if (limiteAte && dEv > limiteAte) return false;
       }
     }
 

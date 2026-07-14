@@ -52,7 +52,7 @@ const CACHE_CASOS_TTL_SEG = 45;
 const CAMPOS_RESUMO_CASOS = [
   'id', 'data', 'tipo', 'prontuario', 'iniciais', 'nascimento',
   'setor', 'medicamento', 'status', 'gravidade', 'farmaceutico', 'conclusao',
-  'numVigimed', 'dataVigimed', 'dataTriagem'
+  'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao'
 ];
 // ============================================================
 // MAPEAMENTO — RESUMO (Kanban/Dashboard) vs COMPLETO (modal de investigação)
@@ -86,7 +86,12 @@ function _mapearCasoResumo_(doc) {
       : String(doc.dataVigimed || '').trim(),
     dataTriagem:     doc.dataTriagem instanceof Date
       ? Utilities.formatDate(doc.dataTriagem, tz, "yyyy-MM-dd'T'HH:mm:ss")
-      : String(doc.dataTriagem || '').trim()
+      : String(doc.dataTriagem || '').trim(),
+    // "Em análise desde" no card do Kanban: BA usa dataTriagem (acima) — DE
+    // não passa por triagem, então usa a própria data de notificação.
+    dataNotificacao: (doc.notificador && doc.notificador.dataNotificacao instanceof Date)
+      ? Utilities.formatDate(doc.notificador.dataNotificacao, tz, "yyyy-MM-dd'T'HH:mm:ss")
+      : String((doc.notificador && doc.notificador.dataNotificacao) || '').trim()
   };
 }
 
@@ -149,6 +154,13 @@ function _mapearCasoCompleto_(doc) {
     notifCategoria:  String(notif.categoria || '').trim(),
     notifEmail:      String(notif.email     || '').trim(),
     dataNotificacao: dataNotificacao,
+    // "Investigação iniciada em" no modal: para BA é a data da triagem
+    // (registrarTriagem carimba dataTriagem); para DE é a própria data de
+    // notificação (dataNotificacao acima) — DE não passa por triagem, já
+    // nasce em investigação.
+    dataTriagem:     doc.dataTriagem instanceof Date
+      ? Utilities.formatDate(doc.dataTriagem, tz, 'dd/MM/yyyy HH:mm')
+      : String(doc.dataTriagem || '').trim(),
     // ── Fase 8 / Exportação E2B(R3) — adicionar dentro do objeto retornado ──
     reacaoTermo:       String(doc.reacaoTermo      || '').trim(),
     doseMedicamento:   String(doc.doseMedicamento  || '').trim(),
@@ -484,7 +496,7 @@ function registrarInvestigacao(dados, token) {
           conclusao: dados.conclusao,
           naranjo: dados.naranjo,
           gravidade: dados.gravidade,
-          farmaceutico: dados.farmaceutico,
+          farmaceutico: dados.farmaceutico ? String(dados.farmaceutico).toUpperCase().trim() : dados.farmaceutico,
           numVigimed: dados.numVigimed,
           dataVigimed: _normalizarDataHoraInput_(dados.dataVigimed),
           observacoes: dados.observacoes,

@@ -436,6 +436,7 @@ function _alertarDescarteFinal_(item, mensagemErro) {
 
     MailApp.sendEmail({
       to: destino,
+      name: 'VigiRAM',
       subject: '[VigiRAM] Falha permanente no espelho Sheets (' + item.tipo + ')',
       body:
         'Um item foi descartado da fila de retry do Mirror após ' + MIRROR_RETRY_MAX + ' tentativas.\n\n' +
