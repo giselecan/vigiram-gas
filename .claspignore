@@ -8,6 +8,8 @@ tailwind.config.js
 tw-input.css
 tw-output.css
 build-icons.js
+obfuscate.js
+.obfuscate-backup/**
 .gitignore
 .claspignore
 .git/**
