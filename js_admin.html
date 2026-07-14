@@ -827,6 +827,12 @@ function _renderSecaoEmails(area) {
             <input type="email" id="cfgEmailCoord" value="${escapeHtml(geral.EMAIL_COORDENACAO || '')}"
                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
           </div>
+          <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+            <label class="block text-xs font-bold text-gray-600 mb-1">URL do Sistema (link nos e-mails)</label>
+            <p class="text-xs text-gray-400 mb-2">URL da implantação (deployment) atual em produção, usada no botão "Abrir VigiRAM" dos e-mails. Se ficar em branco, o sistema tenta detectar automaticamente — mas isso pode apontar para uma implantação antiga quando o e-mail é enviado pelo job diário. Cole aqui a URL "/exec" da implantação ativa para garantir que o link fique sempre correto.</p>
+            <input type="url" id="cfgUrlSistema" placeholder="https://script.google.com/macros/s/AKfycb.../exec" value="${escapeHtml(geral.URL_SISTEMA || '')}"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 outline-none">
+          </div>
           <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-center justify-between gap-4">
             <div>
               <label class="block text-xs font-bold text-gray-600 mb-1">Alertas Ativos</label>
@@ -841,7 +847,7 @@ function _renderSecaoEmails(area) {
           </div>
           <button onclick="_cfgSalvarEmails(this)"
                   class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
-            <i class="fas fa-save"></i> Salvar E-mail da Coordenação
+            <i class="fas fa-save"></i> Salvar Configurações de E-mail
           </button>
 
           <div class="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
@@ -872,7 +878,8 @@ function _renderSecaoEmails(area) {
 
 function _cfgSalvarEmails(btn) {
   const dados = {
-    EMAIL_COORDENACAO: document.getElementById('cfgEmailCoord').value.trim()
+    EMAIL_COORDENACAO: document.getElementById('cfgEmailCoord').value.trim(),
+    URL_SISTEMA: document.getElementById('cfgUrlSistema').value.trim()
   };
   _iniciarCarregando(btn);
   google.script.run

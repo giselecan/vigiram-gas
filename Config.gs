@@ -26,7 +26,13 @@ const DEFAULT_GERAL = {
   EMAIL_COORDENACAO: "farmacia.clinica@hospital.com",
   SLA_PADRAO_HORAS:  "48",
   ALERTAS_ATIVOS:    "SIM",
-  TITULO_SISTEMA:    "VigiRAM"
+  TITULO_SISTEMA:    "VigiRAM",
+  // URL fixa da implantação (deployment) de produção, usada nos links dos
+  // e-mails em vez de ScriptApp.getService().getUrl() — esse método é
+  // instável quando chamado fora de uma requisição web (ex.: no trigger
+  // diário), podendo resolver para uma implantação antiga. Vazio por
+  // padrão: cai no fallback dinâmico até o admin preencher no painel.
+  URL_SISTEMA:       ""
 };
 
 const DEFAULT_LISTAS = {
