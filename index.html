@@ -195,25 +195,16 @@
         <option value="OK">🟢 No Prazo</option>
         <option value="SEM">⚪ Sem SLA</option>
       </select>
-      <select id="filtroMesFechado" onchange="_aplicarMesFechado()"
-              class="flex-shrink-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-700 max-w-[170px]
-                     focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
-        <option value="">Mês (personalizado)</option>
-      </select>
       <div class="flex-shrink-0 flex items-center gap-1 text-sm text-gray-500 whitespace-nowrap">
         <label class="text-xs font-semibold text-gray-500">De</label>
-        <input type="date" id="filtroDe" onchange="_limparMesFechado(); processarFiltros()"
+        <input type="date" id="filtroDe" onchange="processarFiltros()"
                class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-[130px]
                       focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
         <label class="text-xs font-semibold text-gray-500">até</label>
-        <input type="date" id="filtroAte" onchange="_limparMesFechado(); processarFiltros()"
+        <input type="date" id="filtroAte" onchange="processarFiltros()"
                class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-[130px]
                       focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
       </div>
-      <button onclick="processarFiltros()"
-              class="flex-shrink-0 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition flex items-center gap-1.5">
-        <i class="fas fa-check"></i> Aplicar
-      </button>
       <button onclick="limparFiltros()"
               class="flex-shrink-0 text-xs text-teal-600 hover:text-teal-800 font-semibold transition flex items-center gap-1">
         <i class="fas fa-times-circle"></i> Limpar
@@ -296,6 +287,10 @@
             <p class="text-xs text-gray-500 font-bold uppercase">Total de Gatilhos Rastreados</p>
             <p id="dashCardGatilhosTotal" class="text-2xl font-black text-gray-800">0</p>
           </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-orange-400">
+            <p class="text-xs text-gray-500 font-bold uppercase">Aguardando Triagem</p>
+            <p id="dashCardAguardandoTriagem" class="text-2xl font-black text-orange-600">0</p>
+          </div>
           <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-teal-500">
             <p class="text-xs text-gray-500 font-bold uppercase">Gatilhos Investigados</p>
             <p id="dashCardGatilhosInvestigados" class="text-2xl font-black text-teal-700">0</p>
@@ -304,17 +299,15 @@
             <p class="text-xs text-gray-500 font-bold uppercase">Gatilhos Descartados</p>
             <p id="dashCardGatilhosDescartados" class="text-2xl font-black text-gray-600">0</p>
           </div>
-          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-orange-400">
-            <p class="text-xs text-gray-500 font-bold uppercase">Aguardando Triagem</p>
-            <p id="dashCardAguardandoTriagem" class="text-2xl font-black text-orange-600">0</p>
-          </div>
           <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-indigo-500">
-            <p class="text-xs text-gray-500 font-bold uppercase">Notif. Espontâneas Investigadas</p>
+            <p class="text-xs text-gray-500 font-bold uppercase">Notificações Investigadas</p>
             <p id="dashCardNotifInvestigadas" class="text-2xl font-black text-indigo-700">0</p>
+            <p class="text-[11px] text-gray-400 mt-0.5">BA + DE · em análise ou concluídas</p>
           </div>
           <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-amber-400">
             <p class="text-xs text-gray-500 font-bold uppercase">Notif. Pendentes de Investigação</p>
             <p id="dashCardNotifPendentes" class="text-2xl font-black text-amber-600">0</p>
+            <p class="text-[11px] text-gray-400 mt-0.5">BA + DE · investigação ainda não concluída</p>
           </div>
           <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-600">
             <p class="text-xs text-gray-500 font-bold uppercase">Pendência de Importação</p>
@@ -379,9 +372,9 @@
           </div>
           <div class="bg-white p-5 rounded-xl shadow-sm">
             <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-              <i class="fas fa-file-export text-emerald-600 mr-2"></i> Funil de Conformidade Regulatória
+              <i class="fas fa-chart-pie text-emerald-600 mr-2"></i> Notificações por Origem (BA x DE)
             </h3>
-            <div class="relative h-64 w-full"><canvas id="graficoFunil"></canvas></div>
+            <div class="relative h-64 w-full flex justify-center"><canvas id="graficoFunil"></canvas></div>
           </div>
         </div>
       </section>
@@ -414,8 +407,9 @@
                   <tr class="text-left text-gray-400 uppercase text-xs border-b border-gray-200">
                     <th class="py-1.5 px-2">#</th>
                     <th class="py-1.5 px-2">Setor</th>
-                    <th class="py-1.5 px-2 text-center">Total de Gatilhos (BA)</th>
-                    <th class="py-1.5 px-2 text-center">Notif. Espontânea Finalizadas (DE)</th>
+                    <th class="py-1.5 px-2 text-center">Nº de Gatilhos (BA)</th>
+                    <th class="py-1.5 px-2 text-center">Nº de Gatilhos Investigados (BA)</th>
+                    <th class="py-1.5 px-2 text-center">Nº de DE</th>
                     <th class="py-1.5 px-2 text-right">% Conclusão</th>
                   </tr>
                 </thead>
@@ -471,6 +465,8 @@
             <strong>Data:</strong> <span id="descData" class="text-gray-800"></span>
           </p>
         </div>
+        <p class="text-xs text-gray-500 font-bold uppercase mb-1">Gatilho Descartado</p>
+        <p id="descGatilho" class="text-sm font-bold text-red-600 uppercase mb-4">-</p>
         <label class="block text-xs font-bold text-gray-600 mb-1">Motivo do Descarte</label>
         <p id="descMotivo" class="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap min-h-[3rem]">-</p>
         <div class="pt-4 flex justify-end border-t mt-4">
