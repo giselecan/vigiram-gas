@@ -153,3 +153,136 @@ function validarFolderPermitido_(folderId) {
 //      janela de execução — NUNCA salve o valor em arquivo .gs.
 //   3. Atualize o mesmo valor no Pipeline_v3.ps1 (lado PowerShell).
 //   4. Confirme com verSegredoETL_() (loga apenas o tamanho, nunca o valor).
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FASE 8 — PROPRIEDADE INTELECTUAL: ASSINATURA DE AUTORIA + TRAVA DE AMBIENTE
+//
+// VigiRAM é propriedade intelectual de GISELE CRISTINE ARAUJO NASCIMENTO,
+// cedida em uso à unidade hospitalar piloto. O Apps Script não permite
+// ocultar código-fonte de quem tem acesso de Editor — então esta seção não
+// tenta "esconder" nada. Em vez disso: (1) deixa a autoria embutida no
+// código de forma que sobrevive a uma cópia (prova de autoria) e (2) trava
+// a EXECUÇÃO do sistema ao ambiente autorizado, para que uma cópia do
+// projeto (via "Fazer uma cópia" no editor, ou export do código-fonte para
+// outro projeto) pare de funcionar fora do ambiente original.
+//
+// Por que Script Properties sozinhas não bastam: elas NÃO são copiadas
+// quando alguém duplica o projeto no editor do Apps Script — uma cópia
+// nasce com Script Properties vazias. Por isso o e-mail autorizado tem um
+// valor padrão embutido no PRÓPRIO CÓDIGO-FONTE (_AUTORIA_GISELE_ abaixo):
+// mesmo uma cópia sem nenhuma configuração adicional já nasce travada,
+// porque Session.getEffectiveUser() dela nunca vai bater com o padrão.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _PROP_ENV_EMAIL     = 'VIGIRAM_OWNER_EMAIL';
+const _PROP_ENV_SCRIPT_ID = 'VIGIRAM_AUTHORIZED_SCRIPT_ID';
+
+/**
+ * Assinatura de autoria — âncora que não depende de Script Properties
+ * (que não sobrevivem a uma cópia do projeto). Removê-la ou alterá-la exige
+ * edição deliberada do código-fonte: nesse caso, _hashSecurityGISELE_()
+ * (mais abaixo) deixa de bater com o valor esperado e bloqueia o sistema —
+ * a adulteração da assinatura é, ela mesma, o que aciona a trava.
+ */
+const _AUTORIA_GISELE_ = Object.freeze({
+  AUTOR:                  'GISELE CRISTINE ARAUJO NASCIMENTO',
+  PROJETO:                'VigiRAM',
+  EMAIL_AUTORIZADO_PADRAO: 'giselechereese@gmail.com'
+});
+
+/**
+ * _hashSecurityGISELE() — trip-wire de integridade da autoria.
+ * Funções vitais do sistema (login, geração de E2B, roteamento HTTP)
+ * chamam esta função antes de rodar. Ela recalcula um HMAC sobre a
+ * constante de autoria acima e compara com o valor gravado abaixo; se a
+ * constante tiver sido alterada (ex.: name-swap para remover a autoria
+ * numa cópia), o hash não bate e a função lança erro, interrompendo a
+ * operação vital que dependia dela.
+ * NÃO é criptografia de proteção de acesso (roda em texto aberto no V8) —
+ * é assinatura + verificação de integridade, para fins de autoria.
+ */
+function _hashSecurityGISELE_() {
+  const HASH_AUTORIA_ESPERADO =
+    'bad7946daaf875596c1401c489d5c8aa3feb677bee217b03cc94f138b50c7de9';
+  const base = _AUTORIA_GISELE_.AUTOR + '|' + _AUTORIA_GISELE_.PROJETO;
+  const hashAtual = hmacHex_(base, 'VIGIRAM_IP_PROTECT_2026');
+  if (hashAtual !== HASH_AUTORIA_ESPERADO) {
+    throw new Error(
+      'VigiRAM: assinatura de autoria adulterada ou ausente. Sistema bloqueado. ' +
+      'Este software é propriedade intelectual de ' + _AUTORIA_GISELE_.AUTOR + '.'
+    );
+  }
+  return true;
+}
+
+/**
+ * Verificação estrita de ambiente de execução — chamada no início de
+ * doGet/doPost (Router.gs) e replicada em funções vitais (autenticarUsuario,
+ * gerarXmlE2B) como segunda camada. Compara:
+ *
+ *   1) Session.getEffectiveUser().getEmail() — em um Web App publicado com
+ *      "Executar como: EU" (executeAs=USER_DEPLOYING, ver appsscript.json),
+ *      este é o e-mail de quem FEZ O DEPLOY. Se alguém copiar o projeto e
+ *      publicar a cópia como Web App próprio, este e-mail passa a ser o do
+ *      copiador — e diverge do autorizado.
+ *   2) ScriptApp.getScriptId() — todo projeto duplicado no editor do Apps
+ *      Script recebe um ID novo. Uma vez travado (travarAmbienteAtual_),
+ *      qualquer scriptId diferente do autorizado bloqueia a execução.
+ *
+ * Qualquer uma das duas divergências dispara erro fatal, interrompendo a
+ * rota antes de qualquer leitura/escrita de dados.
+ *
+ * CONFIGURAÇÃO (rodar 1x no editor — mesmo padrão de definirSegredoETL_):
+ *   travarAmbienteAtual_()      — registra o scriptId ATUAL como autorizado.
+ *   definirEmailAutorizado_(e)  — só necessário se o e-mail de deploy for
+ *                                  diferente do padrão embutido no código.
+ */
+function verificarAmbienteAutorizado_() {
+  _hashSecurityGISELE_();
+
+  const props = PropertiesService.getScriptProperties();
+
+  const emailAtual = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  const emailAutorizado = String(
+    props.getProperty(_PROP_ENV_EMAIL) || _AUTORIA_GISELE_.EMAIL_AUTORIZADO_PADRAO
+  ).trim().toLowerCase();
+
+  if (emailAtual && emailAutorizado && emailAtual !== emailAutorizado) {
+    throw new Error(
+      'VigiRAM: ambiente de execução não autorizado (identidade de deploy divergente). ' +
+      'Este sistema é propriedade intelectual de ' + _AUTORIA_GISELE_.AUTOR +
+      ' e está licenciado para uso exclusivo da unidade autorizada. ' +
+      'Cópias não autorizadas deste projeto ficam bloqueadas automaticamente.'
+    );
+  }
+
+  const scriptIdAtual = ScriptApp.getScriptId();
+  const scriptIdAutorizado = props.getProperty(_PROP_ENV_SCRIPT_ID);
+
+  if (scriptIdAutorizado && scriptIdAtual !== scriptIdAutorizado) {
+    throw new Error(
+      'VigiRAM: projeto de script não autorizado (scriptId divergente do original). ' +
+      'Este sistema é propriedade intelectual de ' + _AUTORIA_GISELE_.AUTOR + '. ' +
+      'Cópias não autorizadas deste projeto ficam bloqueadas automaticamente.'
+    );
+  }
+
+  return true;
+}
+
+// SEGURANÇA: mesma convenção do bloco ETL acima — sufixo "_" de propósito,
+// para não ficar exposta a google.script.run; rode manualmente no editor.
+function travarAmbienteAtual_() {
+  const id = ScriptApp.getScriptId();
+  PropertiesService.getScriptProperties().setProperty(_PROP_ENV_SCRIPT_ID, id);
+  Logger.log('Ambiente travado. scriptId autorizado = %s', id);
+  return id;
+}
+
+/** Só necessário se o e-mail de deploy autorizado for diferente do padrão embutido. */
+function definirEmailAutorizado_(email) {
+  const limpo = String(email || '').trim().toLowerCase();
+  if (!limpo || limpo.indexOf('@') === -1) throw new Error('E-mail inválido.');
+  PropertiesService.getScriptProperties().setProperty(_PROP_ENV_EMAIL, limpo);
+  return 'E-mail autorizado atualizado para: ' + limpo;
+}

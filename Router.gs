@@ -5,6 +5,11 @@
  * FASE 7 (#2): doPost agora EXIGE assinatura HMAC (verificarAssinaturaETL_)
  * para as ações de escrita do ETL (uploadRaw, insertDB). Sem assinatura válida,
  * a requisição é rejeitada antes de qualquer escrita.
+ *
+ * FASE 8 (IP/autoria): doGet e doPost agora chamam verificarAmbienteAutorizado_()
+ * (Security.gs) como PRIMEIRA coisa dentro do try — antes de qualquer outra
+ * rota ou leitura. Bloqueia TODAS as rotas se o ambiente de execução (e-mail
+ * de deploy / scriptId) não bater com o autorizado — ver Security.gs.
  */
 
 /**
@@ -12,6 +17,7 @@
  */
 function doPost(e) {
   try {
+    verificarAmbienteAutorizado_(); // Security.gs — trava de ambiente/autoria (Fase 8)
     const acao = e.parameter.action;
     switch (acao) {
       case 'uploadRaw':
@@ -44,6 +50,8 @@ function doPost(e) {
  */
 function doGet(e) {
   try {
+    verificarAmbienteAutorizado_(); // Security.gs — trava de ambiente/autoria (Fase 8)
+
     // 1. Rota do robô PowerShell
     if (e.parameter && e.parameter.action === 'getTriggers') {
       return handleGetTriggers(); // Ingest.gs
