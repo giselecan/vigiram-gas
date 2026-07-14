@@ -185,9 +185,15 @@ const _PROP_ENV_SCRIPT_ID = 'VIGIRAM_AUTHORIZED_SCRIPT_ID';
  * a adulteração da assinatura é, ela mesma, o que aciona a trava.
  */
 const _AUTORIA_GISELE_ = Object.freeze({
-  AUTOR:                  'GISELE CRISTINE ARAUJO NASCIMENTO',
-  PROJETO:                'VigiRAM',
-  EMAIL_AUTORIZADO_PADRAO: 'giselechereese@gmail.com'
+  AUTOR:   'GISELE CRISTINE ARAUJO NASCIMENTO',
+  PROJETO: 'VigiRAM',
+  // Mais de um e-mail pode legitimamente publicar/republicar o Web App
+  // (conta pessoal + conta institucional da autora) — qualquer um destes
+  // é aceito como identidade de deploy autorizada.
+  EMAILS_AUTORIZADOS_PADRAO: Object.freeze([
+    'giselechereese@gmail.com',
+    'gisele.can@isgh.org.br'
+  ])
 });
 
 /**
@@ -233,9 +239,10 @@ function _hashSecurityGISELE_() {
  * rota antes de qualquer leitura/escrita de dados.
  *
  * CONFIGURAÇÃO (rodar 1x no editor — mesmo padrão de definirSegredoETL_):
- *   travarAmbienteAtual_()      — registra o scriptId ATUAL como autorizado.
- *   definirEmailAutorizado_(e)  — só necessário se o e-mail de deploy for
- *                                  diferente do padrão embutido no código.
+ *   travarAmbienteAtual_()        — registra o scriptId ATUAL como autorizado.
+ *   definirEmailsAutorizados_(csv) — só necessário se algum e-mail de deploy
+ *                                    válido não estiver na lista padrão
+ *                                    embutida no código (EMAILS_AUTORIZADOS_PADRAO).
  */
 function verificarAmbienteAutorizado_() {
   _hashSecurityGISELE_();
@@ -243,11 +250,12 @@ function verificarAmbienteAutorizado_() {
   const props = PropertiesService.getScriptProperties();
 
   const emailAtual = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
-  const emailAutorizado = String(
-    props.getProperty(_PROP_ENV_EMAIL) || _AUTORIA_GISELE_.EMAIL_AUTORIZADO_PADRAO
-  ).trim().toLowerCase();
+  const csvAutorizados = props.getProperty(_PROP_ENV_EMAIL);
+  const emailsAutorizados = (csvAutorizados ? csvAutorizados.split(',') : _AUTORIA_GISELE_.EMAILS_AUTORIZADOS_PADRAO)
+    .map(function (e) { return String(e || '').trim().toLowerCase(); })
+    .filter(Boolean);
 
-  if (emailAtual && emailAutorizado && emailAtual !== emailAutorizado) {
+  if (emailAtual && emailsAutorizados.length && emailsAutorizados.indexOf(emailAtual) === -1) {
     throw new Error(
       'VigiRAM: ambiente de execução não autorizado (identidade de deploy divergente). ' +
       'Este sistema é propriedade intelectual de ' + _AUTORIA_GISELE_.AUTOR +
@@ -279,10 +287,22 @@ function travarAmbienteAtual_() {
   return id;
 }
 
-/** Só necessário se o e-mail de deploy autorizado for diferente do padrão embutido. */
-function definirEmailAutorizado_(email) {
-  const limpo = String(email || '').trim().toLowerCase();
-  if (!limpo || limpo.indexOf('@') === -1) throw new Error('E-mail inválido.');
-  PropertiesService.getScriptProperties().setProperty(_PROP_ENV_EMAIL, limpo);
-  return 'E-mail autorizado atualizado para: ' + limpo;
+/**
+ * Define a lista de e-mails de deploy autorizados (CSV), substituindo a
+ * lista padrão embutida no código (_AUTORIA_GISELE_.EMAILS_AUTORIZADOS_PADRAO).
+ * Só necessário se algum e-mail de deploy válido não estiver nessa lista padrão.
+ * Ex.: definirEmailsAutorizados_('giselechereese@gmail.com,gisele.can@isgh.org.br')
+ */
+function definirEmailsAutorizados_(csvEmails) {
+  const emails = String(csvEmails || '')
+    .split(',')
+    .map(function (e) { return e.trim().toLowerCase(); })
+    .filter(Boolean);
+
+  if (!emails.length || emails.some(function (e) { return e.indexOf('@') === -1; })) {
+    throw new Error('Informe um CSV de e-mails válidos. Ex.: "a@x.com,b@y.com"');
+  }
+
+  PropertiesService.getScriptProperties().setProperty(_PROP_ENV_EMAIL, emails.join(','));
+  return 'E-mails autorizados atualizados para: ' + emails.join(', ');
 }
