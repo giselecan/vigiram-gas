@@ -343,12 +343,34 @@ function construirCard(caso) {
     ${conclusaoHtml}
     ${vigimedHtml}
     ${farmaHtml}
-    <button data-acao="investigar" data-id="${id}"
+    <button data-acao="${isDesc ? 'descarte' : 'investigar'}" data-id="${id}"
       class="w-full bg-gray-200 hover:bg-gray-300 text-gray-600 text-xs font-bold py-1.5
              rounded-lg mt-3 shadow-sm transition flex items-center justify-center gap-1">
       Ver detalhes <i class="fas fa-eye"></i>
     </button>
   </div>`;
+}
+
+// ---------------------------------------------------------
+// MODAL DESCARTE — gatilho descartado na triagem nunca chega a ser
+// investigado (sem Naranjo, gravidade, etc.), então em vez de abrir o
+// formulário completo de investigação (vazio e sem sentido para esse
+// caso), mostra só o motivo do descarte registrado na triagem.
+// ---------------------------------------------------------
+function abrirDescarte(id) {
+  const caso = casosGlobais.find(c => c.id === id);
+  if (!caso) return;
+
+  document.getElementById('descProntuario').innerText = caso.prontuario;
+  document.getElementById('descSetor').innerText      = caso.setor;
+  document.getElementById('descData').innerText       = formatarDataExibicao(caso.data_evento) || '-';
+  document.getElementById('descMotivo').innerText      = caso.motivoDescarte || 'Motivo não informado.';
+
+  document.getElementById('modalDescarte').classList.remove('hidden');
+}
+
+function fecharModalDescarte() {
+  document.getElementById('modalDescarte').classList.add('hidden');
 }
 
 // ---------------------------------------------------------
@@ -385,8 +407,9 @@ function configurarDelegacaoKanban() {
       if (!btn) return;
       const id   = btn.getAttribute('data-id');
       const acao = btn.getAttribute('data-acao');
-      if (acao === 'triar')     abrirTriagem(id);
+      if (acao === 'triar')      abrirTriagem(id);
       if (acao === 'investigar') abrirInvestigacao(id);
+      if (acao === 'descarte')   abrirDescarte(id);
     });
   });
   delegacaoConfigurada = true;

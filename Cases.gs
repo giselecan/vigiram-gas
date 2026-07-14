@@ -52,7 +52,7 @@ const CACHE_CASOS_TTL_SEG = 45;
 const CAMPOS_RESUMO_CASOS = [
   'id', 'data', 'tipo', 'prontuario', 'iniciais', 'nascimento',
   'setor', 'medicamento', 'status', 'gravidade', 'farmaceutico', 'conclusao',
-  'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao'
+  'motivoDescarte', 'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao'
 ];
 // ============================================================
 // MAPEAMENTO — RESUMO (Kanban/Dashboard) vs COMPLETO (modal de investigação)
@@ -80,6 +80,7 @@ function _mapearCasoResumo_(doc) {
     gravidade:       String(doc.gravidade || '').trim(),
     farmaceutico:    String(doc.farmaceutico || '').trim(),
     conclusao:       String(doc.conclusao || '').trim(),
+    motivoDescarte:  String(doc.motivoDescarte || '').trim(),
     numVigimed:      String(doc.numVigimed || '').trim(),
     dataVigimed:     doc.dataVigimed instanceof Date
       ? Utilities.formatDate(doc.dataVigimed, Session.getScriptTimeZone(), 'yyyy-MM-dd')
@@ -134,6 +135,7 @@ function _mapearCasoCompleto_(doc) {
     evolucao:        String(doc.evolucao || '').trim(),
     desfecho:        String(doc.desfecho || '').trim(),
     conclusao:       String(doc.conclusao || '').trim(),
+    motivoDescarte:  String(doc.motivoDescarte || '').trim(),
     naranjo:         String(doc.naranjo || '').trim(),
     gravidade:       String(doc.gravidade || '').trim(),
     farmaceutico:    String(doc.farmaceutico || '').trim(),

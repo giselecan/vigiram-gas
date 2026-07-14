@@ -448,6 +448,40 @@
     <!-- =====================================================
          MODAL TRIAGEM
     ===================================================== -->
+    <!-- =====================================================
+         MODAL DESCARTE — só o motivo do descarte, sem formulário
+         de investigação (o caso nunca chegou a ser investigado).
+    ===================================================== -->
+    <div id="modalDescarte" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 fade-in">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div class="flex items-center justify-between border-b pb-3 mb-4">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <i class="fas fa-ban text-gray-400"></i> Gatilho Descartado
+          </h2>
+          <button type="button" onclick="fecharModalDescarte()" class="text-gray-400 hover:text-gray-600 transition">
+            <i class="fas fa-times text-lg"></i>
+          </button>
+        </div>
+        <div class="bg-gray-50 p-3 rounded-lg text-xs mb-4 border border-gray-200">
+          <p class="text-gray-600">
+            <strong>Prontuário:</strong> <span id="descProntuario" class="text-gray-800 font-bold"></span>
+            &nbsp;·&nbsp;
+            <strong>Setor:</strong> <span id="descSetor" class="text-gray-800"></span>
+            &nbsp;·&nbsp;
+            <strong>Data:</strong> <span id="descData" class="text-gray-800"></span>
+          </p>
+        </div>
+        <label class="block text-xs font-bold text-gray-600 mb-1">Motivo do Descarte</label>
+        <p id="descMotivo" class="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap min-h-[3rem]">-</p>
+        <div class="pt-4 flex justify-end border-t mt-4">
+          <button type="button" onclick="fecharModalDescarte()"
+                  class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-200 transition">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div id="modalTriagem" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50">
       <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 fade-in">
         <h2 class="text-xl font-bold text-gray-800 mb-2 border-b pb-3">
