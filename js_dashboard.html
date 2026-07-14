@@ -85,6 +85,28 @@ function _importadoVigimed(c) {
   return !!(c.numVigimed && c.dataVigimed);
 }
 
+/**
+ * Cria o gráfico na primeira chamada; nas seguintes (troca de filtro,
+ * alternância de tema) só ATUALIZA labels/dados/cores da instância já
+ * existente via chart.update(), em vez de destruir e recriar os 6
+ * <canvas> do zero a cada clique num filtro (flicker + trabalho de
+ * layout/GC repetido). O número de datasets de cada gráfico é sempre o
+ * mesmo entre chamadas, então o pareamento por índice é seguro.
+ * Chart.defaults.color/borderColor (tema) são resolvidos pelo Chart.js a
+ * cada update() — não precisam ser reaplicados por instância.
+ */
+function _upsertChart(instanciaAtual, canvasId, config) {
+  if (instanciaAtual) {
+    instanciaAtual.data.labels = config.data.labels;
+    config.data.datasets.forEach((novoDs, i) => {
+      Object.assign(instanciaAtual.data.datasets[i], novoDs);
+    });
+    instanciaAtual.update();
+    return instanciaAtual;
+  }
+  return new Chart(document.getElementById(canvasId).getContext('2d'), config);
+}
+
 // ---------------------------------------------------------
 // DESENHAR / ATUALIZAR GRÁFICOS
 // ---------------------------------------------------------
@@ -255,12 +277,8 @@ function desenharGraficos() {
     : 'Sem gatilhos triados no período';
 
   // ---------------------------------------------------------
-  // GRÁFICOS
+  // GRÁFICOS — ver _upsertChart: atualiza em vez de destruir+recriar
   // ---------------------------------------------------------
-  [_grafTemporal, _grafDesfechos, _grafGravidade, _grafGravidadeSetor, _grafMedicamentos, _grafFunil]
-    .forEach(g => { if (g) g.destroy(); });
-  _grafTemporal = _grafDesfechos = _grafGravidade = _grafGravidadeSetor = _grafMedicamentos = _grafFunil = null;
-
   Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
 
   // Paleta sensível ao tema. desenharGraficos() é re-chamada ao alternar o
@@ -277,7 +295,7 @@ function desenharGraficos() {
 
   // Gráfico 1 (Bloco 2) — Evolução Temporal de RAMs
   const diasOrdenados = [...calc.diasMapa.values()].sort((a, b) => a.data - b.data);
-  _grafTemporal = new Chart(document.getElementById('graficoTemporal').getContext('2d'), {
+  _grafTemporal = _upsertChart(_grafTemporal, 'graficoTemporal', {
     type: 'line',
     data: {
       labels: diasOrdenados.map(d => `${String(d.data.getDate()).padStart(2, '0')}/${String(d.data.getMonth() + 1).padStart(2, '0')}`),
@@ -294,7 +312,7 @@ function desenharGraficos() {
   });
 
   // Gráfico 2 (Bloco 2) — Desfecho dos gatilhos (rosca)
-  _grafDesfechos = new Chart(document.getElementById('graficoDesfechos').getContext('2d'), {
+  _grafDesfechos = _upsertChart(_grafDesfechos, 'graficoDesfechos', {
     type: 'doughnut',
     data: {
       labels: ['RAM Confirmada', 'Descartados', 'Em Análise'],
@@ -308,7 +326,7 @@ function desenharGraficos() {
   });
 
   // Gráfico 3 (Bloco 2) — Distribuição de gravidade (pizza)
-  _grafGravidade = new Chart(document.getElementById('graficoGravidade').getContext('2d'), {
+  _grafGravidade = _upsertChart(_grafGravidade, 'graficoGravidade', {
     type: 'pie',
     data: {
       labels: ['Leve', 'Moderada', 'Grave', 'Fatal'],
@@ -330,7 +348,7 @@ function desenharGraficos() {
     })
     .slice(0, 8);
 
-  _grafGravidadeSetor = new Chart(document.getElementById('graficoGravidadeSetor').getContext('2d'), {
+  _grafGravidadeSetor = _upsertChart(_grafGravidadeSetor, 'graficoGravidadeSetor', {
     type: 'bar',
     data: {
       labels: setoresRam,
@@ -356,7 +374,7 @@ function desenharGraficos() {
     .sort((a, b) => calc.meds[b] - calc.meds[a])
     .slice(0, 5);
 
-  _grafMedicamentos = new Chart(document.getElementById('graficoMedicamentos').getContext('2d'), {
+  _grafMedicamentos = _upsertChart(_grafMedicamentos, 'graficoMedicamentos', {
     type: 'bar',
     data: {
       labels: topMeds,
@@ -370,7 +388,7 @@ function desenharGraficos() {
   });
 
   // Gráfico 6 (Bloco 3) — Notificações por Origem (BA x DE), pizza
-  _grafFunil = new Chart(document.getElementById('graficoFunil').getContext('2d'), {
+  _grafFunil = _upsertChart(_grafFunil, 'graficoFunil', {
     type: 'pie',
     data: {
       labels: ['Busca Ativa (BA)', 'Demanda Espontânea (DE)'],

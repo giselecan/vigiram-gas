@@ -362,19 +362,40 @@ function abrirInvestigacao(id) {
 
 
 /**
- * Alterna um leve estado de "carregando" no formulário enquanto o
- * detalhe completo é buscado. Elementos são OPCIONAIS — se
- * #invCarregandoDetalhe ou #formInvestigacaoCampos não existirem no
- * index.html, a função simplesmente não faz nada (sem quebrar).
- * Sugestão: adicionar um <div id="invCarregandoDetalhe" class="hidden">
- * com um spinner no topo do modal, e envolver os campos do formulário
- * num container id="formInvestigacaoCampos" para o efeito de opacidade.
+ * Mostra/esconde o overlay de carregamento (#invCarregandoDetalhe,
+ * index.html) enquanto getCasoDetalhado() busca o detalhe completo do
+ * caso, e trava de verdade os campos do formulário nesse intervalo —
+ * não só visualmente (opacity-40), mas desabilitando input/select/
+ * textarea/button dentro de #formInvestigacao. Sem isto, o usuário podia
+ * digitar num campo antes do detalhe chegar e ter o texto sobrescrito
+ * quando _preencherFormularioInvestigacao() rodasse (race condition).
+ *
+ * Cada elemento guarda em data-inv-ja-desabilitado se JÁ estava
+ * desabilitado ANTES do carregamento começar (ex.: _aplicarModoSomenteLeitura
+ * já rodou para um caso CONCLUÍDO) — ao esconder o overlay, só reabilita
+ * quem não estava assim por outro motivo, sem reabrir campos de um caso
+ * somente-leitura por engano.
  */
 function _mostrarCarregandoInvestigacao(mostrar) {
   const elSpinner = document.getElementById('invCarregandoDetalhe');
   if (elSpinner) elSpinner.classList.toggle('hidden', !mostrar);
-  const elForm = document.getElementById('formInvestigacaoCampos');
-  if (elForm) elForm.classList.toggle('opacity-40', mostrar);
+
+  const elForm = document.getElementById('formInvestigacao');
+  if (!elForm) return;
+  elForm.classList.toggle('opacity-40', mostrar);
+
+  const campos = elForm.querySelectorAll('input, select, textarea, button');
+  if (mostrar) {
+    campos.forEach(el => {
+      el.dataset.invJaDesabilitado = el.disabled ? '1' : '0';
+      el.disabled = true;
+    });
+  } else {
+    campos.forEach(el => {
+      if (el.dataset.invJaDesabilitado !== '1') el.disabled = false;
+      delete el.dataset.invJaDesabilitado;
+    });
+  }
 }
 
 function _limparFormularioInvestigacao() {
@@ -542,10 +563,38 @@ function _toggleBlocoObito() {
 // FASE 2 (roadmap) — F2-09: exames estruturados (subtabela repetível)
 // ---------------------------------------------------------
 let _examesEstruturadosSeq = 0;
+let _delegacaoExamesConfigurada = false;
+
+/**
+ * Delegação de evento no <tbody> (configurada UMA vez), no lugar de um
+ * addEventListener('input', ...) por campo + onclick inline por linha —
+ * mesmo padrão já usado em configurarDelegacaoKanban (js_kanban.html) e no
+ * modal de Admin (js_admin.html). Evita acumular 6 listeners por linha de
+ * exame adicionada.
+ */
+function _configurarDelegacaoExames() {
+  if (_delegacaoExamesConfigurada) return;
+  const corpo = document.getElementById('corpoExamesEstruturados');
+  if (!corpo) return;
+
+  corpo.addEventListener('input', ev => {
+    if (ev.target.matches('input')) agendarAutosave();
+  });
+
+  corpo.addEventListener('click', ev => {
+    const btn = ev.target.closest('button[data-acao="remover-exame"]');
+    if (!btn) return;
+    document.getElementById(btn.getAttribute('data-linha'))?.remove();
+    agendarAutosave();
+  });
+
+  _delegacaoExamesConfigurada = true;
+}
 
 function _renderizarExamesEstruturados(lista) {
   const corpo = document.getElementById('corpoExamesEstruturados');
   if (!corpo) return;
+  _configurarDelegacaoExames();
   corpo.innerHTML = '';
   _examesEstruturadosSeq = 0;
   (Array.isArray(lista) ? lista : []).forEach(exame => _adicionarLinhaExameEstruturado(exame));
@@ -573,8 +622,7 @@ function _adicionarLinhaExameEstruturado(exame) {
     <td class="py-1 px-2"><input type="text" class="exame-unidade w-full border rounded px-2 py-1 text-xs" placeholder="mg/dL" value="${escapeHtml(e.unidade || '')}"></td>
     <td class="py-1 px-2"><input type="text" class="exame-refmin w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMin || '')}"></td>
     <td class="py-1 px-2"><input type="text" class="exame-refmax w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMax || '')}"></td>
-    <td class="py-1 px-2"><button type="button" onclick="document.getElementById('${id}').remove(); agendarAutosave();" class="text-red-400 hover:text-red-600" title="Remover exame"><i class="fas fa-trash-alt"></i></button></td>`;
-  tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', agendarAutosave));
+    <td class="py-1 px-2"><button type="button" data-acao="remover-exame" data-linha="${id}" class="text-red-400 hover:text-red-600" title="Remover exame"><i class="fas fa-trash-alt"></i></button></td>`;
   corpo.appendChild(tr);
 }
 

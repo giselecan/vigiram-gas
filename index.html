@@ -480,7 +480,7 @@
       </div>
     </div>
 
-    <div id="modalTriagem" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50">
+    <div id="modalTriagem" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 fade-in">
       <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 fade-in">
         <h2 class="text-xl font-bold text-gray-800 mb-2 border-b pb-3">
           <i class="fas fa-filter text-orange-500 mr-2"></i> Triagem de Gatilho (Trigger Tools)
@@ -574,7 +574,17 @@
         </div>
 
         <!-- Corpo scrollável -->
-        <div class="p-5 overflow-y-auto bg-gray-50 flex-1">
+        <div class="p-5 overflow-y-auto bg-gray-50 flex-1 relative">
+
+          <!-- Overlay de carregamento enquanto getCasoDetalhado() busca o
+               detalhe completo (história clínica, Naranjo, PII do
+               notificador) — some assim que os dados chegam
+               (js_investigacao.html, _mostrarCarregandoInvestigacao). -->
+          <div id="invCarregandoDetalhe"
+               class="hidden absolute inset-0 bg-white bg-opacity-70 backdrop-blur-sm z-20 flex flex-col items-center justify-center gap-3">
+            <i class="fas fa-circle-notch fa-spin text-3xl text-blue-600"></i>
+            <p class="text-sm font-semibold text-gray-500">Carregando detalhes da investigação…</p>
+          </div>
 
           <!-- Info do caso (read-only) — B2: agora com Iniciais e Idade -->
           <div class="bg-white p-4 border border-blue-100 rounded-xl shadow-sm mb-5 flex flex-wrap gap-6 text-sm">

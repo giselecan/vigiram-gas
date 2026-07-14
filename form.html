@@ -434,6 +434,15 @@
 
     let _timeoutRascunho = null;
 
+    /** form.html é servido standalone (Router.gs) — sem js_core.html, então
+     *  sem a escapeHtml() de lá. Cópia local mínima, só para montar <option>
+     *  de setor a partir de string única (ver carregarSetores). */
+    function _escHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     /** Agora local em "yyyy-MM-ddTHH:mm" para datetime-local. */
     function _agoraDateTimeLocal() {
       const d = new Date();
@@ -478,15 +487,11 @@
       // getSetoresPublico() — só nomes de setor, zero PII.
       google.script.run
         .withSuccessHandler(res => {
-          sel.innerHTML = '<option value="">Selecione o setor…</option>';
           const setores = (res && res.setores) || [];
           if (setores.length) {
-            setores.forEach(nome => {
-              const opt = document.createElement('option');
-              opt.value       = nome;
-              opt.textContent = nome;
-              sel.appendChild(opt);
-            });
+            // innerHTML montado UMA vez (era um appendChild por <option>).
+            sel.innerHTML = '<option value="">Selecione o setor…</option>' +
+              setores.map(nome => `<option value="${_escHtml(nome)}">${_escHtml(nome)}</option>`).join('');
             // Restaura seleção salva no rascunho, se houver
             const r = _lerRascunho();
             if (r && r.setor) sel.value = r.setor;
