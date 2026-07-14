@@ -378,7 +378,12 @@ function salvarDemandaEspontanea(formDados) {
     invalidarCasosCache_(); // P1.1 — novo caso precisa aparecer na próxima leitura
     notificarNovaDemandaEspontanea_(objetoCaso); // Notify.gs — alerta imediato ao farmacêutico do setor
 
-    const resultado = { farmaceuticoResponsavel: farmaceuticoResponsavel };
+    // `caso` (formato resumo, igual ao usado pelo Kanban) permite ao chamador
+    // fazer atualização otimista local (atualizarCasoLocal) em vez de um
+    // carregarCasos() completo — mesmo padrão já usado por registrarTriagem/
+    // registrarInvestigacao (P1.2). Campo aditivo: farmaceuticoResponsavel
+    // continua no mesmo lugar para não quebrar form.html.
+    const resultado = { farmaceuticoResponsavel: farmaceuticoResponsavel, caso: _mapearCasoResumo_(objetoCaso) };
 
     // Registra a chave de idempotência SÓ após sucesso completo — um retry
     // com a mesma chave passa a devolver este mesmo resultado.

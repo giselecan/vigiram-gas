@@ -46,14 +46,11 @@ function abrirNotificacaoInterna() {
 
   // Popular select de setores via configGlobal (já carregado em _aplicarConfig)
   if (selectSetor) {
-    selectSetor.innerHTML = '<option value="">Selecione o setor…</option>';
+    // innerHTML montado UMA vez (era um appendChild por <option> — mesmo
+    // padrão de montagem única já usado em _popularSelect/js_core.html).
     const setores = (configGlobal && configGlobal.setores) ? configGlobal.setores : [];
-    setores.forEach(s => {
-      const opt = document.createElement('option');
-      opt.value       = escapeHtml(s.setor);
-      opt.textContent = s.setor;
-      selectSetor.appendChild(opt);
-    });
+    selectSetor.innerHTML = '<option value="">Selecione o setor…</option>' +
+      setores.map(s => `<option value="${escapeHtml(s.setor)}">${escapeHtml(s.setor)}</option>`).join('');
     // Pré-seleciona se filtro do Kanban estiver ativo
     if (filtroSetorAtivo && filtroSetorAtivo !== 'TODOS') {
       selectSetor.value = filtroSetorAtivo;
@@ -178,13 +175,17 @@ function enviarNotificacaoInterna(event) {
   };
 
   google.script.run
-    .withSuccessHandler(() => {
+    .withSuccessHandler(res => {
       btn.innerHTML = originalHtml;
       btn.disabled  = false;
       _niIdempotencyKeyAtual = null; // sucesso completo → próxima chamada usa chave nova
       fecharNotificacaoInterna();
       mostrarToast(`Caso DE registrado para prontuário ${prontuario}. Já em investigação.`, 'sucesso');
-      carregarCasos();
+      // Atualização otimista local (mesmo padrão de triagem/investigação) —
+      // evita um carregarCasos() completo (full re-fetch de todos os casos)
+      // só para refletir a criação de UM caso novo.
+      if (res && res.caso) atualizarCasoLocal(res.caso);
+      else carregarCasos(); // fallback defensivo, caso o backend não devolva o caso
     })
     .withFailureHandler(err => {
       btn.innerHTML = originalHtml;

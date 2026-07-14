@@ -172,7 +172,7 @@ function _renderSecaoVisaoGeral(area) {
   Promise.all([
     _chamarGS('listarUsuarios', tokenSessao),
     _chamarGS('listarGatilhos', tokenSessao),
-    _chamarGS('getConfig', tokenSessao),
+    _getConfigCacheadoPromise(),
     _chamarGS('listarLogsAuditoria', tokenSessao, 6)
   ]).then(([usuarios, gatilhos, cfg, logs]) => {
     const usuariosAtivos = (usuarios  || []).filter(u => u.ativo === 'SIM').length;
@@ -676,13 +676,10 @@ function _cfgSetoresSelecionados() {
 
 /** Busca os nomes distintos de setor já cadastrados (aba Setores) para montar as checkboxes. */
 function _cfgSetoresDistintos(callback) {
-  google.script.run
-    .withSuccessHandler(cfg => {
-      const nomes = Array.from(new Set((cfg.setores || []).map(s => String(s.setor || '').toUpperCase()))).filter(Boolean);
-      callback(nomes);
-    })
-    .withFailureHandler(() => callback([]))
-    .getConfig(tokenSessao);
+  _getConfigCacheado(cfg => {
+    const nomes = Array.from(new Set((cfg.setores || []).map(s => String(s.setor || '').toUpperCase()))).filter(Boolean);
+    callback(nomes);
+  }, () => callback([]));
 }
 
 function _cfgNovoUsuario() {
@@ -827,8 +824,7 @@ function _cfgAlterarStatus(email, novoAtivo, btn) {
 // CONFIGURAÇÕES · E-MAILS
 // ─────────────────────────────────────────────────────────
 function _renderSecaoEmails(area) {
-  google.script.run
-    .withSuccessHandler(cfg => {
+  _getConfigCacheado(cfg => {
       const geral = cfg.geral || {};
       area.innerHTML = `
         <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-5">
@@ -885,9 +881,7 @@ function _renderSecaoEmails(area) {
             </div>
           </div>
         </div>`;
-    })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig(tokenSessao);
+  }, e => { area.innerHTML = _erroHtml(e.message); });
 }
 
 function _cfgSalvarEmails(btn) {
@@ -956,8 +950,7 @@ function _cfgEnviarEmailTeste(btn, tipo) {
 // CONFIGURAÇÕES · SLA
 // ─────────────────────────────────────────────────────────
 function _renderSecaoSLA(area) {
-  google.script.run
-    .withSuccessHandler(cfg => {
+  _getConfigCacheado(cfg => {
       const sla = (cfg.geral || {}).SLA_PADRAO_HORAS || '48';
       area.innerHTML = `
         <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-5">
@@ -982,9 +975,7 @@ function _renderSecaoSLA(area) {
             <i class="fas fa-save"></i> Salvar SLA
           </button>
         </div>`;
-    })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig(tokenSessao);
+  }, e => { area.innerHTML = _erroHtml(e.message); });
 }
 
 function _cfgSalvarSLA(btn) {
@@ -1001,8 +992,7 @@ function _cfgSalvarSLA(btn) {
 // CONFIGURAÇÕES · SETORES
 // ─────────────────────────────────────────────────────────
 function _renderSecaoSetores(area) {
-  google.script.run
-    .withSuccessHandler(cfg => {
+  _getConfigCacheado(cfg => {
       // Agrupado por SETOR (1 linha por setor) — cfg.setores continua sendo
       // 1 par {setor,email} por documento (usado em outros lugares, como o
       // envio do relatório diário), só a exibição/edição aqui é agrupada
@@ -1053,9 +1043,7 @@ function _renderSecaoSetores(area) {
                 class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
           <i class="fas fa-save"></i> Salvar Setores
         </button>`;
-    })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig(tokenSessao);
+  }, e => { area.innerHTML = _erroHtml(e.message); });
 }
 
 /** Monta uma linha da tabela de Setores — usada tanto na carga inicial quanto ao adicionar uma linha nova. */
@@ -1252,8 +1240,7 @@ const _CAMPOS_LISTA = {
 };
 
 function _renderSecaoListas(area) {
-  google.script.run
-    .withSuccessHandler(cfg => {
+  _getConfigCacheado(cfg => {
       const listas = cfg.listas || {};
       const blocos = Object.entries(_CAMPOS_LISTA).map(([campo, label]) => {
         const itens = (listas[campo] || []).map((op, i) =>
@@ -1289,9 +1276,7 @@ function _renderSecaoListas(area) {
           </button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${blocos}</div>`;
-    })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
-    .getConfig(tokenSessao);
+  }, e => { area.innerHTML = _erroHtml(e.message); });
 }
 
 function _cfgAdicionarItemLista(campo) {
@@ -1349,11 +1334,35 @@ function _fmtDataHora(d) {
   return `${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}/${dt.getFullYear()} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 
-/** Invalida o cache de config no servidor para refletir edições imediatamente. */
+/** Invalida o cache de config no servidor (e o cache local — ver abaixo) para refletir edições imediatamente. */
 function invalidarConfigCache() {
+  _configAdminCache = null;
   google.script.run
     .withFailureHandler(e => console.warn('invalidarConfig falhou — config pode ficar em cache até 10min:', e.message))
     .invalidarConfig();
+}
+
+/**
+ * Cache client-side de getConfig() — Emails/SLA/Setores/Listas e o modal de
+ * Novo/Editar Usuário (_cfgSetoresDistintos) todos leem o MESMO getConfig().
+ * Sem isto, alternar entre essas sub-abas disparava um round-trip
+ * google.script.run por clique, mesmo o servidor já cacheando o mesmo
+ * payload (Config.gs, TTL 600s) — a latência do round-trip em si continuava
+ * acontecendo a cada troca de aba. Invalidado junto do cache do servidor em
+ * invalidarConfigCache(), então nunca fica desatualizado após um salvamento.
+ */
+let _configAdminCache = null;
+
+function _getConfigCacheado(onSucesso, onFalha) {
+  if (_configAdminCache) { onSucesso(_configAdminCache); return; }
+  google.script.run
+    .withSuccessHandler(cfg => { _configAdminCache = cfg; onSucesso(cfg); })
+    .withFailureHandler(onFalha || (e => mostrarToast(e.message, 'erro')))
+    .getConfig(tokenSessao);
+}
+
+function _getConfigCacheadoPromise() {
+  return new Promise((resolve, reject) => _getConfigCacheado(resolve, reject));
 }
 
 /** Promisifica google.script.run para permitir Promise.all() em telas com múltiplas fontes (ex: Visão Geral). */
