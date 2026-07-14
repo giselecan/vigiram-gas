@@ -629,6 +629,16 @@ function _cfgUsAdicionarSetorNaLista() {
   const existentes = Array.from(lista.querySelectorAll('.cfgUsSetorChk')).map(c => c.value);
   if (existentes.includes(nome)) { input.value = ''; return; }
 
+  // Aviso de grafia parecida (evita recriar a duplicação já corrigida em
+  // "Verificar Duplicados" — ex.: usuário digita "UTI-Adulto" quando já
+  // existe "UTI ADULTO" na lista). Não bloqueia: o admin pode confirmar
+  // que é mesmo um setor novo e distinto.
+  const chaveNova = normalizarSetorComparacao(nome);
+  const parecido = existentes.find(e => normalizarSetorComparacao(e) === chaveNova && e !== nome);
+  if (parecido && !confirm(`Já existe um setor parecido: "${parecido}".\n\nTem certeza que "${nome}" é um setor DIFERENTE? Se for o mesmo, cancele e selecione "${parecido}" na lista em vez de criar um novo.`)) {
+    return;
+  }
+
   const label = document.createElement('label');
   label.className = 'cfgUsSetorLinha flex items-center gap-2 text-sm py-1 cursor-pointer rounded px-1 hover:bg-gray-50';
   label.dataset.nome = nome;
@@ -1017,10 +1027,16 @@ function _renderSecaoSetores(area) {
           <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
             <i class="fas fa-hospital text-teal-600"></i> Setores e Responsáveis
           </h2>
-          <button onclick="_cfgAdicionarSetor()"
-                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
-            <i class="fas fa-plus"></i> Adicionar Setor
-          </button>
+          <div class="flex items-center gap-2">
+            <button onclick="_cfgVerificarSetoresDuplicados(this)"
+                    class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+              <i class="fas fa-clone"></i> Verificar Duplicados
+            </button>
+            <button onclick="_cfgAdicionarSetor()"
+                    class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+              <i class="fas fa-plus"></i> Adicionar Setor
+            </button>
+          </div>
         </div>
         <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
           <div class="overflow-x-auto">
@@ -1086,6 +1102,93 @@ function _cfgSalvarSetores(btn) {
     .withSuccessHandler(res => { _pararCarregando(btn); mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro'); if (res.sucesso) invalidarConfigCache(); })
     .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .salvarSetores(setores, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// CONFIGURAÇÕES · SETORES · DIAGNÓSTICO DE DUPLICADOS
+//
+// Duplicata real (mesmo setor físico, mesmo responsável) só acontece
+// quando a mesma pessoa/setor foi digitada com grafias levemente
+// diferentes em edições distintas (maiúsc./minúsc., espaço extra, acento
+// com codificação diferente ao colar de Word/Excel etc.) — cada grafia
+// vira um documento próprio na coleção `setores` (id = setor+e-mail), sem
+// nunca se auto-mesclar. Este painel agrupa por uma chave normalizada
+// (sem acento, maiúsculo, espaços colapsados) + e-mail do responsável,
+// mostra os grupos com mais de 1 grafia pro admin escolher o nome
+// canônico, e só mescla quando o admin confirma — nada é apagado
+// automaticamente sem revisão.
+// ─────────────────────────────────────────────────────────
+
+function _cfgVerificarSetoresDuplicados(btn) {
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      if (!res.duplicados.length) {
+        mostrarToast(`Nenhum setor duplicado encontrado (${res.totalSetores} documento(s), ${res.totalGrupos} setor(es) distinto(s)).`, 'sucesso');
+        return;
+      }
+      _cfgAbrirSubModal(
+        `${res.duplicados.length} Grupo(s) Duplicado(s)`,
+        `<p class="text-xs text-gray-500 mb-4">Escolha a grafia correta de cada grupo. As demais serão apagadas e os usuários que tinham a grafia antiga atribuída passam a usar a escolhida.</p>
+         <div id="cfgDupGrupos" class="space-y-4">
+           ${res.duplicados.map((g, i) => _cfgHtmlGrupoDuplicado(g, i)).join('')}
+         </div>`,
+        'Mesclar Selecionados',
+        () => _cfgMesclarSetoresDuplicados(res.duplicados)
+      );
+    })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
+    .diagnosticarSetoresDuplicados(tokenSessao);
+}
+
+function _cfgHtmlGrupoDuplicado(grupo, idx) {
+  // Sugestão de padrão: a grafia que mais se repete no grupo (ou a
+  // primeira, em empate) — o admin pode trocar por outra do grupo.
+  const contagem = {};
+  grupo.forEach(d => { contagem[d.setor] = (contagem[d.setor] || 0) + 1; });
+  const sugestao = grupo.slice().sort((a, b) => (contagem[b.setor] - contagem[a.setor]))[0].setor;
+
+  const opcoes = grupo.map((d, j) => `
+    <label class="flex items-center gap-2 text-sm py-1 cursor-pointer">
+      <input type="radio" name="cfgDupCanonico_${idx}" value="${escapeHtml(d.setor)}" ${d.setor === sugestao ? 'checked' : ''}>
+      <span>${escapeHtml(d.setor)}</span>
+      <span class="text-xs text-gray-400">(id: ${escapeHtml(d.id)})</span>
+    </label>`).join('');
+
+  return `
+    <div class="border border-amber-200 bg-amber-50 rounded-lg p-3" data-grupo-idx="${idx}">
+      <p class="text-xs font-bold text-gray-600 mb-1">
+        <i class="fas fa-user-md text-gray-400"></i> ${escapeHtml(grupo[0].farmaceutico || 'N/I')}
+        <span class="text-gray-400 font-normal">(${escapeHtml(grupo[0].email || 'sem e-mail')})</span>
+      </p>
+      ${opcoes}
+    </div>`;
+}
+
+function _cfgMesclarSetoresDuplicados(duplicados) {
+  const btn = document.getElementById('cfgSubModalBtn');
+  const payload = duplicados.map((grupo, idx) => {
+    const radio = document.querySelector(`input[name="cfgDupCanonico_${idx}"]:checked`);
+    const nomeCanonico = radio ? radio.value : grupo[0].setor;
+    return {
+      email: grupo[0].email,
+      farmaceutico: grupo[0].farmaceutico,
+      nomeCanonico: nomeCanonico,
+      idsAntigos: grupo.map(d => d.id),
+      grafias: grupo.map(d => d.setor)
+    };
+  });
+
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      mostrarToast(res.mensagem, res.sucesso ? 'sucesso' : 'erro');
+      if (res.sucesso) { _fecharSubModal(); invalidarConfigCache(); _abrirSubConfig('setores'); }
+    })
+    .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
+    .mesclarSetoresDuplicados(payload, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────

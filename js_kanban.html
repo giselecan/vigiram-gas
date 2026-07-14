@@ -98,11 +98,19 @@ function processarFiltros() {
     // batia, e o caso ESCAPAVA do filtro (nem incluído nem excluído
     // corretamente, só ignorado). parseDataFlexivel (js_core.html) trata
     // BR e ISO da mesma forma, então o filtro agora vale para todos os casos.
+    //
+    // CORREÇÃO (mesma data início/fim não retornava nada): os limites eram
+    // `new Date(dataDe)`/`new Date(dataAte)` — string "yyyy-MM-dd" vira
+    // meia-noite UTC, não local, e o limite superior nunca cobria o dia
+    // inteiro. parseDataFiltroLimite (js_core.html) usa hora local e
+    // estende "até" para o fim do dia (23:59:59.999).
     if (dataDe || dataAte) {
       const dEv = parseDataFlexivel(c.data_evento);
       if (dEv) {
-        if (dataDe && dEv < new Date(dataDe)) return false;
-        if (dataAte && dEv > new Date(dataAte)) return false;
+        const limiteDe  = parseDataFiltroLimite(dataDe, false);
+        const limiteAte = parseDataFiltroLimite(dataAte, true);
+        if (limiteDe  && dEv < limiteDe)  return false;
+        if (limiteAte && dEv > limiteAte) return false;
       }
     }
 
@@ -232,6 +240,12 @@ function construirCard(caso) {
   const med   = escapeHtml(caso.medicamento);
   const data  = escapeHtml(formatarDataExibicao(caso.data_evento)); // dd/MM/yyyy unificado (util em js_core)
 
+  // "Em análise desde": BA usa a data em que foi triado (dataTriagem);
+  // DE não passa por triagem, então usa a data de notificação. Cai para a
+  // data do evento se o carimbo ainda não existir (casos antigos).
+  const dataInvestigacaoBruta = isDE ? caso.dataNotificacao : caso.dataTriagem;
+  const dataInvestigacao = escapeHtml(formatarDataExibicao(dataInvestigacaoBruta) || data);
+
   // B1 — Iniciais + idade
   const iniciais = (caso.paciente && caso.paciente !== 'N/I') ? caso.paciente : '';
   const idade    = _calcularIdade(caso.data_nascimento || caso.nascimento || '');
@@ -291,7 +305,7 @@ function construirCard(caso) {
       </p>
       ${farmaHtml}
       <p class="text-xs text-gray-400 mt-2 flex items-center gap-1">
-        <i class="fas fa-hourglass-half"></i> Em análise desde ${data}
+        <i class="fas fa-hourglass-half"></i> Em análise desde ${dataInvestigacao}
       </p>
       <button data-acao="investigar" data-id="${id}"
         class="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5

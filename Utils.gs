@@ -176,6 +176,26 @@ function _idDocSetor_(setor, email) {
   return slugEmail ? (slugSetor + '__' + slugEmail) : slugSetor;
 }
 
+/**
+ * Normaliza um nome de setor só para COMPARAÇÃO/agrupamento (diagnóstico de
+ * duplicados) — NUNCA usar no lugar de _idDocSetor_ para gerar o ID do
+ * documento, isso reintroduziria a própria duplicação que este helper serve
+ * para detectar (docs antigos ficariam com ID diferente do recém-calculado).
+ * Remove acento via NFD + descarte de marcas diacríticas (Á/Ã/Ç → A/A/C,
+ * cobre inclusive diferenças de forma de composição Unicode ao colar de
+ * Word/Excel), maiúsculas, e colapsa hífen/underscore/espaços repetidos em
+ * um único espaço — assim "UTI Adulto", "UTI-ADULTO" e "uti  adulto " caem
+ * na mesma chave.
+ */
+function _normalizarSetorComparacao_(setor) {
+  return String(setor || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Padroniza a saída das respostas HTTP da API em JSON. */
 function createJsonResponse(obj) {
   return ContentService

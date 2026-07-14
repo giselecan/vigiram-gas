@@ -151,6 +151,47 @@ function parseDataFlexivel(valor) {
 }
 
 // ---------------------------------------------------------
+// LIMITES DE UM FILTRO DE PERÍODO (<input type="date"> "de"/"até")
+// BUG CORRIGIDO: os filtros de período (js_dashboard.html e js_kanban.html)
+// comparavam com `new Date("yyyy-MM-dd")` — string ISO só-data é sempre
+// interpretada como MEIA-NOITE UTC pelo motor JS, não meia-noite local. Em
+// fusos atrás de UTC (ex.: America/Sao_Paulo, UTC-3) isso empurra o limite
+// ~3h para o dia ANTERIOR, e o limite superior também ficava fixo em
+// 00:00:00 (sem cobrir o dia inteiro). Resultado: filtrar a MESMA data no
+// início e fim excluía praticamente todos os casos daquele dia. Esta
+// função usa a mesma construção local de parseDataFlexivel (nunca
+// `new Date(string)`) e estende o limite superior até o fim do dia.
+// @param {string} valor - value de <input type="date"> ("yyyy-MM-dd")
+// @param {boolean} fimDoDia - true → 23:59:59.999, false → 00:00:00
+// ---------------------------------------------------------
+function parseDataFiltroLimite(valor, fimDoDia) {
+  if (!valor) return null;
+  const m = String(valor).trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const ano = parseInt(m[1], 10), mes = parseInt(m[2], 10) - 1, dia = parseInt(m[3], 10);
+  return fimDoDia
+    ? new Date(ano, mes, dia, 23, 59, 59, 999)
+    : new Date(ano, mes, dia, 0, 0, 0, 0);
+}
+
+// ---------------------------------------------------------
+// NORMALIZAÇÃO DE SETOR PARA COMPARAÇÃO (não para exibição/gravação) —
+// espelha _normalizarSetorComparacao_ (Utils.gs). Usada só para AVISAR
+// sobre grafia parecida ao cadastrar um setor novo pelo texto livre
+// (js_admin.html), evitando reintroduzir a duplicação corrigida no
+// backend (ver diagnosticarSetoresDuplicados/mesclarSetoresDuplicados,
+// Config write.gs).
+// ---------------------------------------------------------
+function normalizarSetorComparacao(setor) {
+  return String(setor || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// ---------------------------------------------------------
 // CONVERSÃO PARA INPUTS type="datetime-local"
 // value exigido pelo browser: "yyyy-MM-ddTHH:mm".
 // Aceita os formatos armazenados (com/sem hora, BR/ISO, "T" ou espaço).

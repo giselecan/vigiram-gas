@@ -309,6 +309,10 @@ function abrirInvestigacao(id) {
   const elMedConfirmado = document.getElementById('invMedicamentoConfirmado');
   if (elMedConfirmado) elMedConfirmado.value = caso.medicamento;
   document.getElementById('invDataEvento').innerText  = formatarDataExibicao(caso.data_evento) || '-';
+  // BA: data da triagem (quando o caso entrou em investigação). DE: não
+  // passa por triagem, então mostra a data de notificação.
+  const dataInvestigacaoBruta = caso.tipo === 'DE' ? caso.dataNotificacao : caso.dataTriagem;
+  document.getElementById('invDataInvestigacao').innerText = formatarDataExibicao(dataInvestigacaoBruta) || '-';
   document.getElementById('invSubtitulo').textContent = `ID: ${caso.id} · ${caso.setor}`;
   _aplicarModoSomenteLeitura(caso.status === STATUS.CONCLUIDO);
 
