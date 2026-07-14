@@ -258,11 +258,19 @@
 
       <!-- Coluna Concluídos -->
       <div class="flex-1 flex flex-col min-w-0">
-        <div class="bg-gray-200 border-t-4 border-gray-500 rounded-t shadow-sm p-3 flex items-center justify-between">
-          <h2 class="text-base font-bold text-gray-700 flex items-center gap-2">
-            <i class="fas fa-check-double text-gray-500"></i> Finalizados / Descartados
+        <div class="bg-gray-200 border-t-4 border-gray-500 rounded-t shadow-sm p-3 flex items-center justify-between gap-2">
+          <h2 class="text-base font-bold text-gray-700 flex items-center gap-2 min-w-0">
+            <i class="fas fa-check-double text-gray-500 flex-shrink-0"></i> <span class="truncate">Finalizados / Descartados</span>
           </h2>
-          <span id="contador-concluidos" class="bg-gray-300 text-gray-700 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <select id="filtroFinalizados" onchange="processarFiltros()"
+                    class="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-2 focus:ring-teal-500 outline-none">
+              <option value="TODOS">Todos</option>
+              <option value="CONCLUIDO">Só concluídos</option>
+              <option value="DESCARTADO">Só descartados</option>
+            </select>
+            <span id="contador-concluidos" class="bg-gray-300 text-gray-700 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
+          </div>
         </div>
         <div id="coluna-concluidos" class="bg-gray-100 rounded-b shadow-sm p-3 flex-1 overflow-y-auto kanban-col space-y-2"></div>
         <button id="btnMaisConcluidos" onclick="carregarMais('concluidos')"
@@ -440,6 +448,40 @@
     <!-- =====================================================
          MODAL TRIAGEM
     ===================================================== -->
+    <!-- =====================================================
+         MODAL DESCARTE — só o motivo do descarte, sem formulário
+         de investigação (o caso nunca chegou a ser investigado).
+    ===================================================== -->
+    <div id="modalDescarte" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50 fade-in">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div class="flex items-center justify-between border-b pb-3 mb-4">
+          <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+            <i class="fas fa-ban text-gray-400"></i> Gatilho Descartado
+          </h2>
+          <button type="button" onclick="fecharModalDescarte()" class="text-gray-400 hover:text-gray-600 transition">
+            <i class="fas fa-times text-lg"></i>
+          </button>
+        </div>
+        <div class="bg-gray-50 p-3 rounded-lg text-xs mb-4 border border-gray-200">
+          <p class="text-gray-600">
+            <strong>Prontuário:</strong> <span id="descProntuario" class="text-gray-800 font-bold"></span>
+            &nbsp;·&nbsp;
+            <strong>Setor:</strong> <span id="descSetor" class="text-gray-800"></span>
+            &nbsp;·&nbsp;
+            <strong>Data:</strong> <span id="descData" class="text-gray-800"></span>
+          </p>
+        </div>
+        <label class="block text-xs font-bold text-gray-600 mb-1">Motivo do Descarte</label>
+        <p id="descMotivo" class="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3 whitespace-pre-wrap min-h-[3rem]">-</p>
+        <div class="pt-4 flex justify-end border-t mt-4">
+          <button type="button" onclick="fecharModalDescarte()"
+                  class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-semibold text-sm hover:bg-gray-200 transition">
+            Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div id="modalTriagem" class="fixed inset-0 bg-black bg-opacity-60 hidden flex items-center justify-center z-50">
       <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 fade-in">
         <h2 class="text-xl font-bold text-gray-800 mb-2 border-b pb-3">

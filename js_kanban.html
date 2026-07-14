@@ -49,6 +49,7 @@ function limparFiltros() {
   document.getElementById('filtroSLA').value           = 'TODOS';
   document.getElementById('filtroDe').value            = '';
   document.getElementById('filtroAte').value           = '';
+  document.getElementById('filtroFinalizados').value   = 'TODOS';
   processarFiltros();
 }
 
@@ -70,6 +71,7 @@ function processarFiltros() {
   const slaFiltro = document.getElementById('filtroSLA').value;
   const dataDe    = document.getElementById('filtroDe').value;
   const dataAte   = document.getElementById('filtroAte').value;
+  const finalizadosFiltro = document.getElementById('filtroFinalizados').value;
 
   const casosFiltradosLocal = casosGlobais.filter(c => {
     if (busca) {
@@ -134,9 +136,11 @@ function processarFiltros() {
 
   casosFiltrados.triagem      = ordenarPorSLA(casosFiltradosLocal.filter(c => c.status === STATUS.TRIAGEM));
   casosFiltrados.investigacao = ordenarPorDataEvento(casosFiltradosLocal.filter(c => c.status === STATUS.INVESTIGACAO));
-  casosFiltrados.concluidos   = casosFiltradosLocal.filter(
-    c => c.status === STATUS.CONCLUIDO || c.status === STATUS.DESCARTADO
-  );
+  casosFiltrados.concluidos   = casosFiltradosLocal.filter(c => {
+    if (finalizadosFiltro === 'CONCLUIDO')  return c.status === STATUS.CONCLUIDO;
+    if (finalizadosFiltro === 'DESCARTADO') return c.status === STATUS.DESCARTADO;
+    return c.status === STATUS.CONCLUIDO || c.status === STATUS.DESCARTADO;
+  });
 
   document.getElementById('contadorResultados').textContent =
     `${casosFiltradosLocal.length} caso${casosFiltradosLocal.length !== 1 ? 's' : ''} exibido${casosFiltradosLocal.length !== 1 ? 's' : ''}`;
@@ -339,12 +343,34 @@ function construirCard(caso) {
     ${conclusaoHtml}
     ${vigimedHtml}
     ${farmaHtml}
-    <button data-acao="investigar" data-id="${id}"
+    <button data-acao="${isDesc ? 'descarte' : 'investigar'}" data-id="${id}"
       class="w-full bg-gray-200 hover:bg-gray-300 text-gray-600 text-xs font-bold py-1.5
              rounded-lg mt-3 shadow-sm transition flex items-center justify-center gap-1">
       Ver detalhes <i class="fas fa-eye"></i>
     </button>
   </div>`;
+}
+
+// ---------------------------------------------------------
+// MODAL DESCARTE — gatilho descartado na triagem nunca chega a ser
+// investigado (sem Naranjo, gravidade, etc.), então em vez de abrir o
+// formulário completo de investigação (vazio e sem sentido para esse
+// caso), mostra só o motivo do descarte registrado na triagem.
+// ---------------------------------------------------------
+function abrirDescarte(id) {
+  const caso = casosGlobais.find(c => c.id === id);
+  if (!caso) return;
+
+  document.getElementById('descProntuario').innerText = caso.prontuario;
+  document.getElementById('descSetor').innerText      = caso.setor;
+  document.getElementById('descData').innerText       = formatarDataExibicao(caso.data_evento) || '-';
+  document.getElementById('descMotivo').innerText      = caso.motivoDescarte || 'Motivo não informado.';
+
+  document.getElementById('modalDescarte').classList.remove('hidden');
+}
+
+function fecharModalDescarte() {
+  document.getElementById('modalDescarte').classList.add('hidden');
 }
 
 // ---------------------------------------------------------
@@ -381,8 +407,9 @@ function configurarDelegacaoKanban() {
       if (!btn) return;
       const id   = btn.getAttribute('data-id');
       const acao = btn.getAttribute('data-acao');
-      if (acao === 'triar')     abrirTriagem(id);
+      if (acao === 'triar')      abrirTriagem(id);
       if (acao === 'investigar') abrirInvestigacao(id);
+      if (acao === 'descarte')   abrirDescarte(id);
     });
   });
   delegacaoConfigurada = true;
