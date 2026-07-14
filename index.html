@@ -195,16 +195,25 @@
         <option value="OK">🟢 No Prazo</option>
         <option value="SEM">⚪ Sem SLA</option>
       </select>
+      <select id="filtroMesFechado" onchange="_aplicarMesFechado()"
+              class="flex-shrink-0 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-700 max-w-[170px]
+                     focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
+        <option value="">Mês (personalizado)</option>
+      </select>
       <div class="flex-shrink-0 flex items-center gap-1 text-sm text-gray-500 whitespace-nowrap">
         <label class="text-xs font-semibold text-gray-500">De</label>
-        <input type="date" id="filtroDe" onchange="processarFiltros()"
+        <input type="date" id="filtroDe" onchange="_limparMesFechado(); processarFiltros()"
                class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-[130px]
                       focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
         <label class="text-xs font-semibold text-gray-500">até</label>
-        <input type="date" id="filtroAte" onchange="processarFiltros()"
+        <input type="date" id="filtroAte" onchange="_limparMesFechado(); processarFiltros()"
                class="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-[130px]
                       focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition bg-white">
       </div>
+      <button onclick="processarFiltros()"
+              class="flex-shrink-0 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition flex items-center gap-1.5">
+        <i class="fas fa-check"></i> Aplicar
+      </button>
       <button onclick="limparFiltros()"
               class="flex-shrink-0 text-xs text-teal-600 hover:text-teal-800 font-semibold transition flex items-center gap-1">
         <i class="fas fa-times-circle"></i> Limpar
@@ -267,115 +276,165 @@
     <!-- =====================================================
          VIEW DASHBOARD
     ===================================================== -->
-    <div id="view-dashboard" class="hidden p-6 flex-1 overflow-y-auto bg-gray-100 fade-in">
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500">
-          <p class="text-xs text-gray-500 font-bold uppercase">Total Rastreados</p>
-          <p id="dashCardTotal" class="text-2xl font-black text-gray-800">0</p>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-red-500">
-          <p class="text-xs text-gray-500 font-bold uppercase">RAMs Confirmadas</p>
-          <p id="dashCardRAMs" class="text-2xl font-black text-red-600">0</p>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-gray-400">
-          <p class="text-xs text-gray-500 font-bold uppercase">Falsos Positivos</p>
-          <p id="dashCardDescartes" class="text-2xl font-black text-gray-600">0</p>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-orange-400">
-          <p class="text-xs text-gray-500 font-bold uppercase">Aguardando Avaliação</p>
-          <p id="dashCardPendentes" class="text-2xl font-black text-orange-600">0</p>
-        </div>
-      </div>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-teal-500">
-          <p class="text-xs text-gray-500 font-bold uppercase">Tempo Médio de Análise (Triagem)</p>
-          <p id="dashCardTempoMedio" class="text-2xl font-black text-teal-700">—</p>
-          <p class="text-xs text-gray-400 mt-0.5">Evento → triagem farmacêutica · gatilhos (BA)</p>
-        </div>
-        <div class="bg-white p-4 rounded-lg shadow-sm border-l-4 border-red-600">
-          <p class="text-xs text-gray-500 font-bold uppercase">Triagens Atrasadas (SLA)</p>
-          <p id="dashCardAtrasados" class="text-2xl font-black text-red-700">0</p>
-          <p id="dashCardAtrasadosSub" class="text-xs text-gray-400 mt-0.5">—</p>
-        </div>
-      </div>
-       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-chart-pie text-teal-600 mr-2"></i> Desfecho dos Gatilhos
-          </h3>
-          <div class="relative h-64 w-full flex justify-center"><canvas id="graficoDesfechos"></canvas></div>
-        </div>
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-heartbeat text-red-500 mr-2"></i> Distribuição de Gravidade
-          </h3>
-          <div class="relative h-64 w-full flex justify-center"><canvas id="graficoGravidade"></canvas></div>
-        </div>
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-hospital text-blue-500 mr-2"></i> Setores com Mais Eventos
-          </h3>
-          <div class="relative h-64 w-full"><canvas id="graficoSetores"></canvas></div>
-        </div>
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-pills text-purple-500 mr-2"></i> Top Medicamentos Suspeitos
-          </h3>
-          <div class="relative h-64 w-full"><canvas id="graficoMedicamentos"></canvas></div>
-        </div>
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-bullseye text-red-600 mr-2"></i> Conversão Gatilho → RAM (Busca Ativa)
-          </h3>
-          <div class="relative h-64 w-full flex justify-center"><canvas id="graficoGatilhoRam"></canvas></div>
-        </div>
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-layer-group text-orange-500 mr-2"></i> Notificações de RAM por Setor × Gravidade
-          </h3>
-          <div class="relative h-64 w-full"><canvas id="graficoGravidadeSetor"></canvas></div>
-        </div>
-      </div>
+    <div id="view-dashboard" class="hidden p-6 flex-1 overflow-y-auto bg-gray-50 fade-in space-y-8">
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-ranking-star text-blue-500 mr-2"></i> Ranking de Produção por Setor
-          </h3>
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs">
-              <thead>
-                <tr class="text-left text-gray-400 uppercase text-xs border-b border-gray-200">
-                  <th class="py-1.5 px-2">#</th>
-                  <th class="py-1.5 px-2">Setor</th>
-                  <th class="py-1.5 px-2 text-center">Concluídos</th>
-                  <th class="py-1.5 px-2 text-center">Rastreados</th>
-                  <th class="py-1.5 px-2 text-right">% Conclusão</th>
-                </tr>
-              </thead>
-              <tbody id="rankingSetoresBody"></tbody>
-            </table>
+      <!-- BLOCO 1 — VISÃO GERAL -->
+      <section>
+        <p class="text-gray-500 uppercase tracking-wider text-sm mb-4 font-bold">
+          <i class="fas fa-gauge-high mr-1.5"></i>Bloco 1 · Visão Geral
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-500">
+            <p class="text-xs text-gray-500 font-bold uppercase">Total de Gatilhos Rastreados</p>
+            <p id="dashCardGatilhosTotal" class="text-2xl font-black text-gray-800">0</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-teal-500">
+            <p class="text-xs text-gray-500 font-bold uppercase">Gatilhos Investigados</p>
+            <p id="dashCardGatilhosInvestigados" class="text-2xl font-black text-teal-700">0</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-gray-400">
+            <p class="text-xs text-gray-500 font-bold uppercase">Gatilhos Descartados</p>
+            <p id="dashCardGatilhosDescartados" class="text-2xl font-black text-gray-600">0</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-orange-400">
+            <p class="text-xs text-gray-500 font-bold uppercase">Aguardando Triagem</p>
+            <p id="dashCardAguardandoTriagem" class="text-2xl font-black text-orange-600">0</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-indigo-500">
+            <p class="text-xs text-gray-500 font-bold uppercase">Notif. Espontâneas Investigadas</p>
+            <p id="dashCardNotifInvestigadas" class="text-2xl font-black text-indigo-700">0</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-amber-400">
+            <p class="text-xs text-gray-500 font-bold uppercase">Notif. Pendentes de Investigação</p>
+            <p id="dashCardNotifPendentes" class="text-2xl font-black text-amber-600">0</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-600">
+            <p class="text-xs text-gray-500 font-bold uppercase">Pendência de Importação</p>
+            <p id="dashCardPendenteImportacao" class="text-2xl font-black text-red-700">0</p>
+            <p class="text-[11px] text-gray-400 mt-0.5">Concluídos sem nº/data VigiMed</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-purple-500">
+            <p class="text-xs text-gray-500 font-bold uppercase">Taxa de Notificação Espontânea</p>
+            <p id="dashCardTaxaEspontanea" class="text-2xl font-black text-purple-700">0%</p>
+            <div class="w-full bg-gray-200 rounded-full h-1.5 mt-2 overflow-hidden">
+              <div id="dashBarraEspontanea" class="bg-purple-500 h-1.5 rounded-full" style="width:0%"></div>
+            </div>
+            <p id="dashCardTaxaEspontaneaSub" class="text-[11px] text-gray-400 mt-1">—</p>
           </div>
         </div>
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-          <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
-            <i class="fas fa-user-md text-teal-600 mr-2"></i> Ranking de Investigação por Farmacêutico
-          </h3>
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs">
-              <thead>
-                <tr class="text-left text-gray-400 uppercase text-xs border-b border-gray-200">
-                  <th class="py-1.5 px-2">#</th>
-                  <th class="py-1.5 px-2">Farmacêutico</th>
-                  <th class="py-1.5 px-2 text-center">Casos Concluídos</th>
-                  <th class="py-1.5 px-2 text-right">% do Total</th>
-                </tr>
-              </thead>
-              <tbody id="rankingFarmaceuticosBody"></tbody>
-            </table>
+      </section>
+
+      <!-- BLOCO 2 — ANÁLISE CLÍNICA E TENDÊNCIA -->
+      <section>
+        <p class="text-gray-500 uppercase tracking-wider text-sm mb-4 font-bold">
+          <i class="fas fa-chart-pie mr-1.5"></i>Bloco 2 · Análise Clínica e Tendência
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="bg-white p-5 rounded-xl shadow-sm md:col-span-2">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-magnifying-glass-chart text-blue-500 mr-2"></i> Evolução Temporal de RAMs
+            </h3>
+            <div class="relative h-72 w-full"><canvas id="graficoTemporal"></canvas></div>
+          </div>
+          <div class="bg-white p-5 rounded-xl shadow-sm">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-filter text-teal-600 mr-2"></i> Desfecho dos Gatilhos
+            </h3>
+            <div class="relative h-64 w-full flex justify-center"><canvas id="graficoDesfechos"></canvas></div>
+          </div>
+          <div class="bg-white p-5 rounded-xl shadow-sm">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-heartbeat text-red-500 mr-2"></i> Distribuição de Gravidade
+            </h3>
+            <div class="relative h-64 w-full flex justify-center"><canvas id="graficoGravidade"></canvas></div>
           </div>
         </div>
-      </div>
+      </section>
+
+      <!-- BLOCO 3 — MAPA DE RISCO -->
+      <section>
+        <p class="text-gray-500 uppercase tracking-wider text-sm mb-4 font-bold">
+          <i class="fas fa-shield-halved mr-1.5"></i>Bloco 3 · Mapa de Risco
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="bg-white p-5 rounded-xl shadow-sm md:col-span-2">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-layer-group text-orange-500 mr-2"></i> RAM por Setor × Gravidade (Top 8)
+            </h3>
+            <div class="relative h-64 w-full"><canvas id="graficoGravidadeSetor"></canvas></div>
+          </div>
+          <div class="bg-white p-5 rounded-xl shadow-sm">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-pills text-purple-500 mr-2"></i> Top 5 Medicamentos Suspeitos
+            </h3>
+            <div class="relative h-64 w-full"><canvas id="graficoMedicamentos"></canvas></div>
+          </div>
+          <div class="bg-white p-5 rounded-xl shadow-sm">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-file-export text-emerald-600 mr-2"></i> Funil de Conformidade Regulatória
+            </h3>
+            <div class="relative h-64 w-full"><canvas id="graficoFunil"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- BLOCO 4 — DESEMPENHO OPERACIONAL E RANKINGS -->
+      <section>
+        <p class="text-gray-500 uppercase tracking-wider text-sm mb-4 font-bold">
+          <i class="fas fa-ranking-star mr-1.5"></i>Bloco 4 · Desempenho Operacional e Rankings
+        </p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-teal-500">
+            <p class="text-xs text-gray-500 font-bold uppercase">Tempo Médio de Análise (Triagem)</p>
+            <p id="dashCardTempoMedio" class="text-2xl font-black text-teal-700">—</p>
+            <p class="text-xs text-gray-400 mt-0.5">Evento → triagem farmacêutica · gatilhos (BA)</p>
+          </div>
+          <div class="bg-white p-4 rounded-xl shadow-sm border-l-4 border-red-600">
+            <p class="text-xs text-gray-500 font-bold uppercase">Triagens Atrasadas (SLA)</p>
+            <p id="dashCardAtrasados" class="text-2xl font-black text-red-700">0</p>
+            <p id="dashCardAtrasadosSub" class="text-xs text-gray-400 mt-0.5">—</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="bg-white p-5 rounded-xl shadow-sm">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-ranking-star text-blue-500 mr-2"></i> Ranking de Produção por Setor
+            </h3>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="text-left text-gray-400 uppercase text-xs border-b border-gray-200">
+                    <th class="py-1.5 px-2">#</th>
+                    <th class="py-1.5 px-2">Setor</th>
+                    <th class="py-1.5 px-2 text-center">Total de Gatilhos (BA)</th>
+                    <th class="py-1.5 px-2 text-center">Notif. Espontânea Finalizadas (DE)</th>
+                    <th class="py-1.5 px-2 text-right">% Conclusão</th>
+                  </tr>
+                </thead>
+                <tbody id="rankingSetoresBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="bg-white p-5 rounded-xl shadow-sm">
+            <h3 class="font-bold text-gray-700 border-b pb-2 mb-4">
+              <i class="fas fa-user-md text-teal-600 mr-2"></i> Ranking de Investigação por Farmacêutico
+            </h3>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="text-left text-gray-400 uppercase text-xs border-b border-gray-200">
+                    <th class="py-1.5 px-2">#</th>
+                    <th class="py-1.5 px-2">Farmacêutico</th>
+                    <th class="py-1.5 px-2 text-center">Casos Concluídos</th>
+                    <th class="py-1.5 px-2 text-right">% do Total</th>
+                  </tr>
+                </thead>
+                <tbody id="rankingFarmaceuticosBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <!-- =====================================================
