@@ -587,12 +587,16 @@ function _cfgHtmlCheckboxesSetores(distintos, selecionados) {
   distintos.forEach(s => marcados.add(s)); // garante que setores só do usuário também apareçam
   const todos = Array.from(marcados).sort((a, b) => a.localeCompare(b));
 
+  // Nome do setor por extenso, sem cortar: "truncate" (Tailwind) escondia o
+  // final do nome com "..." em setores com nome mais longo — trocado por
+  // quebra de linha (break-words), com o checkbox alinhado ao topo pra não
+  // ficar descentralizado quando o texto ocupa 2 linhas.
   const itens = todos.map(s => `
-    <label class="cfgUsSetorLinha flex items-center gap-2 text-sm py-1 cursor-pointer rounded px-1 hover:bg-gray-50" data-nome="${escapeHtml(s)}">
-      <input type="checkbox" class="cfgUsSetorChk flex-shrink-0" value="${escapeHtml(s)}"
+    <label class="cfgUsSetorLinha flex items-start gap-2 text-sm py-1 cursor-pointer rounded px-1 hover:bg-gray-50" data-nome="${escapeHtml(s)}">
+      <input type="checkbox" class="cfgUsSetorChk flex-shrink-0 mt-0.5" value="${escapeHtml(s)}"
              onchange="_cfgUsAtualizarContagemSetores()"
              ${(selecionados || []).map(x => String(x).toUpperCase()).includes(s) ? 'checked' : ''}>
-      <span class="truncate">${escapeHtml(s)}</span>
+      <span class="break-words">${escapeHtml(s)}</span>
     </label>`).join('');
 
   return `
@@ -640,9 +644,9 @@ function _cfgUsAdicionarSetorNaLista() {
   }
 
   const label = document.createElement('label');
-  label.className = 'cfgUsSetorLinha flex items-center gap-2 text-sm py-1 cursor-pointer rounded px-1 hover:bg-gray-50';
+  label.className = 'cfgUsSetorLinha flex items-start gap-2 text-sm py-1 cursor-pointer rounded px-1 hover:bg-gray-50';
   label.dataset.nome = nome;
-  label.innerHTML = `<input type="checkbox" class="cfgUsSetorChk flex-shrink-0" value="${escapeHtml(nome)}" onchange="_cfgUsAtualizarContagemSetores()" checked> <span class="truncate">${escapeHtml(nome)}</span>`;
+  label.innerHTML = `<input type="checkbox" class="cfgUsSetorChk flex-shrink-0 mt-0.5" value="${escapeHtml(nome)}" onchange="_cfgUsAtualizarContagemSetores()" checked> <span class="break-words">${escapeHtml(nome)}</span>`;
   lista.appendChild(label);
 
   document.getElementById('cfgUsSetorVazio').classList.add('hidden');
@@ -999,28 +1003,19 @@ function _cfgSalvarSLA(btn) {
 function _renderSecaoSetores(area) {
   google.script.run
     .withSuccessHandler(cfg => {
-      const setores = (cfg.setores || []).sort((a, b) => a.setor.localeCompare(b.setor));
-      const linhas = setores.map((s, i) => `
-        <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm" id="setorLinha_${i}">
-          <td class="px-4 py-2.5">
-            <input type="text" value="${escapeHtml(s.setor)}" data-campo="setor" data-idx="${i}"
-                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
-          </td>
-          <td class="px-4 py-2.5">
-            <input type="text" value="${escapeHtml(s.farmaceutico)}" data-campo="farmaceutico" data-idx="${i}"
-                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
-          </td>
-          <td class="px-4 py-2.5">
-            <input type="email" value="${escapeHtml(s.email)}" data-campo="email" data-idx="${i}"
-                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
-          </td>
-          <td class="px-4 py-2.5 text-center">
-            <button onclick="_cfgRemoverSetor(${i})"
-                    class="text-red-400 hover:text-red-600 transition text-xs">
-              <i class="fas fa-trash"></i>
-            </button>
-          </td>
-        </tr>`).join('');
+      // Agrupado por SETOR (1 linha por setor) — cfg.setores continua sendo
+      // 1 par {setor,email} por documento (usado em outros lugares, como o
+      // envio do relatório diário), só a exibição/edição aqui é agrupada
+      // pra não repetir o mesmo setor numa linha por farmacêutico.
+      const porSetor = {};
+      (cfg.setores || []).forEach(s => {
+        if (!porSetor[s.setor]) porSetor[s.setor] = { setor: s.setor, farmaceuticos: [], emails: [] };
+        porSetor[s.setor].farmaceuticos.push(s.farmaceutico || '');
+        porSetor[s.setor].emails.push(s.email || '');
+      });
+      const setores = Object.values(porSetor).sort((a, b) => a.setor.localeCompare(b.setor));
+
+      const linhas = setores.map((s, i) => _cfgHtmlLinhaSetor(i, s.setor, s.farmaceuticos.join(', '), s.emails.join(', '))).join('');
 
       area.innerHTML = `
         <div class="flex items-center justify-between mb-5">
@@ -1038,14 +1033,15 @@ function _renderSecaoSetores(area) {
             </button>
           </div>
         </div>
+        <p class="text-xs text-gray-400 mb-3">Mais de um farmacêutico no mesmo setor? Separe os nomes por vírgula e os e-mails por vírgula, NA MESMA ORDEM (ex.: "João Silva, Maria Souza" / "joao@x.com, maria@x.com").</p>
         <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
           <div class="overflow-x-auto">
           <table class="w-full text-left" id="tabelaSetores">
             <thead class="bg-gray-50 border-b">
               <tr>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Setor</th>
-                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Farmacêutico Responsável</th>
-                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">E-mail</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Farmacêutico(s) Responsável(is)</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">E-mail(s)</th>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase w-10"></th>
               </tr>
             </thead>
@@ -1062,23 +1058,38 @@ function _renderSecaoSetores(area) {
     .getConfig(tokenSessao);
 }
 
+/** Monta uma linha da tabela de Setores — usada tanto na carga inicial quanto ao adicionar uma linha nova. */
+function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails) {
+  return `
+        <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm" id="setorLinha_${idx}">
+          <td class="px-4 py-2.5">
+            <input type="text" value="${escapeHtml(setor || '')}" data-campo="setor" data-idx="${idx}" placeholder="NOME DO SETOR"
+                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
+          </td>
+          <td class="px-4 py-2.5">
+            <input type="text" value="${escapeHtml(farmaceuticos || '')}" data-campo="farmaceutico" data-idx="${idx}" placeholder="Nome 1, Nome 2…"
+                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
+          </td>
+          <td class="px-4 py-2.5">
+            <input type="text" value="${escapeHtml(emails || '')}" data-campo="email" data-idx="${idx}" placeholder="email1@x.com, email2@x.com…"
+                   class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
+          </td>
+          <td class="px-4 py-2.5 text-center">
+            <button onclick="_cfgRemoverSetor(${idx})"
+                    class="text-red-400 hover:text-red-600 transition text-xs">
+              <i class="fas fa-trash"></i>
+            </button>
+          </td>
+        </tr>`;
+}
+
 function _cfgAdicionarSetor() {
   const tbody = document.getElementById('setoresBody');
   if (!tbody) return;
   const i = tbody.rows.length;
-  const tr = document.createElement('tr');
-  tr.className = 'border-b border-gray-100 hover:bg-gray-50 text-sm';
-  tr.id = 'setorLinha_' + i;
-  tr.innerHTML = `
-    <td class="px-4 py-2.5"><input type="text" data-campo="setor" data-idx="${i}" placeholder="NOME DO SETOR"
-       class="w-full border border-teal-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-teal-50"></td>
-    <td class="px-4 py-2.5"><input type="text" data-campo="farmaceutico" data-idx="${i}" placeholder="Nome do Farmacêutico"
-       class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white"></td>
-    <td class="px-4 py-2.5"><input type="email" data-campo="email" data-idx="${i}" placeholder="email@isgh.org.br"
-       class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white"></td>
-    <td class="px-4 py-2.5 text-center"><button onclick="this.closest('tr').remove()" class="text-red-400 hover:text-red-600 text-xs"><i class="fas fa-trash"></i></button></td>`;
-  tbody.appendChild(tr);
-  tr.querySelector('input').focus();
+  tbody.insertAdjacentHTML('beforeend', _cfgHtmlLinhaSetor(i, '', '', ''));
+  const novaLinha = document.getElementById('setorLinha_' + i);
+  novaLinha.querySelector('input').focus();
 }
 
 function _cfgRemoverSetor(idx) {
@@ -1086,15 +1097,47 @@ function _cfgRemoverSetor(idx) {
   if (linha) linha.remove();
 }
 
+/**
+ * Expande as linhas agrupadas (1 por setor, farmacêutico/e-mail separados
+ * por vírgula) de volta em pares individuais {setor, farmaceutico, email}
+ * — o formato que salvarSetores (Config write.gs) já espera, 1 documento
+ * por par. Pareia por POSIÇÃO: o N-ésimo nome vai com o N-ésimo e-mail, na
+ * ordem em que foram digitados — por isso a dica de "mesma ordem" na tela.
+ */
+function _cfgExpandirLinhasSetores(tbody) {
+  const setores = [];
+  let erro = null;
+
+  tbody.querySelectorAll('tr').forEach(tr => {
+    if (erro) return;
+    const campos = {};
+    tr.querySelectorAll('input[data-campo]').forEach(inp => { campos[inp.dataset.campo] = inp.value.trim(); });
+    if (!campos.setor) return;
+
+    const nomes  = campos.farmaceutico ? campos.farmaceutico.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const emails = campos.email        ? campos.email.split(',').map(s => s.trim()).filter(Boolean)        : [];
+
+    if (nomes.length !== emails.length) {
+      erro = `Setor "${campos.setor}": ${nomes.length} farmacêutico(s) e ${emails.length} e-mail(s) não batem. Separe cada farmacêutico e seu e-mail por vírgula, na mesma ordem.`;
+      return;
+    }
+
+    if (!nomes.length) {
+      setores.push({ setor: campos.setor, farmaceutico: '', email: '' });
+    } else {
+      nomes.forEach((nome, i) => setores.push({ setor: campos.setor, farmaceutico: nome, email: emails[i] }));
+    }
+  });
+
+  return { setores, erro };
+}
+
 function _cfgSalvarSetores(btn) {
   const tbody = document.getElementById('setoresBody');
   if (!tbody) return;
-  const setores = [];
-  tbody.querySelectorAll('tr').forEach(tr => {
-    const campos = {};
-    tr.querySelectorAll('input[data-campo]').forEach(inp => { campos[inp.dataset.campo] = inp.value.trim(); });
-    if (campos.setor) setores.push(campos);
-  });
+
+  const { setores, erro } = _cfgExpandirLinhasSetores(tbody);
+  if (erro) { mostrarToast(erro, 'erro'); return; }
   if (!setores.length) { mostrarToast('Adicione ao menos um setor.', 'erro'); return; }
 
   _iniciarCarregando(btn);
