@@ -364,6 +364,7 @@ function abrirDescarte(id) {
   document.getElementById('descProntuario').innerText = caso.prontuario;
   document.getElementById('descSetor').innerText      = caso.setor;
   document.getElementById('descData').innerText       = formatarDataExibicao(caso.data_evento) || '-';
+  document.getElementById('descGatilho').innerText    = caso.medicamento || 'N/I';
   document.getElementById('descMotivo').innerText      = caso.motivoDescarte || 'Motivo não informado.';
 
   document.getElementById('modalDescarte').classList.remove('hidden');

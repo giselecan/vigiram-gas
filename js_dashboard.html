@@ -8,16 +8,17 @@
  *   - Bloco 1 agora separa Gatilhos (tipo BA) de Notificações Espontâneas
  *     (tipo DE) — antes eram somados num "Total Rastreado" genérico, o que
  *     escondia a diferença entre robô/ETL e notificação da assistência.
- *   - "Pendência de Importação" e o estágio "Importado VigiMed" do funil
- *     exigem numVigimed E dataVigimed preenchidos — número sem data (ou
- *     vice-versa) ainda conta como pendente.
+ *     "Notificações Investigadas"/"Pendentes" somam BA+DE juntos: todo caso
+ *     que saiu da triagem (BA) ou nasceu direto em investigação (DE) conta,
+ *     esteja em andamento ou já concluído.
+ *   - "Pendência de Importação" exige numVigimed E dataVigimed preenchidos —
+ *     número sem data (ou vice-versa) ainda conta como pendente.
  *   - Naranjo e Prevenibilidade foram avaliados e descartados desta versão:
  *     os campos não são expostos por _mapearCasoResumo_ (Cases.gs) hoje;
  *     reintroduzir exige mudança de backend (fora de escopo aqui).
- *   - Funil de Conformidade tem só 3 estágios (Notificação → RAM Confirmada
- *     → Importado VigiMed); "Exportado E2B" ficou de fora por depender de
- *     um carimbo de data que hoje só existe em log de auditoria separado,
- *     não no documento do caso.
+ *   - "Notificações por Origem (BA x DE)" é uma pizza simples com a
+ *     contagem bruta de cada tipo — substitui o antigo funil de 3 estágios
+ *     (Notificação → RAM Confirmada → Importado VigiMed).
  *   - Gráfico "Setores com Mais Eventos" (Total Rastreado × Concluídos) foi
  *     removido — redundante com a nova Evolução Temporal + Ranking por
  *     Setor.
@@ -34,41 +35,6 @@ let _grafGravidade = null;
 let _grafGravidadeSetor = null;
 let _grafMedicamentos = null;
 let _grafFunil = null;
-
-// ---------------------------------------------------------
-// MÊS FECHADO — atalho na barra de filtros global
-// ---------------------------------------------------------
-function _popularFiltroMesFechado() {
-  const sel = document.getElementById('filtroMesFechado');
-  if (!sel) return;
-  const hoje = new Date();
-  const opcoes = ['<option value="">Mês (personalizado)</option>'];
-  for (let i = 1; i <= 6; i++) {
-    const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1);
-    const label = d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-    opcoes.push(`<option value="${d.getFullYear()}-${d.getMonth()}">${label.charAt(0).toUpperCase()}${label.slice(1)}</option>`);
-  }
-  sel.innerHTML = opcoes.join('');
-}
-document.addEventListener('DOMContentLoaded', _popularFiltroMesFechado);
-
-function _limparMesFechado() {
-  const sel = document.getElementById('filtroMesFechado');
-  if (sel) sel.value = '';
-}
-
-function _isoDataLocal(d) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function _aplicarMesFechado() {
-  const sel = document.getElementById('filtroMesFechado');
-  if (!sel || !sel.value) return;
-  const [ano, mes] = sel.value.split('-').map(Number);
-  document.getElementById('filtroDe').value  = _isoDataLocal(new Date(ano, mes, 1));
-  document.getElementById('filtroAte').value = _isoDataLocal(new Date(ano, mes + 1, 0));
-  processarFiltros();
-}
 
 // Lógica de filtro combinada, herdando as regras idênticas ao js_kanban
 function obterDadosFiltradosDash() {
@@ -128,7 +94,9 @@ function desenharGraficos() {
   const calc = {
     // Bloco 1 — fluxo de gatilhos (BA) e notificações espontâneas (DE)
     gatilhosBA: { total: 0, investigados: 0, descartados: 0, aguardando: 0 },
-    notifDE: { investigadas: 0, pendentes: 0 },
+    // Investigadas/Pendentes somam BA + DE, independente da origem — todo
+    // caso que saiu da triagem/notificação classificado como RAM entra aqui.
+    notif: { investigadas: 0, pendentes: 0 },
     pendenteImportacao: 0,
     origem: { BA: 0, DE: 0 },
 
@@ -137,15 +105,14 @@ function desenharGraficos() {
     gravidade: { LEVE: 0, MODERADA: 0, GRAVE: 0, FATAL: 0 },
     diasMapa: new Map(), // "dd/MM" -> { data, totalBA, ram }
 
-    // Bloco 3 — risco por setor, medicamentos suspeitos, funil regulatório
+    // Bloco 3 — risco por setor, medicamentos suspeitos
     gravidadeSetor: {},   // setor -> {LEVE,MODERADA,GRAVE,FATAL}, só RAM confirmada
     meds: {},
-    funil: { notificacoes: 0, ramConfirmada: 0, importadoVigimed: 0 },
 
     // Bloco 4 — SLA de triagem e rankings
     slaAnalise: { somaHoras: 0, qtd: 0, atrasados: 0 },
-    setorBA: {},          // setor -> {total, concluidos}
-    setorDE: {},          // setor -> concluidos
+    setorBA: {},          // setor -> {total, investigados, concluidos}
+    setorDE: {},          // setor -> total (qualquer status)
     farmaceuticos: {}
   };
 
@@ -153,6 +120,10 @@ function desenharGraficos() {
     const isBA = c.tipo === 'BA';
     const isDE = c.tipo === 'DE';
     const ramConfirmada = _ehRamConfirmada(c);
+    // Todo gatilho/notificação que saiu da triagem classificado como RAM
+    // (foi para investigação) ou já foi concluído conta como "investigado"
+    // — usado na Evolução Temporal em vez de exigir conclusão confirmada.
+    const investigado    = c.status === STATUS.INVESTIGACAO || c.status === STATUS.CONCLUIDO;
 
     // --- Bloco 1 ---
     if (isBA) {
@@ -163,8 +134,14 @@ function desenharGraficos() {
       else calc.gatilhosBA.investigados++;
     } else if (isDE) {
       calc.origem.DE++;
-      if (c.status === STATUS.CONCLUIDO) calc.notifDE.investigadas++;
-      else if (c.status === STATUS.INVESTIGACAO) calc.notifDE.pendentes++;
+    }
+    // Notificações Investigadas/Pendentes: soma BA + DE, sem distinguir
+    // origem — tudo que passou da triagem (BA) ou nasceu direto em
+    // investigação (DE) conta como "investigada" no total, esteja em
+    // andamento (pendente) ou já concluída.
+    if (investigado) {
+      calc.notif.investigadas++;
+      if (c.status === STATUS.INVESTIGACAO) calc.notif.pendentes++;
     }
     if (ramConfirmada && !_importadoVigimed(c)) calc.pendenteImportacao++;
 
@@ -188,11 +165,11 @@ function desenharGraficos() {
     if (dEvento) {
       const diaKey = `${String(dEvento.getDate()).padStart(2, '0')}/${String(dEvento.getMonth() + 1).padStart(2, '0')}`;
       if (!calc.diasMapa.has(diaKey)) {
-        calc.diasMapa.set(diaKey, { data: new Date(dEvento.getFullYear(), dEvento.getMonth(), dEvento.getDate()), totalBA: 0, ram: 0 });
+        calc.diasMapa.set(diaKey, { data: new Date(dEvento.getFullYear(), dEvento.getMonth(), dEvento.getDate()), totalBA: 0, investigado: 0 });
       }
       const bucket = calc.diasMapa.get(diaKey);
       if (isBA) bucket.totalBA++;
-      if (ramConfirmada) bucket.ram++;
+      if (investigado) bucket.investigado++;
     }
 
     // --- Bloco 3: gravidade por setor, só RAM confirmada ---
@@ -212,13 +189,6 @@ function desenharGraficos() {
       calc.meds[c.medicamento] = (calc.meds[c.medicamento] || 0) + 1;
     }
 
-    // --- Bloco 3: funil de conformidade (3 estágios) ---
-    calc.funil.notificacoes++;
-    if (ramConfirmada) {
-      calc.funil.ramConfirmada++;
-      if (_importadoVigimed(c)) calc.funil.importadoVigimed++;
-    }
-
     // --- Bloco 4: SLA de triagem, só gatilhos (BA) já triados ---
     if (isBA && c.dataTriagem && c.status !== STATUS.TRIAGEM) {
       const dTriagem = _parseDataTriagemISO(c.dataTriagem);
@@ -232,13 +202,14 @@ function desenharGraficos() {
       }
     }
 
-    // --- Bloco 4: ranking por setor (BA total/concluídos + DE finalizadas) ---
+    // --- Bloco 4: ranking por setor (BA total/investigados/concluídos + DE total) ---
     if (c.setor) {
       if (isBA) {
-        if (!calc.setorBA[c.setor]) calc.setorBA[c.setor] = { total: 0, concluidos: 0 };
+        if (!calc.setorBA[c.setor]) calc.setorBA[c.setor] = { total: 0, investigados: 0, concluidos: 0 };
         calc.setorBA[c.setor].total++;
+        if (investigado) calc.setorBA[c.setor].investigados++;
         if (c.status === STATUS.CONCLUIDO) calc.setorBA[c.setor].concluidos++;
-      } else if (isDE && c.status === STATUS.CONCLUIDO) {
+      } else if (isDE) {
         calc.setorDE[c.setor] = (calc.setorDE[c.setor] || 0) + 1;
       }
     }
@@ -257,8 +228,8 @@ function desenharGraficos() {
   document.getElementById('dashCardGatilhosInvestigados').innerText = calc.gatilhosBA.investigados;
   document.getElementById('dashCardGatilhosDescartados').innerText  = calc.gatilhosBA.descartados;
   document.getElementById('dashCardAguardandoTriagem').innerText    = calc.gatilhosBA.aguardando;
-  document.getElementById('dashCardNotifInvestigadas').innerText    = calc.notifDE.investigadas;
-  document.getElementById('dashCardNotifPendentes').innerText       = calc.notifDE.pendentes;
+  document.getElementById('dashCardNotifInvestigadas').innerText    = calc.notif.investigadas;
+  document.getElementById('dashCardNotifPendentes').innerText       = calc.notif.pendentes;
   document.getElementById('dashCardPendenteImportacao').innerText   = calc.pendenteImportacao;
 
   const totalOrigem   = calc.origem.BA + calc.origem.DE;
@@ -311,8 +282,8 @@ function desenharGraficos() {
     data: {
       labels: diasOrdenados.map(d => `${String(d.data.getDate()).padStart(2, '0')}/${String(d.data.getMonth() + 1).padStart(2, '0')}`),
       datasets: [
-        { label: 'Total Rastreado (BA)', data: diasOrdenados.map(d => d.totalBA), borderColor: corNeutra, backgroundColor: corNeutra, tension: 0.3, fill: false },
-        { label: 'RAM Confirmada',       data: diasOrdenados.map(d => d.ram),     borderColor: corRam,    backgroundColor: corRam,    tension: 0.3, fill: false }
+        { label: 'Total Rastreado (BA)',    data: diasOrdenados.map(d => d.totalBA),    borderColor: corNeutra, backgroundColor: corNeutra, tension: 0.3, fill: false },
+        { label: 'Gatilho Investigado (RAM)', data: diasOrdenados.map(d => d.investigado), borderColor: corRam,   backgroundColor: corRam,    tension: 0.3, fill: false }
       ]
     },
     options: {
@@ -398,17 +369,18 @@ function desenharGraficos() {
     options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } } }
   });
 
-  // Gráfico 6 (Bloco 3) — Funil de Conformidade Regulatória (3 estágios)
+  // Gráfico 6 (Bloco 3) — Notificações por Origem (BA x DE), pizza
   _grafFunil = new Chart(document.getElementById('graficoFunil').getContext('2d'), {
-    type: 'bar',
+    type: 'pie',
     data: {
-      labels: ['Notificações (BA + DE)', 'RAM Confirmada', 'Importado VigiMed'],
+      labels: ['Busca Ativa (BA)', 'Demanda Espontânea (DE)'],
       datasets: [{
-        data: [calc.funil.notificacoes, calc.funil.ramConfirmada, calc.funil.importadoVigimed],
-        backgroundColor: ['#94a3b8', '#f97316', '#059669']
+        data: [calc.origem.BA, calc.origem.DE],
+        backgroundColor: ['#94a3b8', '#8b5cf6'],
+        borderWidth: 0
       }]
     },
-    options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false } } }
+    options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
   });
 
   // Rankings em tabela (Bloco 4)
@@ -418,7 +390,7 @@ function desenharGraficos() {
 
 // ---------------------------------------------------------
 // Ranking de produção por setor (tabela, top 10)
-// Colunas: Total de Gatilhos (BA) | Notif. Espontânea Finalizadas (DE) | % Conclusão (dos BA)
+// Colunas: Nº de Gatilhos (BA) | Nº de Gatilhos Investigados (BA) | Nº de DE (qualquer status) | % Conclusão (dos BA)
 // ---------------------------------------------------------
 function _renderizarRankingSetores(setorBA, setorDE) {
   const corpo = document.getElementById('rankingSetoresBody');
@@ -427,14 +399,14 @@ function _renderizarRankingSetores(setorBA, setorDE) {
   const setores = new Set([...Object.keys(setorBA), ...Object.keys(setorDE)]);
   const linhas = [...setores]
     .map(s => {
-      const ba = setorBA[s] || { total: 0, concluidos: 0 };
-      return { setor: s, totalBA: ba.total, concluidosBA: ba.concluidos, deFinalizadas: setorDE[s] || 0 };
+      const ba = setorBA[s] || { total: 0, investigados: 0, concluidos: 0 };
+      return { setor: s, totalBA: ba.total, investigadosBA: ba.investigados, concluidosBA: ba.concluidos, totalDE: setorDE[s] || 0 };
     })
-    .sort((a, b) => (b.concluidosBA + b.deFinalizadas) - (a.concluidosBA + a.deFinalizadas))
+    .sort((a, b) => (b.totalBA + b.totalDE) - (a.totalBA + a.totalDE))
     .slice(0, 10);
 
   corpo.innerHTML = linhas.length === 0
-    ? '<tr><td colspan="5" class="text-center text-gray-400 py-3">Sem dados no período.</td></tr>'
+    ? '<tr><td colspan="6" class="text-center text-gray-400 py-3">Sem dados no período.</td></tr>'
     : linhas.map((l, i) => {
         const pct = l.totalBA ? Math.round((l.concluidosBA / l.totalBA) * 100) : null;
         const pctTexto = pct === null ? '—' : pct + '%';
@@ -443,7 +415,8 @@ function _renderizarRankingSetores(setorBA, setorDE) {
           <td class="py-1.5 px-2 text-gray-400 font-bold">${i + 1}º</td>
           <td class="py-1.5 px-2 font-semibold text-gray-700">${escapeHtml(l.setor)}</td>
           <td class="py-1.5 px-2 text-center">${l.totalBA}</td>
-          <td class="py-1.5 px-2 text-center">${l.deFinalizadas}</td>
+          <td class="py-1.5 px-2 text-center">${l.investigadosBA}</td>
+          <td class="py-1.5 px-2 text-center">${l.totalDE}</td>
           <td class="py-1.5 px-2 text-right font-bold ${corPct}">${pctTexto}</td>
         </tr>`;
       }).join('');
