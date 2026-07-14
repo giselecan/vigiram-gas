@@ -313,6 +313,8 @@ function abrirInvestigacao(id) {
   // passa por triagem, então mostra a data de notificação.
   const dataInvestigacaoBruta = caso.tipo === 'DE' ? caso.dataNotificacao : caso.dataTriagem;
   document.getElementById('invDataInvestigacao').innerText = formatarDataExibicao(dataInvestigacaoBruta) || '-';
+  // DE não passa por triagem farmacêutica, então não há "triado por".
+  document.getElementById('invTriadoPor').innerText = caso.triadoPor || '—';
   document.getElementById('invSubtitulo').textContent = `ID: ${caso.id} · ${caso.setor}`;
   _aplicarModoSomenteLeitura(caso.status === STATUS.CONCLUIDO);
 

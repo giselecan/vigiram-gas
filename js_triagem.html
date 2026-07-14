@@ -94,7 +94,8 @@ function enviarTriagem(e) {
     idCaso:         _triagemIdAtual,
     houveRam:       radioChecked.value === 'SIM',
     medSuspeito:    document.getElementById('trgMedSuspeito').value,
-    motivoDescarte: motivoOutro || motivoSelecionado
+    motivoDescarte: motivoOutro || motivoSelecionado,
+    triadoPor:      sessionStorage.getItem('vigi_nome') || ''
   };
 
   google.script.run

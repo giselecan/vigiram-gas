@@ -52,7 +52,7 @@ const CACHE_CASOS_TTL_SEG = 45;
 const CAMPOS_RESUMO_CASOS = [
   'id', 'data', 'tipo', 'prontuario', 'iniciais', 'nascimento',
   'setor', 'medicamento', 'status', 'gravidade', 'farmaceutico', 'conclusao',
-  'motivoDescarte', 'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao'
+  'motivoDescarte', 'triadoPor', 'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao'
 ];
 // ============================================================
 // MAPEAMENTO — RESUMO (Kanban/Dashboard) vs COMPLETO (modal de investigação)
@@ -81,6 +81,7 @@ function _mapearCasoResumo_(doc) {
     farmaceutico:    String(doc.farmaceutico || '').trim(),
     conclusao:       String(doc.conclusao || '').trim(),
     motivoDescarte:  String(doc.motivoDescarte || '').trim(),
+    triadoPor:       String(doc.triadoPor || '').trim(),
     numVigimed:      String(doc.numVigimed || '').trim(),
     dataVigimed:     doc.dataVigimed instanceof Date
       ? Utilities.formatDate(doc.dataVigimed, Session.getScriptTimeZone(), 'yyyy-MM-dd')
@@ -136,6 +137,7 @@ function _mapearCasoCompleto_(doc) {
     desfecho:        String(doc.desfecho || '').trim(),
     conclusao:       String(doc.conclusao || '').trim(),
     motivoDescarte:  String(doc.motivoDescarte || '').trim(),
+    triadoPor:       String(doc.triadoPor || '').trim(),
     naranjo:         String(doc.naranjo || '').trim(),
     gravidade:       String(doc.gravidade || '').trim(),
     farmaceutico:    String(doc.farmaceutico || '').trim(),
@@ -409,20 +411,24 @@ function registrarTriagem(dados, token) {
 
         // Regra #7: dataTriagem é carimbo ÚNICO — se o caso já tiver o
         // timestamp (re-triagem/retrabalho), PRESERVA o original em vez de
-        // sobrescrever, senão o SLA medido seria falsificado.
+        // sobrescrever, senão o SLA medido seria falsificado. triadoPor segue
+        // a mesma regra: mantém o farmacêutico que fez a triagem ORIGINAL.
         const dataTriagemFinal = caso.dataTriagem || new Date();
+        const triadoPorFinal   = caso.triadoPor || String(dados.triadoPor || '').trim();
         let atualizacao;
         if (dados.houveRam === false) {
           atualizacao = {
             status: SCHEMA.STATUS.DESCARTADO,
             motivoDescarte: dados.motivoDescarte,
-            dataTriagem: dataTriagemFinal
+            dataTriagem: dataTriagemFinal,
+            triadoPor: triadoPorFinal
           };
         } else {
           atualizacao = {
             medicamento: String(dados.medSuspeito || '').toUpperCase().trim(),
             status: SCHEMA.STATUS.INVESTIGACAO,
-            dataTriagem: dataTriagemFinal
+            dataTriagem: dataTriagemFinal,
+            triadoPor: triadoPorFinal
           };
         }
 
