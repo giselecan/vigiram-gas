@@ -293,6 +293,18 @@ function _calcularIdade(nascimento) {
 }
 
 // ---------------------------------------------------------
+// HELPER — textarea cresce com o conteúdo (histórico clínico, relato do
+// evento e exames costumam vir longos do ETL/notificador e ficavam
+// cortados nas 2 linhas fixas). Chamada na digitação e sempre que o
+// valor é preenchido via JS (carregamento do caso, restauração de rascunho).
+// ---------------------------------------------------------
+function _autoResizeTextarea(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+// ---------------------------------------------------------
 // ABRIR MODAL — ETAPA 1: cabeçalho instantâneo (dados resumo em memória)
 // ---------------------------------------------------------
 function abrirInvestigacao(id) {
@@ -379,6 +391,10 @@ function _limparFormularioInvestigacao() {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
+  ['invHistoriaClinica', 'invRelatoEvento', 'invExames'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.height = '';
+  });
   document.querySelectorAll('.naranjo-select').forEach(s => {
     s.value = '';
     delete s.dataset.respondida;
@@ -412,6 +428,7 @@ function _preencherFormularioInvestigacao(caso) {
   document.getElementById('invHistoriaClinica').value = caso.historiaClinica || '';
   document.getElementById('invRelatoEvento').value    = caso.relatoEvento    || '';
   document.getElementById('invExames').value          = caso.exames          || '';
+  ['invHistoriaClinica', 'invRelatoEvento', 'invExames'].forEach(id => _autoResizeTextarea(document.getElementById(id)));
   document.getElementById('invNumVigimed').value      = caso.numVigimed      || '';
   document.getElementById('invDataVigimed').value     = paraInputDateTimeLocal(caso.dataVigimed);
   document.getElementById('invObservacoes').value     = caso.observacoes     || '';
@@ -775,6 +792,7 @@ function _carregarRascunhoMemoria(id) {
   mesclar('invHistoriaClinica', dados.historiaClinica);
   mesclar('invRelatoEvento',    dados.relatoEvento);
   mesclar('invExames',          dados.exames);
+  ['invHistoriaClinica', 'invRelatoEvento', 'invExames'].forEach(id => _autoResizeTextarea(document.getElementById(id)));
   mesclar('invFarmaceutico',    dados.farmaceutico);
   mesclar('invObservacoes',     dados.observacoes);
   mesclar('invLote',            dados.lote);
