@@ -49,6 +49,7 @@ function limparFiltros() {
   document.getElementById('filtroSLA').value           = 'TODOS';
   document.getElementById('filtroDe').value            = '';
   document.getElementById('filtroAte').value           = '';
+  document.getElementById('filtroFinalizados').value   = 'TODOS';
   processarFiltros();
 }
 
@@ -70,6 +71,7 @@ function processarFiltros() {
   const slaFiltro = document.getElementById('filtroSLA').value;
   const dataDe    = document.getElementById('filtroDe').value;
   const dataAte   = document.getElementById('filtroAte').value;
+  const finalizadosFiltro = document.getElementById('filtroFinalizados').value;
 
   const casosFiltradosLocal = casosGlobais.filter(c => {
     if (busca) {
@@ -134,9 +136,11 @@ function processarFiltros() {
 
   casosFiltrados.triagem      = ordenarPorSLA(casosFiltradosLocal.filter(c => c.status === STATUS.TRIAGEM));
   casosFiltrados.investigacao = ordenarPorDataEvento(casosFiltradosLocal.filter(c => c.status === STATUS.INVESTIGACAO));
-  casosFiltrados.concluidos   = casosFiltradosLocal.filter(
-    c => c.status === STATUS.CONCLUIDO || c.status === STATUS.DESCARTADO
-  );
+  casosFiltrados.concluidos   = casosFiltradosLocal.filter(c => {
+    if (finalizadosFiltro === 'CONCLUIDO')  return c.status === STATUS.CONCLUIDO;
+    if (finalizadosFiltro === 'DESCARTADO') return c.status === STATUS.DESCARTADO;
+    return c.status === STATUS.CONCLUIDO || c.status === STATUS.DESCARTADO;
+  });
 
   document.getElementById('contadorResultados').textContent =
     `${casosFiltradosLocal.length} caso${casosFiltradosLocal.length !== 1 ? 's' : ''} exibido${casosFiltradosLocal.length !== 1 ? 's' : ''}`;

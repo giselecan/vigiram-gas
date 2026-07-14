@@ -258,11 +258,19 @@
 
       <!-- Coluna Concluídos -->
       <div class="flex-1 flex flex-col min-w-0">
-        <div class="bg-gray-200 border-t-4 border-gray-500 rounded-t shadow-sm p-3 flex items-center justify-between">
-          <h2 class="text-base font-bold text-gray-700 flex items-center gap-2">
-            <i class="fas fa-check-double text-gray-500"></i> Finalizados / Descartados
+        <div class="bg-gray-200 border-t-4 border-gray-500 rounded-t shadow-sm p-3 flex items-center justify-between gap-2">
+          <h2 class="text-base font-bold text-gray-700 flex items-center gap-2 min-w-0">
+            <i class="fas fa-check-double text-gray-500 flex-shrink-0"></i> <span class="truncate">Finalizados / Descartados</span>
           </h2>
-          <span id="contador-concluidos" class="bg-gray-300 text-gray-700 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <select id="filtroFinalizados" onchange="processarFiltros()"
+                    class="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-2 focus:ring-teal-500 outline-none">
+              <option value="TODOS">Todos</option>
+              <option value="CONCLUIDO">Só concluídos</option>
+              <option value="DESCARTADO">Só descartados</option>
+            </select>
+            <span id="contador-concluidos" class="bg-gray-300 text-gray-700 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
+          </div>
         </div>
         <div id="coluna-concluidos" class="bg-gray-100 rounded-b shadow-sm p-3 flex-1 overflow-y-auto kanban-col space-y-2"></div>
         <button id="btnMaisConcluidos" onclick="carregarMais('concluidos')"
