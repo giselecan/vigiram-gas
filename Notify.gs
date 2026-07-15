@@ -36,27 +36,42 @@
  */
 
 /**
- * Monta o mapa SETOR(maiúsculo) -> [e-mails], unificando as fontes:
+ * Monta o mapa SETOR(chave normalizada) -> [e-mails], unificando as fontes:
  *  1) config_emails_legado (Firestore — equivalente a DB_Config_Emails)
  *  2) DB_Setores via getConfig() (canônico — tem prioridade sobre o legado)
  *
+ * A chave usa _normalizarSetorComparacao_ (não só toUpperCase().trim()) porque
+ * o nome do setor cadastrado aqui (texto livre digitado no painel Admin) e o
+ * nome do setor que chega nos casos (ETL do robô, ver enviarRelatorioDiarioGatilhos
+ * e notificarNovaDemandaEspontanea_) são fontes independentes que nunca são
+ * validadas uma contra a outra — acento, hífen e espaço duplo divergentes
+ * faziam duas grafias do MESMO setor virarem chaves diferentes, o setor "não
+ * reconhecido" caía no fallback EMAIL_COORDENACAO, e o farmacêutico
+ * responsável de fato não recebia o e-mail.
+ *
  * Um setor pode ter MAIS DE UM farmacêutico responsável (ex.: "TODOS") —
  * por isso o valor é sempre um array, e todos os e-mails cadastrados para
- * aquele setor recebem o alerta (nenhum é descartado por sobrescrita).
+ * aquele setor recebem o alerta (nenhum é descartado por sobrescrita). O
+ * e-mail também é normalizado para minúsculo, para que o mesmo farmacêutico
+ * cadastrado com capitalização diferente em setores distintos não seja
+ * tratado como duas pessoas na hora de agrupar por destinatário.
  */
 function resolverFarmaceuticosPorSetor_() {
   const map = {};
   const adicionar = function (setor, email) {
     if (!setor || !email) return;
-    if (!map[setor]) map[setor] = [];
-    if (map[setor].indexOf(email) === -1) map[setor].push(email);
+    const chave = _normalizarSetorComparacao_(setor);
+    const emailNormalizado = String(email).trim().toLowerCase();
+    if (!chave || !emailNormalizado) return;
+    if (!map[chave]) map[chave] = [];
+    if (map[chave].indexOf(emailNormalizado) === -1) map[chave].push(emailNormalizado);
   };
 
   // 1) Legado (Firestore) — opcional, pode não ter sido migrado/existir
   try {
     const legado = fsListarTodos_(SCHEMA.FS.EMAILS_LEGADO);
     legado.forEach(function (doc) {
-      adicionar(String(doc.setor || doc._id || '').toUpperCase().trim(), String(doc.email || '').trim());
+      adicionar(doc.setor || doc._id, doc.email);
     });
   } catch (e) {
     // Coleção pode não existir ainda — comportamento idêntico ao Sheets
@@ -67,7 +82,7 @@ function resolverFarmaceuticosPorSetor_() {
   // 2) Canônico (DB_Setores via getConfig) — um documento por (setor, e-mail)
   const cfg = getConfig_();
   (cfg.setores || []).forEach(function (s) {
-    if (s.setor && s.email) adicionar(s.setor.toUpperCase().trim(), s.email);
+    if (s.setor && s.email) adicionar(s.setor, s.email);
   });
 
   return map;
@@ -156,13 +171,23 @@ function enviarRelatorioDiarioGatilhos() {
     { campo: 'tipo',   op: 'EQUAL', valor: 'BA' },
     { campo: 'status', op: 'EQUAL', valor: SCHEMA.STATUS.TRIAGEM }
   ]);
+  // casosPorSetor é agrupado pela chave NORMALIZADA (_normalizarSetorComparacao_)
+  // para que grafias divergentes do mesmo setor físico (acento, hífen, espaço
+  // duplo — comuns no ETL do robô PowerShell) caiam juntas em vez de virarem
+  // grupos "não reconhecidos" que caem no fallback EMAIL_COORDENACAO.
+  // rotuloPorSetor guarda a primeira grafia encontrada só para exibição no e-mail.
   const casosPorSetor = {};
+  const rotuloPorSetor = {};
 
   casosPendentes.forEach(function (caso) {
-    const setor = String(caso.setor || '').toUpperCase().trim();
-    if (!setor) return;
-    if (!casosPorSetor[setor]) casosPorSetor[setor] = [];
-    casosPorSetor[setor].push(caso);
+    const setorOriginal = String(caso.setor || '').toUpperCase().trim();
+    if (!setorOriginal) return;
+    const chave = _normalizarSetorComparacao_(setorOriginal);
+    if (!casosPorSetor[chave]) {
+      casosPorSetor[chave] = [];
+      rotuloPorSetor[chave] = setorOriginal;
+    }
+    casosPorSetor[chave].push(caso);
   });
 
   const FARMACEUTICOS_POR_SETOR = resolverFarmaceuticosPorSetor_();
@@ -172,14 +197,14 @@ function enviarRelatorioDiarioGatilhos() {
   // Inverte o agrupamento: e-mail -> { SETOR: [casos] }. Um farmacêutico
   // responsável por N setores acumula todos aqui e recebe 1 e-mail só.
   const setoresPorEmail = {};
-  for (const setor in casosPorSetor) {
-    const destinatarios = FARMACEUTICOS_POR_SETOR[setor] && FARMACEUTICOS_POR_SETOR[setor].length
-      ? FARMACEUTICOS_POR_SETOR[setor]
+  for (const chave in casosPorSetor) {
+    const destinatarios = FARMACEUTICOS_POR_SETOR[chave] && FARMACEUTICOS_POR_SETOR[chave].length
+      ? FARMACEUTICOS_POR_SETOR[chave]
       : [EMAIL_COORDENACAO];
 
     destinatarios.forEach(function (email) {
       if (!setoresPorEmail[email]) setoresPorEmail[email] = {};
-      setoresPorEmail[email][setor] = casosPorSetor[setor];
+      setoresPorEmail[email][rotuloPorSetor[chave]] = casosPorSetor[chave];
     });
   }
 
@@ -267,9 +292,10 @@ function notificarNovaDemandaEspontanea_(caso) {
     if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
 
     const setor = String(caso.setor || '').toUpperCase().trim();
+    const chaveSetor = _normalizarSetorComparacao_(setor);
     const DIRETORIO = resolverFarmaceuticosPorSetor_();
     const EMAIL_COORDENACAO = cfg.geral.EMAIL_COORDENACAO || "farmacia.clinica@hospital.com";
-    const emailsDestino = (DIRETORIO[setor] && DIRETORIO[setor].length) ? DIRETORIO[setor] : [EMAIL_COORDENACAO];
+    const emailsDestino = (DIRETORIO[chaveSetor] && DIRETORIO[chaveSetor].length) ? DIRETORIO[chaveSetor] : [EMAIL_COORDENACAO];
     const LINK_SISTEMA = _resolverLinkSistema_(cfg);
 
     const { assunto, html } = _montarEmailNovaDemandaEspontanea_(caso, LINK_SISTEMA);
