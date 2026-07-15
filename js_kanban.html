@@ -275,13 +275,24 @@ function construirCard(caso) {
   const tipoCss = isDE ? 'badge-tipo-de' : 'badge-tipo-ba';
   const tipoIco = isDE ? 'fa-user-nurse'                 : 'fa-robot';
 
+  // Data do evento (canto superior direito): dispensação do medicamento
+  // gatilho para BA, ou data informada na notificação para DE — mesmo campo
+  // (caso.data_evento) nos dois casos, só a origem do dado muda. title dá o
+  // tooltip nativo do navegador; o texto ao lado do ícone reforça sem exigir
+  // hover, já que o card não tem espaço para o rótulo completo.
+  const tituloDataEvento = isDE
+    ? 'Data do evento: informada na notificação espontânea'
+    : 'Data do evento: dispensação do medicamento gatilho';
+
   const base = `
     <div class="kanban-card bg-white p-3 rounded-lg shadow-sm border border-gray-200 fade-in">
       <div class="flex justify-between items-start mb-2">
         <span class="${tipoCss} text-xs font-bold px-2 py-0.5 rounded-full uppercase flex items-center gap-1">
           <i class="fas ${tipoIco}"></i> ${tipo}
         </span>
-        <span class="text-xs text-gray-400 font-semibold">${data}</span>
+        <span class="text-xs text-gray-400 font-semibold flex items-center gap-1" title="${tituloDataEvento}">
+          <i class="fas fa-calendar-day"></i> ${data}
+        </span>
       </div>
       <h3 class="font-bold text-gray-800 text-sm">Pront: <span class="text-teal-700">${pront}</span></h3>
       ${pacHtml}
@@ -326,6 +337,16 @@ function construirCard(caso) {
   const conclusaoHtml = caso.conclusao
     ? `<p class="text-xs text-gray-400 mt-0.5">${escapeHtml(caso.conclusao)}</p>` : '';
 
+  // Data do descarte: dataTriagem já é o carimbo gravado no momento do
+  // descarte (registrarTriagem em Cases.gs — mesmo campo usado como "data da
+  // triagem" para os casos que seguem para investigação). Só exibida quando
+  // o caso foi de fato descartado, para não confundir com a data do evento.
+  const dataDescarteHtml = (isDesc && caso.dataTriagem)
+    ? `<p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+         <i class="fas fa-calendar-times"></i> Descartado em ${escapeHtml(formatarDataExibicao(caso.dataTriagem))}
+       </p>`
+    : '';
+
   const vigimedHtml = (!isDesc)
     ? (caso.numVigimed
         ? `<span class="badge-vigimed-ok inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full mt-2">
@@ -340,6 +361,7 @@ function construirCard(caso) {
     <p class="text-xs font-bold ${stsCss} mt-1 uppercase flex items-center gap-1">
       <i class="fas ${stsIco}"></i> ${escapeHtml(caso.status)}
     </p>
+    ${dataDescarteHtml}
     ${conclusaoHtml}
     ${vigimedHtml}
     ${farmaHtml}
