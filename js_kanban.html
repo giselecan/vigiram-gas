@@ -347,6 +347,15 @@ function construirCard(caso) {
        </p>`
     : '';
 
+  // Data da conclusão: dataConclusao vem de auditoria.atualizadoEm (Cases.gs)
+  // — enquanto o status for CONCLUÍDO o caso fica travado para edição, então
+  // esse carimbo é o momento exato do encerramento da investigação.
+  const dataConclusaoHtml = (!isDesc && caso.dataConclusao)
+    ? `<p class="text-xs text-gray-400 mt-0.5 flex items-center gap-1">
+         <i class="fas fa-calendar-check"></i> Concluído em ${escapeHtml(formatarDataExibicao(caso.dataConclusao))}
+       </p>`
+    : '';
+
   const vigimedHtml = (!isDesc)
     ? (caso.numVigimed
         ? `<span class="badge-vigimed-ok inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full mt-2">
@@ -362,6 +371,7 @@ function construirCard(caso) {
       <i class="fas ${stsIco}"></i> ${escapeHtml(caso.status)}
     </p>
     ${dataDescarteHtml}
+    ${dataConclusaoHtml}
     ${conclusaoHtml}
     ${vigimedHtml}
     ${farmaHtml}

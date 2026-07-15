@@ -52,7 +52,8 @@ const CACHE_CASOS_TTL_SEG = 45;
 const CAMPOS_RESUMO_CASOS = [
   'id', 'data', 'tipo', 'prontuario', 'iniciais', 'nascimento',
   'setor', 'medicamento', 'status', 'gravidade', 'farmaceutico', 'conclusao',
-  'motivoDescarte', 'triadoPor', 'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao'
+  'motivoDescarte', 'triadoPor', 'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao',
+  'auditoria.atualizadoEm'
 ];
 // ============================================================
 // MAPEAMENTO — RESUMO (Kanban/Dashboard) vs COMPLETO (modal de investigação)
@@ -93,7 +94,16 @@ function _mapearCasoResumo_(doc) {
     // não passa por triagem, então usa a própria data de notificação.
     dataNotificacao: (doc.notificador && doc.notificador.dataNotificacao instanceof Date)
       ? Utilities.formatDate(doc.notificador.dataNotificacao, tz, "yyyy-MM-dd'T'HH:mm:ss")
-      : String((doc.notificador && doc.notificador.dataNotificacao) || '').trim()
+      : String((doc.notificador && doc.notificador.dataNotificacao) || '').trim(),
+    // "Concluído em" no card do Kanban: reaproveita auditoria.atualizadoEm —
+    // enquanto o status for CONCLUIDO, o caso fica travado para edição
+    // (registrarInvestigacao recusa escrita, ver Cases.gs), então esse
+    // carimbo É o momento exato em que a investigação foi encerrada. Só
+    // muda de novo se o caso for reaberto e reconcluído, o que é o
+    // comportamento correto (reflete a conclusão vigente).
+    dataConclusao: (doc.auditoria && doc.auditoria.atualizadoEm instanceof Date)
+      ? Utilities.formatDate(doc.auditoria.atualizadoEm, tz, "yyyy-MM-dd'T'HH:mm:ss")
+      : String((doc.auditoria && doc.auditoria.atualizadoEm) || '').trim()
   };
 }
 
