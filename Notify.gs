@@ -26,13 +26,27 @@
  *     por vários). EMAIL_COORDENACAO só entra como fallback quando um setor
  *     não tem nenhum farmacêutico cadastrado. Instalar com
  *     instalarTriggerRelatorioDiario().
- *  2) notificarNovaDemandaEspontanea_(idCaso) — disparado na hora pela
- *     criação de uma Demanda Espontânea (salvarDemandaEspontanea, Cases.gs),
- *     avisa o farmacêutico do setor que há uma nova DE aguardando investigação.
- *  3) notificarInvestigacaoConcluida_(idCaso) — disparado quando uma
- *     investigação de DE é concluída (registrarInvestigacao, Cases.gs),
- *     avisa o notificador original (quem relatou o caso) para reforçar que
- *     ele pode/deve fazer uma nova notificação caso identifique outro evento.
+ *  2) notificarNovaDemandaEspontanea_(caso) — chamado por
+ *     salvarDemandaEspontanea (Cases.gs) logo após criar a Demanda
+ *     Espontânea; avisa o farmacêutico do setor que há uma nova DE
+ *     aguardando investigação.
+ *  3) notificarInvestigacaoConcluida_(caso) — chamado por
+ *     registrarInvestigacao (Cases.gs) quando uma investigação de DE é
+ *     concluída; avisa o notificador original (quem relatou o caso) para
+ *     reforçar que ele pode/deve fazer uma nova notificação caso identifique
+ *     outro evento.
+ *
+ * PERF — fila de e-mail (2 e 3 acima, NÃO o relatório diário):
+ *   notificarNovaDemandaEspontanea_/notificarInvestigacaoConcluida_ SÓ
+ *   enfileiram (_enfileirarNotificacao_) — nunca chamam MailApp.sendEmail
+ *   na hora. MailApp é uma chamada de rede (Gmail); fazê-la de forma síncrona
+ *   somaria essa latência ao tempo de resposta de "salvar Demanda Espontânea"
+ *   /"concluir investigação" percebido pelo usuário, sem nenhum ganho — o
+ *   e-mail é um alerta assíncrono por natureza, ninguém espera na tela por
+ *   ele. O trigger processarFilaNotificacoes() (instalar com
+ *   instalarTriggerNotificacoes(), ver final do arquivo) roda a cada 1
+ *   minuto, relê o caso do Firestore (estado mais atual) e envia de fato via
+ *   _enviarNovaDemandaEspontanea_/_enviarInvestigacaoConcluida_.
  */
 
 /**
@@ -283,27 +297,38 @@ function _montarEmailRelatorioDiarioAgrupado_(setoresComCasos, linkSistema) {
 
 /**
  * Chamada por salvarDemandaEspontanea() (Cases.gs) logo após o caso ser
- * persistido. Falha ao enviar não deve derrubar o salvamento do caso — por
- * isso tem try/catch próprio e nunca lança.
+ * persistido. SÓ enfileira — não bloqueia o retorno com uma chamada de rede
+ * ao Gmail (ver nota PERF no cabeçalho do arquivo). Falha ao enfileirar não
+ * deve derrubar o salvamento do caso — por isso tem try/catch próprio.
  */
 function notificarNovaDemandaEspontanea_(caso) {
   try {
-    const cfg = getConfig_();
-    if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
-
-    const setor = String(caso.setor || '').toUpperCase().trim();
-    const chaveSetor = _normalizarSetorComparacao_(setor);
-    const DIRETORIO = resolverFarmaceuticosPorSetor_();
-    const EMAIL_COORDENACAO = cfg.geral.EMAIL_COORDENACAO || "farmacia.clinica@hospital.com";
-    const emailsDestino = (DIRETORIO[chaveSetor] && DIRETORIO[chaveSetor].length) ? DIRETORIO[chaveSetor] : [EMAIL_COORDENACAO];
-    const LINK_SISTEMA = _resolverLinkSistema_(cfg);
-
-    const { assunto, html } = _montarEmailNovaDemandaEspontanea_(caso, LINK_SISTEMA);
-
-    MailApp.sendEmail({ to: emailsDestino.join(','), name: 'VigiRAM', subject: assunto, htmlBody: html });
+    const idCaso = caso && (caso.id || caso._id);
+    if (!idCaso) return;
+    _enfileirarNotificacao_('NOVA_DEMANDA', idCaso);
   } catch (e) {
-    console.error('notificarNovaDemandaEspontanea_: falha ao enviar e-mail: ' + e.message);
+    console.error('notificarNovaDemandaEspontanea_: falha ao enfileirar: ' + e.message);
   }
+}
+
+/**
+ * Envio de fato do alerta de nova Demanda Espontânea — chamado só por
+ * processarFilaNotificacoes(), nunca direto do fluxo de salvamento.
+ */
+function _enviarNovaDemandaEspontanea_(caso) {
+  const cfg = getConfig_();
+  if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
+
+  const setor = String(caso.setor || '').toUpperCase().trim();
+  const chaveSetor = _normalizarSetorComparacao_(setor);
+  const DIRETORIO = resolverFarmaceuticosPorSetor_();
+  const EMAIL_COORDENACAO = cfg.geral.EMAIL_COORDENACAO || "farmacia.clinica@hospital.com";
+  const emailsDestino = (DIRETORIO[chaveSetor] && DIRETORIO[chaveSetor].length) ? DIRETORIO[chaveSetor] : [EMAIL_COORDENACAO];
+  const LINK_SISTEMA = _resolverLinkSistema_(cfg);
+
+  const { assunto, html } = _montarEmailNovaDemandaEspontanea_(caso, LINK_SISTEMA);
+
+  MailApp.sendEmail({ to: emailsDestino.join(','), name: 'VigiRAM', subject: assunto, htmlBody: html });
 }
 
 /** Monta assunto + HTML do alerta de nova Demanda Espontânea — usado no envio real e no e-mail de teste. */
@@ -343,29 +368,157 @@ function _montarEmailNovaDemandaEspontanea_(caso, linkSistema) {
 
 /**
  * Chamada por registrarInvestigacao() (Cases.gs) quando o caso é encerrado
- * (status CONCLUIDO). Só se aplica a casos de Demanda Espontânea (tipo 'DE'),
- * que têm notificador.email preenchido — casos de Busca Ativa (gatilho) não
- * têm notificador cadastrado. Falha ao enviar não derruba o encerramento do
- * caso — try/catch próprio, nunca lança.
+ * (status CONCLUIDO). SÓ enfileira (ver nota PERF no cabeçalho do arquivo) —
+ * o filtro por tipo='DE'/notificador.email é reavaliado de novo em
+ * _enviarInvestigacaoConcluida_ na hora do envio, contra o estado relido do
+ * Firestore. Falha ao enfileirar não derruba o encerramento do caso — try/
+ * catch próprio, nunca lança.
  */
 function notificarInvestigacaoConcluida_(caso) {
   try {
     if (caso.tipo !== 'DE') return;
-
-    const notificador = caso.notificador || {};
-    const emailNotificador = String(notificador.email || '').trim();
+    const emailNotificador = String((caso.notificador || {}).email || '').trim();
     if (!emailNotificador) return;
 
-    const cfg = getConfig_();
-    if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
-
-    const LINK_FORM = _resolverLinkSistema_(cfg) + '?page=form';
-    const { assunto, html } = _montarEmailInvestigacaoConcluida_(caso, LINK_FORM);
-
-    MailApp.sendEmail({ to: emailNotificador, name: 'VigiRAM', subject: assunto, htmlBody: html });
+    const idCaso = caso.id || caso._id;
+    if (!idCaso) return;
+    _enfileirarNotificacao_('INVESTIGACAO_CONCLUIDA', idCaso);
   } catch (e) {
-    console.error('notificarInvestigacaoConcluida_: falha ao enviar e-mail: ' + e.message);
+    console.error('notificarInvestigacaoConcluida_: falha ao enfileirar: ' + e.message);
   }
+}
+
+/**
+ * Envio de fato do alerta de investigação concluída — chamado só por
+ * processarFilaNotificacoes(), nunca direto do fluxo de encerramento.
+ */
+function _enviarInvestigacaoConcluida_(caso) {
+  if (caso.tipo !== 'DE') return;
+
+  const notificador = caso.notificador || {};
+  const emailNotificador = String(notificador.email || '').trim();
+  if (!emailNotificador) return;
+
+  const cfg = getConfig_();
+  if (String(cfg.geral.ALERTAS_ATIVOS || "SIM").toUpperCase() !== "SIM") return;
+
+  const LINK_FORM = _resolverLinkSistema_(cfg) + '?page=form';
+  const { assunto, html } = _montarEmailInvestigacaoConcluida_(caso, LINK_FORM);
+
+  MailApp.sendEmail({ to: emailNotificador, name: 'VigiRAM', subject: assunto, htmlBody: html });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FILA DE E-MAIL (PropertiesService) — 2) e 3) acima, NÃO o relatório diário
+// ─────────────────────────────────────────────────────────────────────────────
+const NOTIFY_QUEUE_KEY      = 'NOTIFY_EMAIL_QUEUE';
+const NOTIFY_FILA_MAX_ITENS = 50; // mesmo limite do Mirror.gs — mesma constraint de 9 KB/valor do PropertiesService
+
+/** Enfileira {tipo, idCaso} — o caso é relido do Firestore na hora do envio (estado mais atual). */
+function _enfileirarNotificacao_(tipo, idCaso) {
+  try {
+    comTrava_(function () {
+      const props = PropertiesService.getScriptProperties();
+      const raw   = props.getProperty(NOTIFY_QUEUE_KEY);
+      const fila  = raw ? JSON.parse(raw) : [];
+
+      if (fila.length >= NOTIFY_FILA_MAX_ITENS) {
+        console.error('Notify: fila de e-mail cheia (' + NOTIFY_FILA_MAX_ITENS + ' itens) — item descartado: ' + tipo + ' ' + idCaso);
+        return;
+      }
+
+      fila.push({ tipo: tipo, idCaso: idCaso });
+      props.setProperty(NOTIFY_QUEUE_KEY, JSON.stringify(fila));
+    });
+  } catch (e) {
+    console.error('Notify: falha ao enfileirar notificação (' + tipo + ' ' + idCaso + '): ' + e.message);
+  }
+}
+
+/**
+ * Processa a fila de e-mail — chamado pelo trigger a cada 1 minuto
+ * (instalarTriggerNotificacoes). Snapshot atômico (lê e zera a fila sob
+ * trava, mesmo padrão de processarFilaEspelho em Mirror.gs) — itens novos
+ * enfileirados durante o processamento entram numa fila limpa, não são
+ * sobrescritos. Falha pontual num item (ex.: Gmail fora do ar) só loga —
+ * sem retry automático, igual ao comportamento anterior (síncrono) deste
+ * arquivo para envio de e-mail.
+ */
+function processarFilaNotificacoes() {
+  const props = PropertiesService.getScriptProperties();
+
+  let fila = null;
+  comTrava_(function () {
+    const raw = props.getProperty(NOTIFY_QUEUE_KEY);
+    if (!raw) return;
+    try { fila = JSON.parse(raw); } catch (e) {
+      console.error('Notify: fila corrompida — limpando. Erro: ' + e.message);
+    }
+    props.deleteProperty(NOTIFY_QUEUE_KEY);
+  });
+
+  if (!fila || !fila.length) return;
+
+  fila.forEach(function (item) {
+    try {
+      const caso = fsGetDoc_(SCHEMA.FS.CASOS, item.idCaso);
+      if (!caso) {
+        console.warn('Notify: caso não encontrado para notificar — ' + item.idCaso);
+        return;
+      }
+      if (item.tipo === 'NOVA_DEMANDA') {
+        _enviarNovaDemandaEspontanea_(caso);
+      } else if (item.tipo === 'INVESTIGACAO_CONCLUIDA') {
+        _enviarInvestigacaoConcluida_(caso);
+      } else {
+        console.warn('Notify: tipo de item desconhecido na fila — descartado: ' + JSON.stringify(item));
+      }
+    } catch (e) {
+      console.error('Notify: falha ao processar item da fila (' + item.tipo + ' ' + item.idCaso + '): ' + e.message);
+    }
+  });
+}
+
+/**
+ * Instala o trigger que roda processarFilaNotificacoes() a cada 1 minuto.
+ * Rode manualmente no editor do Apps Script: selecione esta função → Executar.
+ * Idempotente: não cria duplicatas se já existir.
+ */
+function instalarTriggerNotificacoes() {
+  const existentes = ScriptApp.getProjectTriggers();
+  const jaExiste = existentes.some(function (t) {
+    return t.getHandlerFunction() === 'processarFilaNotificacoes';
+  });
+
+  if (jaExiste) {
+    Logger.log('Trigger processarFilaNotificacoes já instalado — nenhuma ação necessária.');
+    return;
+  }
+
+  ScriptApp.newTrigger('processarFilaNotificacoes')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  Logger.log('✅ Trigger instalado: processarFilaNotificacoes a cada 1 minuto.');
+}
+
+/** Remove o trigger (use para manutenção ou desativação da fila de e-mail). */
+function removerTriggerNotificacoes() {
+  ScriptApp.getProjectTriggers()
+    .filter(function (t) { return t.getHandlerFunction() === 'processarFilaNotificacoes'; })
+    .forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  Logger.log('Trigger processarFilaNotificacoes removido.');
+}
+
+/** Confirma se o trigger da fila de e-mail está instalado. */
+function verificarTriggerNotificacoes() {
+  const instalado = ScriptApp.getProjectTriggers()
+    .some(function (t) { return t.getHandlerFunction() === 'processarFilaNotificacoes'; });
+  Logger.log(instalado
+    ? '✅ Trigger processarFilaNotificacoes está instalado.'
+    : '⚠️ Trigger processarFilaNotificacoes NÃO está instalado — rode instalarTriggerNotificacoes().');
+  return instalado;
 }
 
 /** Monta assunto + HTML do alerta de investigação concluída — usado no envio real e no e-mail de teste. */

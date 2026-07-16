@@ -443,12 +443,15 @@ function fsCarimbarAuditoria_(ctx, idCaso, origem) {
   // gravá-lo). Agora envia o mapa aninhado real com máscara 'auditoria'
   // (o mapa de auditoria contém exatamente estes dois campos, então a
   // substituição do mapa inteiro é segura e determinística).
-  fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idCaso, {
-    auditoria: {
-      atualizadoPor: quem,
-      atualizadoEm: new Date()
-    }
-  });
+  const carimbo = {
+    atualizadoPor: quem,
+    atualizadoEm: new Date()
+  };
+  fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idCaso, { auditoria: carimbo });
+  // Retorna o carimbo para o caller poder montar o estado pós-transação em
+  // memória (Object.assign) sem precisar reler o documento do Firestore —
+  // ver registrarInvestigacao (Cases.gs).
+  return carimbo;
 }
 
 function fsRegistrarLog_(acao, idCaso, detalhe, usuarioOverride) {
