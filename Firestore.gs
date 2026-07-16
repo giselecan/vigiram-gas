@@ -221,6 +221,28 @@ function fsBatchSet_(colecao, itens) {
   }
 }
 
+/**
+ * Exclui vários documentos da MESMA coleção em lote — mesmo padrão de
+ * fsBatchSet_ (um único :commit por bloco de 400), em vez de um
+ * fsDeleteDoc_ (1 round-trip HTTP síncrono) por item num loop.
+ * @param {string} colecao
+ * @param {Array<string>} ids
+ */
+function fsBatchDelete_(colecao, ids) {
+  if (!ids || !ids.length) return;
+  const cfg = fsConfig_();
+  const prefixo = 'projects/' + cfg.projectId + '/databases/' + cfg.databaseId + '/documents/' + colecao + '/';
+  const url = fsUrlBase_() + ':commit';
+  const CHUNK = 400;
+
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const writes = ids.slice(i, i + CHUNK).map(function (id) {
+      return { delete: prefixo + id };
+    });
+    fsFetch_('post', url, { writes: writes });
+  }
+}
+
 function fsUpdateDoc_(colecao, id, camposParciais) {
   const nomesCampos = Object.keys(camposParciais);
   const mascara = nomesCampos.map(function (c) { return 'updateMask.fieldPaths=' + encodeURIComponent(c); }).join('&');
@@ -386,6 +408,14 @@ function fsRunTransaction_(operacao) {
         Utilities.sleep(150 * tentativa);
         continue;
       }
+      if (ehConflito) {
+        // Esgotou as tentativas por conflito REAL de concorrência (duas
+        // transações colidindo no mesmo documento), não por falha de rede —
+        // troca a mensagem técnica ("Firestore.gs: ... HTTP 409") por uma
+        // que o usuário final entenda e saiba o que fazer, em vez de deixar
+        // um toast crua de infraestrutura chegar até a tela de investigação.
+        throw new Error('Muitas pessoas estão editando dados ao mesmo tempo agora. Tente salvar novamente em alguns segundos.');
+      }
       throw erro;
     }
   }
@@ -443,12 +473,15 @@ function fsCarimbarAuditoria_(ctx, idCaso, origem) {
   // gravá-lo). Agora envia o mapa aninhado real com máscara 'auditoria'
   // (o mapa de auditoria contém exatamente estes dois campos, então a
   // substituição do mapa inteiro é segura e determinística).
-  fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idCaso, {
-    auditoria: {
-      atualizadoPor: quem,
-      atualizadoEm: new Date()
-    }
-  });
+  const carimbo = {
+    atualizadoPor: quem,
+    atualizadoEm: new Date()
+  };
+  fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, idCaso, { auditoria: carimbo });
+  // Retorna o carimbo para o caller poder montar o estado pós-transação em
+  // memória (Object.assign) sem precisar reler o documento do Firestore —
+  // ver registrarInvestigacao (Cases.gs).
+  return carimbo;
 }
 
 function fsRegistrarLog_(acao, idCaso, detalhe, usuarioOverride) {

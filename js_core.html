@@ -302,6 +302,45 @@ function alternarTema() {
   try { localStorage.setItem('vigi_tema', novo); } catch (e) { /* sandbox: só nesta sessão */ }
 }
 
+/**
+ * Envolve um par de callbacks do google.script.run com um watchdog de `ms`
+ * milissegundos: se nem sucesso nem falha disparar a tempo, chama
+ * `aoExpirar()` uma vez e passa a ignorar qualquer resposta tardia que
+ * chegue depois (o timeout já "respondeu" no lugar do servidor). Existe
+ * porque o canal do google.script.run roda dentro do iframe sandbox do Apps
+ * Script e depende de cookies de terceiros — em janela anônima/privada (onde
+ * cookies de terceiros costumam vir bloqueados) ou numa trava real no
+ * servidor, ele pode nunca responder, deixando a UI (spinner/botão
+ * desabilitado) travada para sempre sem explicação nenhuma ao usuário.
+ *
+ * Uso:
+ *   const wd = criarWatchdogRPC_(20000, casoOk => {...}, err => {...}, () => {...});
+ *   google.script.run.withSuccessHandler(wd.sucesso).withFailureHandler(wd.falha).minhaFuncao(...);
+ */
+function criarWatchdogRPC_(ms, onSucesso, onFalha, aoExpirar) {
+  let respondeu = false;
+  const timeoutId = setTimeout(function () {
+    if (respondeu) return;
+    respondeu = true;
+    aoExpirar();
+  }, ms);
+
+  return {
+    sucesso: function () {
+      if (respondeu) return;
+      respondeu = true;
+      clearTimeout(timeoutId);
+      onSucesso.apply(null, arguments);
+    },
+    falha: function () {
+      if (respondeu) return;
+      respondeu = true;
+      clearTimeout(timeoutId);
+      onFalha.apply(null, arguments);
+    }
+  };
+}
+
 function inicializar() {
   tokenSessao = sessionStorage.getItem('vigi_token');
 
@@ -310,49 +349,35 @@ function inicializar() {
     return;
   }
 
-  // WATCHDOG: mesmo risco de realizarLogin() — em janela anônima/privada com
-  // cookies de terceiros bloqueados, o iframe sandbox do Apps Script pode
-  // nunca responder, deixando nenhum dos dois handlers disparar. Sem isto o
-  // usuário ficava indefinidamente sem retorno visível ao reabrir a aba com
-  // um token salvo; agora cai no login com uma mensagem explicativa.
-  let respondeuSessao = false;
-  const timeoutSessaoId = setTimeout(() => {
-    if (respondeuSessao) return;
-    respondeuSessao = true;
-    mostrarToast(
-      'Não foi possível validar a sessão. Se você estiver em uma janela anônima/privada, tente uma janela normal — este sistema depende de cookies de terceiros, que costumam vir bloqueados no modo anônimo.',
-      'erro'
-    );
-    _mostrarLogin();
-  }, 15000);
-
-  google.script.run
-    .withSuccessHandler(function(valido) {
-      if (respondeuSessao) return;
-      respondeuSessao = true;
-      clearTimeout(timeoutSessaoId);
-      if (valido) {
-        const nomeGuardado = sessionStorage.getItem('vigi_nome');
-        if (nomeGuardado) _exibirNomeUsuario(nomeGuardado);
-        iniciarAppSeguro();
-      } else {
-        sessionStorage.removeItem('vigi_token');
-        sessionStorage.removeItem('vigi_nome');
-        sessionStorage.removeItem('vigi_perfil');
-        tokenSessao = null;
-        _mostrarLogin();
-      }
-    })
-    .withFailureHandler(function() {
-      if (respondeuSessao) return;
-      respondeuSessao = true;
-      clearTimeout(timeoutSessaoId);
+  const wd = criarWatchdogRPC_(15000, function (valido) {
+    if (valido) {
+      const nomeGuardado = sessionStorage.getItem('vigi_nome');
+      if (nomeGuardado) _exibirNomeUsuario(nomeGuardado);
+      iniciarAppSeguro();
+    } else {
       sessionStorage.removeItem('vigi_token');
       sessionStorage.removeItem('vigi_nome');
       sessionStorage.removeItem('vigi_perfil');
       tokenSessao = null;
       _mostrarLogin();
-    })
+    }
+  }, function () {
+    sessionStorage.removeItem('vigi_token');
+    sessionStorage.removeItem('vigi_nome');
+    sessionStorage.removeItem('vigi_perfil');
+    tokenSessao = null;
+    _mostrarLogin();
+  }, function () {
+    mostrarToast(
+      'Não foi possível validar a sessão. Se você estiver em uma janela anônima/privada, tente uma janela normal — este sistema depende de cookies de terceiros, que costumam vir bloqueados no modo anônimo.',
+      'erro'
+    );
+    _mostrarLogin();
+  });
+
+  google.script.run
+    .withSuccessHandler(wd.sucesso)
+    .withFailureHandler(wd.falha)
     .validarSessao(tokenSessao); // FIX: funções com sufixo "_" não são
                                  // invocáveis via google.script.run — a chamada
                                  // antiga caía sempre no failure handler e
@@ -371,6 +396,53 @@ function iniciarAppSeguro() {
   _configurarAbaAdmin();
   construirNaranjo();
   carregarConfig();
+  _iniciarSincronizacaoPeriodica_();
+}
+
+// ---------------------------------------------------------
+// SINCRONIZAÇÃO PERIÓDICA EM SEGUNDO PLANO
+//
+// Sem isto, um caso editado por outro farmacêutico só aparecia/atualizava
+// na tela quando o usuário atual clicava em "Sincronizar" manualmente ou
+// dava F5 — podia ficar com dado desatualizado por horas. Roda em segundo
+// plano a cada SINCRONIZACAO_SILENCIOSA_MS: sem skeleton, sem mexer no
+// botão "Sincronizar", sem toast em caso de falha pontual (o usuário
+// continua vendo a última base carregada com sucesso) e SEM resetar a
+// paginação/"carregar mais" que o usuário já tinha aberto em cada coluna
+// do Kanban — processarFiltros() reseta paginaAtual para 1 internamente,
+// então aqui a paginação é salva antes e restaurada depois.
+// ---------------------------------------------------------
+const SINCRONIZACAO_SILENCIOSA_MS = 90000; // 90s
+
+let _syncPeriodicoIniciado = false;
+function _iniciarSincronizacaoPeriodica_() {
+  // Guarda contra múltiplos setInterval: iniciarAppSeguro() roda de novo a
+  // cada login (ex.: logout seguido de login na mesma aba, sem reload real
+  // — ver fazerLogout), então sem esta trava cada ciclo adicionaria mais um
+  // intervalo rodando em paralelo.
+  if (_syncPeriodicoIniciado) return;
+  _syncPeriodicoIniciado = true;
+  setInterval(_sincronizarSilenciosamente_, SINCRONIZACAO_SILENCIOSA_MS);
+}
+
+function _sincronizarSilenciosamente_() {
+  if (!tokenSessao) return; // sessão encerrada (tela de login) — nada a sincronizar
+
+  const paginaSalva = Object.assign({}, paginaAtual);
+
+  google.script.run
+    .withSuccessHandler(casos => {
+      casosGlobais = casos;
+      processarFiltros(); // reaplica filtro/ordenação/gráficos sobre a base nova
+      Object.assign(paginaAtual, paginaSalva); // restaura o "carregar mais" que o usuário já tinha
+      renderizarColuna('triagem');
+      renderizarColuna('investigacao');
+      renderizarColuna('concluidos');
+    })
+    .withFailureHandler(e => {
+      console.warn('[sincronizacaoSilenciosa] falha (segue com a última base carregada):', e && e.message);
+    })
+    .getTodosOsCasos(tokenSessao);
 }
 
 function _configurarAbaAdmin() {
@@ -390,61 +462,44 @@ function realizarLogin(event) {
   btn.disabled   = true;
   btn.classList.add('btn-carregando');
 
-  // WATCHDOG: em janela anônima/privada (ou com cookies de terceiros
-  // bloqueados), o iframe sandbox do Apps Script pode nunca conseguir
-  // estabelecer o canal do google.script.run — nesse caso NENHUM dos dois
-  // handlers (success/failure) é chamado, e o botão "Entrando…" fica travado
-  // para sempre, sem qualquer mensagem de erro. O timeout abaixo garante que
-  // o usuário sempre recebe um retorno, mesmo quando a ponte RPC nunca responde.
-  let respondeu = false;
-  const timeoutId = setTimeout(() => {
-    if (respondeu) return;
-    respondeu = true;
+  const restaurarBotao = () => {
+    btn.innerHTML = originalHtml;
+    btn.disabled  = false;
+    btn.classList.remove('btn-carregando');
+  };
+
+  const wd = criarWatchdogRPC_(15000, res => {
+    if (res.sucesso) {
+      sessionStorage.setItem('vigi_token', res.token);
+      sessionStorage.setItem('vigi_nome', res.nome);
+      sessionStorage.setItem('vigi_perfil', res.perfil || 'FARMACEUTICO');
+      tokenSessao = res.token;
+      // Restaura o botão ANTES de trocar de tela — sem isto ele fica como
+      // spinner desabilitado e, ao voltar ao login (logout sem reload), não
+      // daria para logar de novo.
+      restaurarBotao();
+      document.getElementById('loginSenha').value = '';
+      _exibirNomeUsuario(res.nome || '');
+      mostrarToast('Bem-vindo(a), ' + res.nome, 'sucesso');
+      iniciarAppSeguro();
+    } else {
+      mostrarToast(res.erro, 'erro');
+      restaurarBotao();
+    }
+  }, () => {
+    mostrarToast('Falha na comunicação com o servidor.', 'erro');
+    restaurarBotao();
+  }, () => {
     mostrarToast(
       'Não foi possível conectar ao servidor. Se você estiver em uma janela anônima/privada, tente uma janela normal — este sistema depende de cookies de terceiros, que costumam vir bloqueados no modo anônimo.',
       'erro'
     );
-    btn.innerHTML = originalHtml;
-    btn.disabled  = false;
-    btn.classList.remove('btn-carregando');
-  }, 15000);
+    restaurarBotao();
+  });
 
   google.script.run
-    .withSuccessHandler(res => {
-      if (respondeu) return;
-      respondeu = true;
-      clearTimeout(timeoutId);
-      if (res.sucesso) {
-        sessionStorage.setItem('vigi_token', res.token);
-        sessionStorage.setItem('vigi_nome', res.nome);
-        sessionStorage.setItem('vigi_perfil', res.perfil || 'FARMACEUTICO');
-        tokenSessao = res.token;
-        // Restaura o botão ANTES de trocar de tela — sem isto ele fica como
-        // spinner desabilitado e, ao voltar ao login (logout sem reload), não
-        // daria para logar de novo.
-        btn.innerHTML = originalHtml;
-        btn.disabled  = false;
-        btn.classList.remove('btn-carregando');
-        document.getElementById('loginSenha').value = '';
-        _exibirNomeUsuario(res.nome || '');
-        mostrarToast('Bem-vindo(a), ' + res.nome, 'sucesso');
-        iniciarAppSeguro();
-      } else {
-        mostrarToast(res.erro, 'erro');
-        btn.innerHTML = originalHtml;
-        btn.disabled  = false;
-        btn.classList.remove('btn-carregando');
-      }
-    })
-    .withFailureHandler(() => {
-      if (respondeu) return;
-      respondeu = true;
-      clearTimeout(timeoutId);
-      mostrarToast('Falha na comunicação com o servidor.', 'erro');
-      btn.innerHTML = originalHtml;
-      btn.disabled  = false;
-      btn.classList.remove('btn-carregando');
-    })
+    .withSuccessHandler(wd.sucesso)
+    .withFailureHandler(wd.falha)
     .autenticarUsuario(email, senha);
 }
 
@@ -696,33 +751,41 @@ function carregarCasos() {
 
   mostrarSkeletons();
 
+  const wd = criarWatchdogRPC_(20000, processarDados, e => {
+    limparSkeletons();
+    const msg = (e && e.message) ? e.message : String(e);
+    console.error('[carregarCasos] Falha:', msg);
+
+    const ehSessaoExpirada =
+      msg.includes('Sessão expirada') ||
+      msg.includes('não autorizada')  ||
+      msg.includes('consolidar base Kanban');
+
+    if (ehSessaoExpirada) {
+      sessionStorage.removeItem('vigi_token');
+      sessionStorage.removeItem('vigi_nome');
+      sessionStorage.removeItem('vigi_perfil');
+      tokenSessao = null;
+      mostrarToast('Sessão expirada. Faça login novamente.', 'erro');
+      // reload é inócuo no iframe sandbox do GAS — volta ao login direto.
+      _mostrarLogin();
+    } else {
+      // Mensagem amigável — o detalhe técnico já foi logado acima
+      // (console.error) para diagnóstico, sem expor stack/URL cru ao usuário.
+      mostrarToast('Não foi possível carregar os casos. Tente novamente em instantes.', 'erro');
+      if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.classList.remove('btn-carregando'); }
+    }
+  }, () => {
+    // Canal RPC nunca respondeu (ver criarWatchdogRPC_) — sem isto, o
+    // usuário ficava com os skeletons girando pra sempre.
+    limparSkeletons();
+    mostrarToast('O carregamento demorou demais e foi cancelado. Se você estiver em uma janela anônima/privada, tente uma janela normal. Clique em Sincronizar para tentar de novo.', 'erro');
+    if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.classList.remove('btn-carregando'); }
+  });
+
   google.script.run
-    .withSuccessHandler(processarDados)
-    .withFailureHandler(e => {
-      limparSkeletons();
-      const msg = (e && e.message) ? e.message : String(e);
-      console.error('[carregarCasos] Falha:', msg);
-
-      const ehSessaoExpirada =
-        msg.includes('Sessão expirada') ||
-        msg.includes('não autorizada')  ||
-        msg.includes('consolidar base Kanban');
-
-      if (ehSessaoExpirada) {
-        sessionStorage.removeItem('vigi_token');
-        sessionStorage.removeItem('vigi_nome');
-        sessionStorage.removeItem('vigi_perfil');
-        tokenSessao = null;
-        mostrarToast('Sessão expirada. Faça login novamente.', 'erro');
-        // reload é inócuo no iframe sandbox do GAS — volta ao login direto.
-        _mostrarLogin();
-      } else {
-        // Mensagem amigável — o detalhe técnico já foi logado acima
-        // (console.error) para diagnóstico, sem expor stack/URL cru ao usuário.
-        mostrarToast('Não foi possível carregar os casos. Tente novamente em instantes.', 'erro');
-        if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.classList.remove('btn-carregando'); }
-      }
-    })
+    .withSuccessHandler(wd.sucesso)
+    .withFailureHandler(wd.falha)
     .getTodosOsCasos(tokenSessao);
 }
 

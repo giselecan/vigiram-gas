@@ -17,33 +17,38 @@
  * depender de acesso ao console do Firebase, e sem que nenhuma função do
  * sistema volte a LER esse livro-razão para decidir comportamento.
  *
- * ARQUITETURA:
+ * ARQUITETURA (revisão PERF — fila SEMPRE, nunca gravação síncrona):
  *   1. Pontos de escrita que representam um EVENTO DE AUDITORIA (caso novo
  *      entrando no sistema, ou investigação FINALIZADA) chamam
  *      espelharCasoNoSheets_() logo após a escrita no Firestore.
  *   2. fsRegistrarLog_ chama espelharLogNoSheets_() após gravar no Firestore
  *      — todo evento (erro, login, disparo do robô PowerShell, ação admin)
  *      vira uma linha em DB_Log/"Logs_Auditoria".
- *   3. Se a gravação no Sheets falhar, o payload é serializado em
+ *   3. Nenhuma das duas grava no Sheets na hora — SEMPRE serializam o item em
  *      PropertiesService (fila MIRROR_RETRY_QUEUE) — máx. 50 itens / 9 KB —
- *      para NUNCA bloquear/atrasar o retorno do payload principal ao
- *      frontend/PowerShell: a chamada é a ÚLTIMA coisa que a função de
- *      negócio faz, envolvida em try/catch, depois de o resultado já estar
- *      pronto para ser devolvido.
- *   4. O trigger processarFilaEspelho() roda a cada 5 minutos e reprocessa
- *      os itens com falha em ordem FIFO, com até 3 tentativas por item.
- *      Após 3 falhas o item é descartado, registrado em console.error e
- *      um alerta é enviado por e-mail à coordenação (ver RETIFICAÇÃO abaixo).
+ *      e retornam imediatamente. Isso tira o appendRow (I/O do Sheets) E o
+ *      comTrava_() (LockService.getScriptLock(), que é do SCRIPT INTEIRO, não
+ *      por documento) do caminho de resposta de toda escrita do sistema —
+ *      antes, com 22 usuários + robô concorrentes, cada login/triagem/
+ *      investigação ficava presa atrás dessa mesma trava global.
+ *   4. O trigger processarFilaEspelho() roda a cada 5 minutos, é o ÚNICO
+ *      lugar que efetivamente grava no Sheets (sob comTrava_, ok travar ali:
+ *      não há usuário esperando essa execução), reprocessa em ordem FIFO com
+ *      até 3 tentativas por item. Itens de caso são relidos do Firestore na
+ *      hora de gravar (o item só guarda o ID) — garante que o backup reflita
+ *      o estado mais atual, não uma foto de minutos atrás. Após 3 falhas o
+ *      item é descartado, registrado em console.error e um alerta é enviado
+ *      por e-mail à coordenação (ver RETIFICAÇÃO abaixo).
  *
  * INTEGRAÇÃO — pontos de chamada em Cases.gs / Firestore.gs / Ingest.gs:
  *
  *   salvarDemandaEspontanea() / handleInsertDB():
  *     após fsSetDoc_(SCHEMA.FS.CASOS, idCaso, objetoCaso) — caso NOVO entrando
- *     → espelharCasoNoSheets_(idCaso, objetoCaso, 'CRIACAO')
+ *     → espelharCasoNoSheets_(idCaso, 'CRIACAO')
  *
  *   registrarInvestigacao() — SOMENTE quando dados.encerrar finaliza o caso:
  *     após fsRunTransaction_() bem-sucedido
- *     → espelharCasoNoSheets_(dados.idCaso, docAtualizado, 'FECHAMENTO')
+ *     → espelharCasoNoSheets_(dados.idCaso, 'FECHAMENTO')
  *     (rascunhos de triagem/investigação NÃO tocam mais o Sheets — só o
  *     Firestore, que é a fonte única durante o trabalho em andamento)
  *
@@ -55,8 +60,9 @@
  *   Rode instalarTriggerEspelho() UMA VEZ no editor do Apps Script.
  *   Para remover: removerTriggerEspelho().
  *   VERIFICAÇÃO: rode verificarTriggerEspelho() a qualquer momento para
- *   confirmar se o trigger está instalado (causa raiz nº1 de "fila nunca
- *   reprocessa" é esse trigger nunca ter sido criado).
+ *   confirmar se o trigger está instalado — agora é o ÚNICO caminho que
+ *   grava no Sheets, então sem ele o Sheets simplesmente para de receber
+ *   linhas novas (a fila só cresce, silenciosamente, até o limite de itens).
  *
  * CONSTRAINT PropertiesService:
  *   Cada valor: máx 9 KB. A fila serializa um array JSON.
@@ -66,11 +72,8 @@
  * RETIFICAÇÃO [Regra de Ouro #2 — Concorrência]:
  *   _gravarCasoNoSheets/_gravarLogNoSheets gravavam DIRETO no Sheets sem
  *   passar por comTrava_(). Com 22 usuários + robô PowerShell escrevendo
- *   simultâneo, dois appendRow concorrentes podiam duplicar/perder linha —
- *   falha silenciosa que ia parar na fila de retry e, sem trigger instalado,
- *   nunca era reprocessada. Agora espelharCasoNoSheets_/espelharLogNoSheets_
- *   e o reprocessamento da fila encapsulam a gravação em comTrava_(), igual
- *   ao resto do sistema.
+ *   simultâneo, dois appendRow concorrentes podiam duplicar/perder linha.
+ *   Agora só processarFilaEspelho grava de fato, sempre sob comTrava_().
  *
  * RETIFICAÇÃO [Visibilidade]:
  *   Falha de mirror antes só ia para console.error (ninguém lê). Ao
@@ -90,34 +93,29 @@ const MIRROR_FILA_MAX_ITENS = 50;  // limite de itens na fila
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Grava uma linha de backup/auditoria (appendRow) em DB_Casos_RAM — NUNCA
- * sobrescreve uma linha existente. Chamado em dois momentos apenas:
- * criação do caso (ETL/DE) e FECHAMENTO da investigação (Cases.gs).
+ * Enfileira o backup/auditoria (appendRow) de um caso em DB_Casos_RAM para o
+ * trigger de 5 min (processarFilaEspelho) gravar — NUNCA grava direto no
+ * Sheets aqui. Chamado em dois momentos apenas: criação do caso (ETL/DE) e
+ * FECHAMENTO da investigação (Cases.gs).
+ *
+ * PERF: gravar aqui de forma síncrona exigiria comTrava_() — um
+ * LockService.getScriptLock() do SCRIPT INTEIRO (não por documento) — mais
+ * um appendRow no Sheets, ambos na resposta ao usuário. Como o Sheets é só
+ * backup append-only que nenhuma função do sistema volta a ler (ver
+ * cabeçalho deste arquivo), alguns minutos de atraso não têm efeito
+ * funcional algum, mas evitam serializar TODA escrita do sistema atrás dessa
+ * gravação. O item guarda só o ID: processarFilaEspelho relê o Firestore na
+ * hora de gravar, garantindo que o backup reflita o estado mais atual (não
+ * uma foto tirada minutos antes).
  *
  * @param {string} idCaso
- * @param {Object|null} dadosObjeto — objeto já montado; se ausente, relê o
- *   documento atual do Firestore (garante que o backup reflete o estado
- *   pós-transação, não dados parciais do caller).
- * @param {'CRIACAO'|'FECHAMENTO'} motivo — só para rastreio/logs; não afeta
- *   a gravação (é sempre um appendRow, independente do motivo).
+ * @param {'CRIACAO'|'FECHAMENTO'} motivo — só para rastreio/logs.
  */
-function espelharCasoNoSheets_(idCaso, dadosObjeto, motivo) {
+function espelharCasoNoSheets_(idCaso, motivo) {
   try {
-    const doc = dadosObjeto || fsGetDoc_(SCHEMA.FS.CASOS, idCaso);
-    if (!doc) {
-      console.warn('Mirror: caso não encontrado no Firestore para espelhar — ' + idCaso);
-      return;
-    }
-
-    // [RETIFICADO] gravação no Sheets agora sob comTrava_ — evita corrida
-    // com frontend/ETL escrevendo na mesma aba ao mesmo tempo (Regra de Ouro #2).
-    comTrava_(function () {
-      _gravarCasoNoSheets(idCaso, doc);
-    });
-
-  } catch (e) {
-    console.error('Mirror [espelharCasoNoSheets_] falhou para ' + idCaso + ' (' + motivo + '): ' + e.message);
     _enfileirarRetry({ tipo: 'CASO', idCaso: idCaso, tentativas: 0 });
+  } catch (e) {
+    console.error('Mirror [espelharCasoNoSheets_] falhou ao enfileirar ' + idCaso + ' (' + motivo + '): ' + e.message);
   }
 }
 
@@ -150,20 +148,23 @@ function espelharCasosEmLote_(itens) {
 }
 
 /**
- * Espelha um evento de log no DB_Log do Sheets.
+ * Enfileira um evento de log para o Sheets — nunca grava síncrono aqui.
  * Chamado dentro de fsRegistrarLog_() após a escrita no Firestore.
+ *
+ * PERF: fsRegistrarLog_ roda ao final de PRATICAMENTE TODA escrita do
+ * sistema (login, triagem, investigação, ações de admin...). Gravar aqui de
+ * forma síncrona sob comTrava_() (lock global do script) serializava todas
+ * essas escritas concorrentes atrás de um appendRow de auditoria que ninguém
+ * volta a ler — daí este evento (como o de casos, ver espelharCasoNoSheets_)
+ * só entrar na fila; quem grava de fato é processarFilaEspelho, a cada 5 min.
  *
  * @param {{ data, usuario, acao, idCaso, detalhe }} payload
  */
 function espelharLogNoSheets_(payload) {
   try {
-    // [RETIFICADO] idem — gravação de log também sob comTrava_.
-    comTrava_(function () {
-      _gravarLogNoSheets(payload);
-    });
-  } catch (e) {
-    console.error('Mirror [espelharLogNoSheets_] falhou: ' + e.message);
     _enfileirarRetry({ tipo: 'LOG', payload: payload, tentativas: 0 });
+  } catch (e) {
+    console.error('Mirror [espelharLogNoSheets_] falhou ao enfileirar: ' + e.message);
   }
 }
 

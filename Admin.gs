@@ -53,14 +53,34 @@ function _comAdmin_(token, operacao) {
 // LEITURA
 // ─────────────────────────────────────────────────────────────────────────────
 
+// PERF: painel Admin relista os usuários a cada abertura da aba "Usuários"
+// (e da "Visão Geral", que também consome listarUsuarios) — sem cache, cada
+// uma dessas aberturas refazia um fsListarTodos_ (varredura completa da
+// coleção) mesmo que ninguém tenha mexido em nenhum usuário nesse meio-tempo.
+// TTL curto (30s, bem menor que o de getConfig_) porque a lista muda mais
+// (criar/editar/ativar-desativar) — invalidado nas próprias mutações abaixo,
+// então nunca fica visivelmente desatualizado após uma ação do próprio admin.
+const USUARIOS_CACHE_KEY = 'ADMIN_USUARIOS_V1';
+const USUARIOS_CACHE_SEG = 30;
+
+function _invalidarCacheUsuarios_() {
+  CacheService.getScriptCache().remove(USUARIOS_CACHE_KEY);
+}
+
 /**
  * Lista todos os usuários sem expor a coluna de senha.
  * @returns {Array<{email,nome,ativo,perfil}>}
  */
 function listarUsuarios(token) {
   return _comAdmin_(token, function () {
+    const cache = CacheService.getScriptCache();
+    const hit = cache.get(USUARIOS_CACHE_KEY);
+    if (hit) {
+      try { return JSON.parse(hit); } catch (e) { /* cache corrompido: relê abaixo */ }
+    }
+
     const docs = fsListarTodos_(SCHEMA.FS.USUARIOS);
-    return docs
+    const usuarios = docs
       .filter(function (u) { return u.email; })
       .map(function (u) {
         return {
@@ -75,6 +95,9 @@ function listarUsuarios(token) {
           setores: Array.isArray(u.setores) ? u.setores : []
         };
       });
+
+    try { cache.put(USUARIOS_CACHE_KEY, JSON.stringify(usuarios), USUARIOS_CACHE_SEG); } catch (e) {}
+    return usuarios;
   });
 }
 
@@ -124,6 +147,7 @@ function criarUsuario(dados, token) {
     });
 
     _sincronizarSetoresUsuario_(email, nome, [], setores);
+    _invalidarCacheUsuarios_();
 
     fsRegistrarLog_('ADMIN_CRIAR_USUARIO', email, `Criado por ${__emailSessaoAtual} — perfil: ${perfil}`);
     return { sucesso: true, mensagem: `Usuário "${nome}" criado com sucesso.` };
@@ -163,6 +187,7 @@ function editarUsuario(dados, token) {
     });
 
     _sincronizarSetoresUsuario_(email, nome, setoresAntigos, setores);
+    _invalidarCacheUsuarios_();
 
     fsRegistrarLog_('ADMIN_EDITAR_USUARIO', email, `Alterado por ${__emailSessaoAtual} — perfil: ${perfil}`);
     return { sucesso: true, mensagem: `Usuário "${nome}" atualizado com sucesso.` };
@@ -271,6 +296,7 @@ function alterarStatusUsuario(email, ativo, token) {
 
     // CORREÇÃO #7: grava boolean direto, não mais 'SIM'/'NÃO'.
     fsUpdateDoc_(SCHEMA.FS.USUARIOS, emailAlvo, { ativo: !!ativo });
+    _invalidarCacheUsuarios_();
 
     fsRegistrarLog_(
       ativo ? 'ADMIN_ATIVAR_USUARIO' : 'ADMIN_DESATIVAR_USUARIO',

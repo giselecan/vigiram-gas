@@ -16,6 +16,18 @@
 
 let _gatCache = [];
 
+// Contadores de geração — incrementados a cada troca de aba (sidebar) e de
+// sub-aba (dentro de Configurações). Cada render*() assíncrono captura o
+// valor vigente no momento em que foi disparado e o compara contra o atual
+// antes de escrever em area.innerHTML: se o admin já trocou de aba enquanto
+// a resposta do servidor ainda estava a caminho, a escrita é descartada. Sem
+// isto, abrir "Usuários" (mais lento) e mudar rápido para "Setores" antes da
+// resposta chegar fazia a tabela de usuários aparecer sob o título "Setores"
+// quando a resposta atrasada finalmente chegava — o mesmo tipo de race
+// condition já corrigido no modal de investigação (js_investigacao.html).
+let _cfgGeracaoTopo = 0;
+let _cfgGeracaoSub  = 0;
+
 // ─────────────────────────────────────────────────────────
 // ABERTURA / FECHAMENTO DO MODAL PRINCIPAL
 // ─────────────────────────────────────────────────────────
@@ -34,10 +46,16 @@ function fecharConfiguracoes() {
 }
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    const modal = document.getElementById('modalConfig');
-    if (modal && modal.classList.contains('flex')) fecharConfiguracoes();
-  }
+  if (e.key !== 'Escape') return;
+  // Sub-modal (Novo Usuário, Editar Gatilho, etc.) tem prioridade: fechar só
+  // ele, sem derrubar o painel Admin inteiro por baixo. Sem esta checagem,
+  // apertar Esc com um formulário aberto (reflexo comum) descartava tudo o
+  // que o admin tinha digitado, sem confirmação nenhuma.
+  const subModal = document.getElementById('cfgSubModal');
+  if (subModal) { _fecharSubModal(); return; }
+
+  const modal = document.getElementById('modalConfig');
+  if (modal && modal.classList.contains('flex')) fecharConfiguracoes();
 });
 
 // ─────────────────────────────────────────────────────────
@@ -162,19 +180,22 @@ function _abrirSecaoTopo(secao) {
 
   const area = document.getElementById('cfgConteudo');
   area.innerHTML = _loadingHtml();
-  if (_SECOES_TOPO[secao]) _SECOES_TOPO[secao].render(area);
+  const geracao = ++_cfgGeracaoTopo;
+  if (_SECOES_TOPO[secao]) _SECOES_TOPO[secao].render(area, geracao);
 }
 
 // ─────────────────────────────────────────────────────────
 // SEÇÃO — VISÃO GERAL (dashboard resumido)
 // ─────────────────────────────────────────────────────────
-function _renderSecaoVisaoGeral(area) {
+function _renderSecaoVisaoGeral(area, geracao) {
   Promise.all([
     _chamarGS('listarUsuarios', tokenSessao),
     _chamarGS('listarGatilhos', tokenSessao),
     _getConfigCacheadoPromise(),
     _chamarGS('listarLogsAuditoria', tokenSessao, 6)
   ]).then(([usuarios, gatilhos, cfg, logs]) => {
+    if (geracao !== _cfgGeracaoTopo) return; // admin já trocou de aba — descarta
+
     const usuariosAtivos = (usuarios  || []).filter(u => u.ativo === 'SIM').length;
     const gatilhosAtivos = (gatilhos  || []).filter(g => g.ativo).length;
     const setores        = (cfg && cfg.setores) || [];
@@ -208,7 +229,7 @@ function _renderSecaoVisaoGeral(area) {
             </div>`).join('') : `<div class="px-5 py-8 text-center text-gray-400 text-sm">Nenhuma atividade registrada.</div>`}
         </div>
       </div>`;
-  }).catch(e => { area.innerHTML = _erroHtml(e.message); });
+  }).catch(e => { if (geracao === _cfgGeracaoTopo) area.innerHTML = _erroHtml(e.message); });
 }
 
 function _cardStat(icon, label, valor, corTexto, corFundo) {
@@ -227,9 +248,14 @@ function _cardStat(icon, label, valor, corTexto, corFundo) {
 // ─────────────────────────────────────────────────────────
 // SEÇÃO — GATILHOS (Gestão de Antídotos — CRUD completo)
 // ─────────────────────────────────────────────────────────
-function _renderSecaoGatilhos(area) {
+// geracao é OPCIONAL: quando chamada como refresh direto após salvar/excluir
+// um gatilho (não pela navegação da sidebar), não há geração nova para
+// comparar — nesse caso o admin certamente ainda está na aba (acabou de
+// agir nela), então o guard é pulado.
+function _renderSecaoGatilhos(area, geracao) {
   google.script.run
     .withSuccessHandler(gatilhos => {
+      if (geracao !== undefined && geracao !== _cfgGeracaoTopo) return;
       _gatCache = gatilhos || [];
       area.innerHTML = `
         <div class="flex items-center justify-between mb-5 gap-3 flex-wrap">
@@ -261,7 +287,10 @@ function _renderSecaoGatilhos(area) {
         </div>`;
       _gatRenderTabela();
     })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .withFailureHandler(e => {
+      if (geracao !== undefined && geracao !== _cfgGeracaoTopo) return;
+      area.innerHTML = _erroHtml(e.message);
+    })
     .listarGatilhos(tokenSessao);
 }
 
@@ -407,9 +436,10 @@ function _gatExcluir(id, btn) {
 // ─────────────────────────────────────────────────────────
 // SEÇÃO — LOGS E AUDITORIA (somente leitura)
 // ─────────────────────────────────────────────────────────
-function _renderSecaoLogs(area) {
+function _renderSecaoLogs(area, geracao) {
   google.script.run
     .withSuccessHandler(logs => {
+      if (geracao !== _cfgGeracaoTopo) return;
       area.innerHTML = `
         <div class="flex items-center justify-between mb-5 gap-3 flex-wrap">
           <div>
@@ -440,7 +470,7 @@ function _renderSecaoLogs(area) {
           </div>
         </div>`;
     })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .withFailureHandler(e => { if (geracao === _cfgGeracaoTopo) area.innerHTML = _erroHtml(e.message); })
     .listarLogsAuditoria(tokenSessao, 300);
 }
 
@@ -493,7 +523,8 @@ function _abrirSubConfig(id) {
   const area = document.getElementById('cfgSubConteudo');
   if (!area) return;
   area.innerHTML = _loadingHtml();
-  if (_SUBSECOES_CONFIG[id]) _SUBSECOES_CONFIG[id].render(area);
+  const geracao = ++_cfgGeracaoSub;
+  if (_SUBSECOES_CONFIG[id]) _SUBSECOES_CONFIG[id].render(area, geracao);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -501,9 +532,10 @@ function _abrirSubConfig(id) {
 // ─────────────────────────────────────────────────────────
 let _usuariosCache = [];
 
-function _renderSecaoUsuarios(area) {
+function _renderSecaoUsuarios(area, geracao) {
   google.script.run
     .withSuccessHandler(usuarios => {
+      if (geracao !== _cfgGeracaoSub) return;
       _usuariosCache = usuarios || [];
       const linhas = _usuariosCache.map(u => {
         const ativo = u.ativo === 'SIM';
@@ -569,7 +601,7 @@ function _renderSecaoUsuarios(area) {
           </div>
         </div>`;
     })
-    .withFailureHandler(e => { area.innerHTML = _erroHtml(e.message); })
+    .withFailureHandler(e => { if (geracao === _cfgGeracaoSub) area.innerHTML = _erroHtml(e.message); })
     .listarUsuarios(tokenSessao);
 }
 
@@ -823,8 +855,9 @@ function _cfgAlterarStatus(email, novoAtivo, btn) {
 // ─────────────────────────────────────────────────────────
 // CONFIGURAÇÕES · E-MAILS
 // ─────────────────────────────────────────────────────────
-function _renderSecaoEmails(area) {
+function _renderSecaoEmails(area, geracao) {
   _getConfigCacheado(cfg => {
+      if (geracao !== _cfgGeracaoSub) return;
       const geral = cfg.geral || {};
       area.innerHTML = `
         <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-5">
@@ -881,7 +914,7 @@ function _renderSecaoEmails(area) {
             </div>
           </div>
         </div>`;
-  }, e => { area.innerHTML = _erroHtml(e.message); });
+  }, e => { if (geracao === _cfgGeracaoSub) area.innerHTML = _erroHtml(e.message); });
 }
 
 function _cfgSalvarEmails(btn) {
@@ -949,8 +982,9 @@ function _cfgEnviarEmailTeste(btn, tipo) {
 // ─────────────────────────────────────────────────────────
 // CONFIGURAÇÕES · SLA
 // ─────────────────────────────────────────────────────────
-function _renderSecaoSLA(area) {
+function _renderSecaoSLA(area, geracao) {
   _getConfigCacheado(cfg => {
+      if (geracao !== _cfgGeracaoSub) return;
       const sla = (cfg.geral || {}).SLA_PADRAO_HORAS || '48';
       area.innerHTML = `
         <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2 mb-5">
@@ -975,7 +1009,7 @@ function _renderSecaoSLA(area) {
             <i class="fas fa-save"></i> Salvar SLA
           </button>
         </div>`;
-  }, e => { area.innerHTML = _erroHtml(e.message); });
+  }, e => { if (geracao === _cfgGeracaoSub) area.innerHTML = _erroHtml(e.message); });
 }
 
 function _cfgSalvarSLA(btn) {
@@ -991,8 +1025,9 @@ function _cfgSalvarSLA(btn) {
 // ─────────────────────────────────────────────────────────
 // CONFIGURAÇÕES · SETORES
 // ─────────────────────────────────────────────────────────
-function _renderSecaoSetores(area) {
+function _renderSecaoSetores(area, geracao) {
   _getConfigCacheado(cfg => {
+      if (geracao !== _cfgGeracaoSub) return;
       // Agrupado por SETOR (1 linha por setor) — cfg.setores continua sendo
       // 1 par {setor,email} por documento (usado em outros lugares, como o
       // envio do relatório diário), só a exibição/edição aqui é agrupada
@@ -1043,7 +1078,7 @@ function _renderSecaoSetores(area) {
                 class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
           <i class="fas fa-save"></i> Salvar Setores
         </button>`;
-  }, e => { area.innerHTML = _erroHtml(e.message); });
+  }, e => { if (geracao === _cfgGeracaoSub) area.innerHTML = _erroHtml(e.message); });
 }
 
 /** Monta uma linha da tabela de Setores — usada tanto na carga inicial quanto ao adicionar uma linha nova. */
@@ -1082,7 +1117,18 @@ function _cfgAdicionarSetor() {
 
 function _cfgRemoverSetor(idx) {
   const linha = document.getElementById('setorLinha_' + idx);
-  if (linha) linha.remove();
+  if (!linha) return;
+
+  // Sem confirmação, um clique acidental removia a linha da tabela e o
+  // próximo "Salvar Setores" apagava o setor definitivamente do Firestore
+  // (delete de órfãos — ver salvarSetores, Config write.gs), sem nenhum
+  // aviso equivalente ao confirm() já usado para excluir usuário/gatilho.
+  // Linha vazia (setor ainda sem nome, recém-adicionada) não precisa avisar.
+  const inputSetor = linha.querySelector('input[data-campo="setor"]');
+  const nome = inputSetor ? inputSetor.value.trim() : '';
+  if (nome && !confirm(`Remover o setor "${nome}" da lista? Isso só apaga de verdade ao clicar em "Salvar Setores" em seguida.`)) return;
+
+  linha.remove();
 }
 
 /**
@@ -1239,8 +1285,9 @@ const _CAMPOS_LISTA = {
   problemas_adicionais:       'Problemas Adicionais do Medicamento'
 };
 
-function _renderSecaoListas(area) {
+function _renderSecaoListas(area, geracao) {
   _getConfigCacheado(cfg => {
+      if (geracao !== _cfgGeracaoSub) return;
       const listas = cfg.listas || {};
       const blocos = Object.entries(_CAMPOS_LISTA).map(([campo, label]) => {
         const itens = (listas[campo] || []).map((op, i) =>
@@ -1276,7 +1323,7 @@ function _renderSecaoListas(area) {
           </button>
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">${blocos}</div>`;
-  }, e => { area.innerHTML = _erroHtml(e.message); });
+  }, e => { if (geracao === _cfgGeracaoSub) area.innerHTML = _erroHtml(e.message); });
 }
 
 function _cfgAdicionarItemLista(campo) {

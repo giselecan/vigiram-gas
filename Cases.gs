@@ -157,6 +157,14 @@ function _mapearCasoCompleto_(doc) {
     naranjoRespostas:String(doc.naranjoRespostas || '').trim(),
     atualizadoPor:   String(doc.auditoria && doc.auditoria.atualizadoPor || '').trim(),
     atualizadoEm:    atualizadoEm,
+    // Timestamp bruto (epoch ms), só para controle de concorrência otimista
+    // (ver registrarInvestigacao) — o frontend guarda este valor ao abrir o
+    // modal e devolve como `versaoEsperada` ao salvar; se alguém mais tiver
+    // salvado o caso nesse meio-tempo, o backend recusa o save em vez de
+    // sobrescrever silenciosamente (lost update).
+    atualizadoEmTs:  (doc.auditoria && doc.auditoria.atualizadoEm instanceof Date)
+      ? doc.auditoria.atualizadoEm.getTime()
+      : null,
     // LOTE/LABORATORIO separados (07/2026). Fallback lê o campo legado
     // loteLaboratorio de docs antigos ainda não re-salvos pela investigação.
     lote:            String(doc.lote != null && doc.lote !== '' ? doc.lote : (doc.loteLaboratorio || '')).trim(),
@@ -383,10 +391,10 @@ function salvarDemandaEspontanea(formDados) {
     };
 
     fsSetDoc_(SCHEMA.FS.CASOS, idCaso, objetoCaso);
-    espelharCasoNoSheets_(idCaso, objetoCaso, 'CRIACAO');
+    espelharCasoNoSheets_(idCaso, 'CRIACAO');
     fsRegistrarLog_('NOTIFICACAO_ESPONTANEA', idCaso, `${setor} / ${medicamento}`);
     invalidarCasosCache_(); // P1.1 — novo caso precisa aparecer na próxima leitura
-    notificarNovaDemandaEspontanea_(objetoCaso); // Notify.gs — alerta imediato ao farmacêutico do setor
+    notificarNovaDemandaEspontanea_(objetoCaso); // Notify.gs — só enfileira, não bloqueia o retorno
 
     // `caso` (formato resumo, igual ao usado pelo Kanban) permite ao chamador
     // fazer atualização otimista local (atualizarCasoLocal) em vez de um
@@ -490,6 +498,7 @@ function registrarInvestigacao(dados, token) {
     try {
       const novoStatus = dados.encerrar ? SCHEMA.STATUS.CONCLUIDO : SCHEMA.STATUS.INVESTIGACAO;
 
+      let casoAtualizado = null;
       fsRunTransaction_(function (ctx) {
         const caso = fsTxnGetDoc_(ctx.id, SCHEMA.FS.CASOS, dados.idCaso);
         if (!caso) throw new Error('Caso não localizado para investigação.');
@@ -503,7 +512,23 @@ function registrarInvestigacao(dados, token) {
           throw new Error('Caso CONCLUÍDO está travado. Use "Reabrir investigação" antes de editar.');
         }
 
-        fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, dados.idCaso, {
+        // CONTROLE DE CONCORRÊNCIA (lost update): dados.versaoEsperada é o
+        // auditoria.atualizadoEm (epoch ms) que o cliente tinha quando abriu
+        // o modal (getCasoDetalhado → _mapearCasoCompleto_.atualizadoEmTs).
+        // Se o carimbo ATUAL do documento já mudou, outra pessoa salvou este
+        // caso enquanto o usuário editava — sem esta checagem, este save
+        // sobrescreveria o formulário inteiro por cima das mudanças do
+        // outro, silenciosamente (o segundo usuário não via erro nenhum).
+        // Comparação só roda quando os dois lados têm valor (graceful degrade
+        // para uma aba com frontend antigo em cache, sem versaoEsperada).
+        const versaoAtual = (caso.auditoria && caso.auditoria.atualizadoEm instanceof Date)
+          ? caso.auditoria.atualizadoEm.getTime()
+          : null;
+        if (dados.versaoEsperada && versaoAtual && dados.versaoEsperada !== versaoAtual) {
+          throw new Error('Este caso foi alterado por outra pessoa enquanto você editava. Feche e reabra a investigação para ver os dados mais recentes antes de salvar novamente.');
+        }
+
+        const atualizacao = {
           status: novoStatus,
           // Farmacêutico pode corrigir o nome do medicamento suspeito caso o
           // notificador tenha digitado errado na notificação original.
@@ -570,9 +595,18 @@ function registrarInvestigacao(dados, token) {
           dum:                      dados.dum                      || '',
           gestante:                 !!dados.gestante,
           lactante:                 !!dados.lactante
-        });
-        
-        fsCarimbarAuditoria_(ctx, dados.idCaso);
+        };
+
+        fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, dados.idCaso, atualizacao);
+        const carimbo = fsCarimbarAuditoria_(ctx, dados.idCaso);
+        // Estado pós-transação montado em memória (pré-imagem + atualização +
+        // carimbo de auditoria) — mesmo padrão de registrarTriagem. Evita um
+        // fsGetDoc_ extra só para devolver o resumo ao frontend (essa releitura
+        // acontecia em toda "Salvar Rascunho", que é clicado repetidamente
+        // durante o preenchimento do formulário). `auditoria` precisa entrar
+        // explicitamente porque _mapearCasoResumo_ usa auditoria.atualizadoEm
+        // como "Concluído em" no card do Kanban.
+        casoAtualizado = Object.assign({}, caso, atualizacao, { auditoria: carimbo });
         return true;
       });
 
@@ -583,19 +617,17 @@ function registrarInvestigacao(dados, token) {
         dados.conclusao || ''
       );
 
-      const docAtualizado = fsGetDoc_(SCHEMA.FS.CASOS, dados.idCaso);
-      const resultado      = _mapearCasoResumo_(docAtualizado);
+      const resultado = _mapearCasoResumo_(casoAtualizado);
 
       // FASE 9 — Sheets é append-only, "backup histórico de casos
       // investigados": só grava uma linha NOVA (nunca sobrescreve) quando a
       // investigação é de fato FINALIZADA (encerrar=true), nunca em
       // rascunho. Feito por ÚLTIMO, com o payload de retorno já pronto em
-      // `resultado` — espelharCasoNoSheets_ tem seu próprio try/catch e, se
-      // o Sheets falhar/demorar, cai na fila de retry (Mirror.gs) em vez de
-      // atrasar ou quebrar o retorno ao frontend.
+      // `resultado` — espelharCasoNoSheets_ apenas enfileira (Mirror.gs),
+      // nunca escreve no Sheets de forma síncrona aqui.
       if (novoStatus === SCHEMA.STATUS.CONCLUIDO) {
-        espelharCasoNoSheets_(dados.idCaso, docAtualizado, 'FECHAMENTO');
-        notificarInvestigacaoConcluida_(docAtualizado); // Notify.gs — alerta ao notificador original (só casos DE)
+        espelharCasoNoSheets_(dados.idCaso, 'FECHAMENTO');
+        notificarInvestigacaoConcluida_(casoAtualizado); // Notify.gs — só enfileira, não bloqueia o retorno
       }
 
       return resultado;

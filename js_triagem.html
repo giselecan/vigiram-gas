@@ -98,19 +98,27 @@ function enviarTriagem(e) {
     triadoPor:      sessionStorage.getItem('vigi_nome') || ''
   };
 
+  const restaurarBotao = () => {
+    btn.innerHTML = '<i class="fas fa-check mr-1"></i> Salvar e Enviar';
+    btn.disabled  = false;
+  };
+
+  const wd = criarWatchdogRPC_(20000, casoAtualizado => {
+    fecharModalTriagem();
+    restaurarBotao();
+    atualizarCasoLocal(casoAtualizado);
+    mostrarToast('Triagem registrada com sucesso.', 'sucesso');
+  }, err => {
+    mostrarToast('Erro na triagem: ' + err.message, 'erro');
+    restaurarBotao();
+  }, () => {
+    restaurarBotao();
+    mostrarToast('O servidor demorou demais para responder. Verifique se a triagem foi registrada (recarregue os casos) antes de tentar de novo.', 'erro');
+  });
+
   google.script.run
-    .withSuccessHandler(casoAtualizado => {
-      fecharModalTriagem();
-      btn.innerHTML = '<i class="fas fa-check mr-1"></i> Salvar e Enviar';
-      btn.disabled  = false;
-      atualizarCasoLocal(casoAtualizado);
-      mostrarToast('Triagem registrada com sucesso.', 'sucesso');
-    })
-    .withFailureHandler(err => {
-      mostrarToast('Erro na triagem: ' + err.message, 'erro');
-      btn.innerHTML = '<i class="fas fa-check mr-1"></i> Salvar e Enviar';
-      btn.disabled  = false;
-    })
+    .withSuccessHandler(wd.sucesso)
+    .withFailureHandler(wd.falha)
     .registrarTriagem(dados, tokenSessao);
 }
 </script>
