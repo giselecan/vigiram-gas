@@ -451,12 +451,18 @@ function fsCarimbarAuditoria_(ctx, idCaso, origem) {
   });
 }
 
-function fsRegistrarLog_(acao, idCaso, detalhe) {
+function fsRegistrarLog_(acao, idCaso, detalhe, usuarioOverride) {
   try {
     const idLog   = Utilities.getUuid();
     const payload = {
       data:    new Date(),
-      usuario: usuarioAtual_(),
+      // usuarioOverride existe para chamadores que já sabem com certeza qual
+      // e-mail devem carimbar (ex.: _registrarLogin_) e não podem depender de
+      // usuarioAtual_()/__emailSessaoAtual — essa global de escopo de script
+      // pode ser sobrescrita por OUTRA execução concorrente antes do finally
+      // de comAutenticacao_ restaurá-la, carimbando o log com o usuário
+      // errado (causa raiz de logins/ações aparecendo sob outra conta).
+      usuario: usuarioOverride || usuarioAtual_(),
       acao:    acao,
       idCaso:  idCaso  || '',
       detalhe: detalhe || ''
