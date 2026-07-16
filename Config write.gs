@@ -91,43 +91,48 @@ function salvarSetores(setores, token) {
     // Falha no passo 1 → estado antigo + parte do novo (superset, form segue
     // funcionando). Falha no passo 2 → sobra órfão, corrigido no próximo save.
 
-    // 1) Upsert
+    // 1) Upsert em lote — PERF: a versão anterior fazia 1 fsSetDoc_ (1
+    // round-trip HTTP síncrono) por setor; com dezenas de setores/
+    // farmacêuticos, "Salvar Setores" travava por vários segundos.
+    // fsBatchSet_ resolve tudo em ceil(N/400) chamadas via :commit — mesmo
+    // padrão já usado pelo ETL (Ingest.gs).
     const idsNovos = {};
-    let upserts = 0;
+    const itensBatch = [];
     setores.forEach(function (s) {
       const setor = String(s.setor || '').trim().toUpperCase();
       if (!setor) return;
       const email = String(s.email || '').trim();
       const id = _idDocSetor_(setor, email);
+      if (idsNovos[id]) return; // mesmo setor+e-mail repetido na lista — dedup defensivo
       idsNovos[id] = true;
-      fsSetDoc_(SCHEMA.FS.SETORES, id, {
-        setor:                    setor,
-        ativo:                    true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
-        farmaceuticoResponsavel:  String(s.farmaceutico || '').trim().toUpperCase(),
-        emailResponsavel:         email
+      itensBatch.push({
+        id: id,
+        dados: {
+          setor:                   setor,
+          ativo:                   true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
+          farmaceuticoResponsavel: String(s.farmaceutico || '').trim().toUpperCase(),
+          emailResponsavel:        email
+        }
       });
-      upserts++;
     });
 
-    if (upserts === 0) {
+    if (!itensBatch.length) {
       return { sucesso: false, mensagem: 'Nenhum setor válido na lista.' };
     }
+    fsBatchSet_(SCHEMA.FS.SETORES, itensBatch);
 
-    // 2) Delete só dos órfãos
-    let removidos = 0;
+    // 2) Delete só dos órfãos, também em lote
     const existentes = fsListarTodos_(SCHEMA.FS.SETORES);
-    existentes.forEach(function (doc) {
-      if (doc._id && !idsNovos[doc._id]) {
-        fsDeleteDoc_(SCHEMA.FS.SETORES, doc._id);
-        removidos++;
-      }
-    });
+    const idsOrfaos = existentes
+      .filter(function (doc) { return doc._id && !idsNovos[doc._id]; })
+      .map(function (doc) { return doc._id; });
+    if (idsOrfaos.length) fsBatchDelete_(SCHEMA.FS.SETORES, idsOrfaos);
 
     invalidarConfig(); // limpa também o cache público do form (ver Config.gs)
     fsRegistrarLog_('SETORES_ATUALIZADOS', 'setores',
-      upserts + ' setor(es) salvos, ' + removidos + ' removido(s) | Por: ' + __emailSessaoAtual);
+      itensBatch.length + ' setor(es) salvos, ' + idsOrfaos.length + ' removido(s) | Por: ' + __emailSessaoAtual);
 
-    return { sucesso: true, mensagem: upserts + ' setor(es) salvos com sucesso.' };
+    return { sucesso: true, mensagem: itensBatch.length + ' setor(es) salvos com sucesso.' };
   });
 }
 
@@ -322,6 +327,16 @@ function salvarListas(listas, token) {
 // GATILHOS (medicamentos monitorados pelo ETL) — Firestore SOMENTE (Fase 9)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// PERF: mesmo raciocínio de USUARIOS_CACHE_KEY (Admin.gs) — a aba Gatilhos e
+// a Visão Geral do painel Admin relistam a coleção inteira a cada abertura.
+// TTL curto, invalidado nas próprias mutações abaixo.
+const GATILHOS_CACHE_KEY = 'ADMIN_GATILHOS_V1';
+const GATILHOS_CACHE_SEG = 30;
+
+function _invalidarCacheGatilhos_() {
+  CacheService.getScriptCache().remove(GATILHOS_CACHE_KEY);
+}
+
 /**
  * Lê a lista completa de gatilhos (ativos e inativos) direto da coleção
  * Firestore SCHEMA.FS.GATILHOS, para alimentar a tabela de dados do painel
@@ -332,9 +347,15 @@ function salvarListas(listas, token) {
  */
 function listarGatilhos(token) {
   return comAutenticacao_(token, function () {
+    const cache = CacheService.getScriptCache();
+    const hit = cache.get(GATILHOS_CACHE_KEY);
+    if (hit) {
+      try { return JSON.parse(hit); } catch (e) { /* cache corrompido: relê abaixo */ }
+    }
+
     try {
       const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
-      return docs
+      const resultado = docs
         // Antes filtrava por `d.medicamento && d._id`, o que ESCONDIA qualquer
         // doc sem o campo `medicamento` (campo ausente/renomeado por migração ou
         // versão antiga). Isso causava o sintoma "salvar diz que já existe, mas
@@ -370,6 +391,9 @@ function listarGatilhos(token) {
           };
         })
         .sort(function (a, b) { return a.medicamento.localeCompare(b.medicamento); });
+
+      try { cache.put(GATILHOS_CACHE_KEY, JSON.stringify(resultado), GATILHOS_CACHE_SEG); } catch (e) {}
+      return resultado;
     } catch (erro) {
       throw new Error('Não foi possível carregar os gatilhos do Firestore: ' + erro.message);
     }
@@ -408,6 +432,7 @@ function salvarGatilho(dados, token) {
     if (idOriginal && idOriginal !== idNovo) {
       fsDeleteDoc_(SCHEMA.FS.GATILHOS, idOriginal);
     }
+    _invalidarCacheGatilhos_();
 
     fsRegistrarLog_(idOriginal ? 'GATILHO_ATUALIZADO' : 'GATILHO_CRIADO', 'N/A',
       nome + ' | Por: ' + __emailSessaoAtual);
@@ -430,6 +455,7 @@ function alternarStatusGatilho(id, ativo, token) {
     if (!existente) return { sucesso: false, mensagem: 'Gatilho não encontrado.' };
 
     fsUpdateDoc_(SCHEMA.FS.GATILHOS, docId, { ativo: !!ativo, atualizadoEm: new Date() });
+    _invalidarCacheGatilhos_();
 
     fsRegistrarLog_(ativo ? 'GATILHO_ATIVADO' : 'GATILHO_DESATIVADO', 'N/A',
       (existente.medicamento || docId) + ' | Por: ' + __emailSessaoAtual);
@@ -451,6 +477,7 @@ function excluirGatilho(id, token) {
     if (!existente) return { sucesso: false, mensagem: 'Gatilho não encontrado.' };
 
     fsDeleteDoc_(SCHEMA.FS.GATILHOS, docId);
+    _invalidarCacheGatilhos_();
 
     fsRegistrarLog_('GATILHO_EXCLUIDO', 'N/A',
       (existente.medicamento || docId) + ' | Por: ' + __emailSessaoAtual);

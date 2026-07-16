@@ -221,6 +221,28 @@ function fsBatchSet_(colecao, itens) {
   }
 }
 
+/**
+ * Exclui vários documentos da MESMA coleção em lote — mesmo padrão de
+ * fsBatchSet_ (um único :commit por bloco de 400), em vez de um
+ * fsDeleteDoc_ (1 round-trip HTTP síncrono) por item num loop.
+ * @param {string} colecao
+ * @param {Array<string>} ids
+ */
+function fsBatchDelete_(colecao, ids) {
+  if (!ids || !ids.length) return;
+  const cfg = fsConfig_();
+  const prefixo = 'projects/' + cfg.projectId + '/databases/' + cfg.databaseId + '/documents/' + colecao + '/';
+  const url = fsUrlBase_() + ':commit';
+  const CHUNK = 400;
+
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const writes = ids.slice(i, i + CHUNK).map(function (id) {
+      return { delete: prefixo + id };
+    });
+    fsFetch_('post', url, { writes: writes });
+  }
+}
+
 function fsUpdateDoc_(colecao, id, camposParciais) {
   const nomesCampos = Object.keys(camposParciais);
   const mascara = nomesCampos.map(function (c) { return 'updateMask.fieldPaths=' + encodeURIComponent(c); }).join('&');
