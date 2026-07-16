@@ -169,6 +169,11 @@ const CAMPOS_PROGRESSO = [
 // ESTADO INTERNO
 // ---------------------------------------------------------
 let _invIdAtual         = '';
+// Carimbo (epoch ms) de auditoria.atualizadoEm no momento em que o detalhe
+// do caso foi carregado — enviado de volta como `versaoEsperada` ao salvar,
+// para o backend detectar se outra pessoa salvou o caso nesse meio-tempo
+// (controle de concorrência otimista, ver registrarInvestigacao em Cases.gs).
+let _invVersaoEsperada  = null;
 let _classNaranjoFinal  = 'DUVIDOSA';
 let _autosaveTimer      = null;
 const _rascunhosEmMemoria = new Map();
@@ -348,10 +353,17 @@ function abrirInvestigacao(id) {
   // da sincronização geral do Kanban.
   google.script.run
     .withSuccessHandler(casoCompleto => {
+      // Descarta resposta atrasada: se o usuário fechou o modal ou abriu
+      // OUTRO caso antes desta resposta chegar, _invIdAtual já mudou — sem
+      // esta checagem, o detalhe (história clínica, Naranjo, notificador)
+      // do caso `id` seria preenchido por cima do caso que está na tela
+      // agora (race condition entre respostas fora de ordem).
+      if (id !== _invIdAtual) return;
       _mostrarCarregandoInvestigacao(false);
       _preencherFormularioInvestigacao(casoCompleto);
     })
     .withFailureHandler(err => {
+      if (id !== _invIdAtual) return;
       _mostrarCarregandoInvestigacao(false);
       mostrarToast('Erro ao carregar detalhes do caso: ' + (err.message || err), 'erro');
       fecharModalInvestigacao();
@@ -444,6 +456,8 @@ function _limparFormularioInvestigacao() {
 }
 
 function _preencherFormularioInvestigacao(caso) {
+  _invVersaoEsperada = caso.atualizadoEmTs || null;
+
   const elMedConfirmado = document.getElementById('invMedicamentoConfirmado');
   if (elMedConfirmado) elMedConfirmado.value = caso.medicamento || '';
   document.getElementById('invHistoriaClinica').value = caso.historiaClinica || '';
@@ -777,6 +791,7 @@ function fecharModalInvestigacao() {
   if (_autosaveTimer) clearTimeout(_autosaveTimer);
   document.getElementById('modalInvestigacao').classList.add('hidden');
   _invIdAtual = '';
+  _invVersaoEsperada = null;
 }
 
 // ---------------------------------------------------------
@@ -869,6 +884,8 @@ function _coletarFormulario(encerrar) {
 
   return {
     idCaso:          _invIdAtual,
+    // Controle de concorrência otimista (ver registrarInvestigacao, Cases.gs)
+    versaoEsperada:  _invVersaoEsperada,
     medicamento:     (document.getElementById('invMedicamentoConfirmado') || {}).value || '',
     historiaClinica: document.getElementById('invHistoriaClinica').value,
     relatoEvento:    document.getElementById('invRelatoEvento').value,

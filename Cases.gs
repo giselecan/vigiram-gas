@@ -157,6 +157,14 @@ function _mapearCasoCompleto_(doc) {
     naranjoRespostas:String(doc.naranjoRespostas || '').trim(),
     atualizadoPor:   String(doc.auditoria && doc.auditoria.atualizadoPor || '').trim(),
     atualizadoEm:    atualizadoEm,
+    // Timestamp bruto (epoch ms), só para controle de concorrência otimista
+    // (ver registrarInvestigacao) — o frontend guarda este valor ao abrir o
+    // modal e devolve como `versaoEsperada` ao salvar; se alguém mais tiver
+    // salvado o caso nesse meio-tempo, o backend recusa o save em vez de
+    // sobrescrever silenciosamente (lost update).
+    atualizadoEmTs:  (doc.auditoria && doc.auditoria.atualizadoEm instanceof Date)
+      ? doc.auditoria.atualizadoEm.getTime()
+      : null,
     // LOTE/LABORATORIO separados (07/2026). Fallback lê o campo legado
     // loteLaboratorio de docs antigos ainda não re-salvos pela investigação.
     lote:            String(doc.lote != null && doc.lote !== '' ? doc.lote : (doc.loteLaboratorio || '')).trim(),
@@ -502,6 +510,22 @@ function registrarInvestigacao(dados, token) {
         // Única via de escrita clínica em CONCLUÍDO é reabrirInvestigacao().
         if (caso.status === SCHEMA.STATUS.CONCLUIDO) {
           throw new Error('Caso CONCLUÍDO está travado. Use "Reabrir investigação" antes de editar.');
+        }
+
+        // CONTROLE DE CONCORRÊNCIA (lost update): dados.versaoEsperada é o
+        // auditoria.atualizadoEm (epoch ms) que o cliente tinha quando abriu
+        // o modal (getCasoDetalhado → _mapearCasoCompleto_.atualizadoEmTs).
+        // Se o carimbo ATUAL do documento já mudou, outra pessoa salvou este
+        // caso enquanto o usuário editava — sem esta checagem, este save
+        // sobrescreveria o formulário inteiro por cima das mudanças do
+        // outro, silenciosamente (o segundo usuário não via erro nenhum).
+        // Comparação só roda quando os dois lados têm valor (graceful degrade
+        // para uma aba com frontend antigo em cache, sem versaoEsperada).
+        const versaoAtual = (caso.auditoria && caso.auditoria.atualizadoEm instanceof Date)
+          ? caso.auditoria.atualizadoEm.getTime()
+          : null;
+        if (dados.versaoEsperada && versaoAtual && dados.versaoEsperada !== versaoAtual) {
+          throw new Error('Este caso foi alterado por outra pessoa enquanto você editava. Feche e reabra a investigação para ver os dados mais recentes antes de salvar novamente.');
         }
 
         const atualizacao = {
