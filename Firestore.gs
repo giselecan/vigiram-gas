@@ -386,6 +386,14 @@ function fsRunTransaction_(operacao) {
         Utilities.sleep(150 * tentativa);
         continue;
       }
+      if (ehConflito) {
+        // Esgotou as tentativas por conflito REAL de concorrência (duas
+        // transações colidindo no mesmo documento), não por falha de rede —
+        // troca a mensagem técnica ("Firestore.gs: ... HTTP 409") por uma
+        // que o usuário final entenda e saiba o que fazer, em vez de deixar
+        // um toast crua de infraestrutura chegar até a tela de investigação.
+        throw new Error('Muitas pessoas estão editando dados ao mesmo tempo agora. Tente salvar novamente em alguns segundos.');
+      }
       throw erro;
     }
   }
