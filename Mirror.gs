@@ -120,31 +120,27 @@ function espelharCasoNoSheets_(idCaso, motivo) {
 }
 
 /**
- * Espelha VÁRIOS casos novos numa ÚNICA gravação em lote (um setValues sob um
- * único comTrava_), em vez de um appendRow por caso — cada appendRow é a
- * escrita mais lenta do Sheets e ainda pegava/soltava o lock por caso. Usado
- * pelo ETL (handleInsertDB). Semântica de falha idêntica à do caminho único:
- * se a gravação em lote falhar, cada caso volta para a fila de retry
- * (processarFilaEspelho relê o Firestore por ID), sem bloquear a resposta ao robô.
+ * Enfileira o backup/auditoria de VÁRIOS casos novos do ETL — nunca grava
+ * síncrono aqui. Usado pelo robô PowerShell (handleInsertDB, Ingest.gs).
+ *
+ * PERF: a versão anterior gravava direto no Sheets (um setValues em lote)
+ * sob comTrava_() — o MESMO LockService.getScriptLock() global que
+ * processarFilaEspelho (trigger de 5 min) também usa. Quando o robô rodava
+ * exatamente durante o flush da fila, handleInsertDB ficava esperando o
+ * lock por até 30s antes de responder — e invalidarCasosCache_() (chamada
+ * DEPOIS deste espelho, ver Ingest.gs) atrasava junto, ou seja, atrasava
+ * quando os casos novos apareciam no Kanban dos farmacêuticos. Agora só
+ * enfileira (mesmo caminho de espelharCasoNoSheets_/espelharLogNoSheets_);
+ * quem grava de fato é processarFilaEspelho. Cada item guarda só o ID —
+ * processarFilaEspelho relê o Firestore na hora de gravar (estado mais
+ * atual, não uma foto de minutos atrás).
  * @param {Array<{id, objeto}>} itens
  */
 function espelharCasosEmLote_(itens) {
   if (!itens || !itens.length) return;
-  try {
-    // Monta as linhas ANTES de pegar o lock — trabalho de CPU não precisa
-    // segurar o LockService, que serializa todas as escritas do sistema.
-    const linhas = itens.map(function (it) { return _construirLinhaCaso_(it.id, it.objeto); });
-
-    comTrava_(function () {
-      const aba = getSheet_(SCHEMA.ABAS.CASOS);
-      if (!aba) throw new Error('Aba ' + SCHEMA.ABAS.CASOS + ' não encontrada.');
-      const inicio = aba.getLastRow() + 1;
-      aba.getRange(inicio, 1, linhas.length, SCHEMA.LARGURA).setValues(linhas);
-    });
-  } catch (e) {
-    console.error('Mirror [espelharCasosEmLote_] falhou para ' + itens.length + ' caso(s): ' + e.message);
-    itens.forEach(function (it) { _enfileirarRetry({ tipo: 'CASO', idCaso: it.id, tentativas: 0 }); });
-  }
+  itens.forEach(function (it) {
+    _enfileirarRetry({ tipo: 'CASO', idCaso: it.id, tentativas: 0 });
+  });
 }
 
 /**
