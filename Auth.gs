@@ -110,8 +110,14 @@ function autenticarUsuario(email, senha) {
  */
 function _registrarLogin_(email, sucesso, detalhe) {
   try {
+    // Passa o e-mail explicitamente como usuarioOverride: login não passa por
+    // comAutenticacao_ (ainda não há sessão), então usuarioAtual_() cairia na
+    // global __emailSessaoAtual, que pode estar carimbada por OUTRA execução
+    // concorrente (ex.: uma ação autenticada de outro usuário em andamento) —
+    // era esse o bug de logins aparecendo registrados sob a conta errada.
     fsRegistrarLog_(sucesso ? 'LOGIN_SUCESSO' : 'LOGIN_FALHA', 'N/A',
-      (email || 'e-mail não informado') + ' — ' + detalhe);
+      (email || 'e-mail não informado') + ' — ' + detalhe,
+      email || 'e-mail não informado');
   } catch (e) {
     console.error('_registrarLogin_: falha ao registrar log de login — ' + e.message);
   }

@@ -310,8 +310,27 @@ function inicializar() {
     return;
   }
 
+  // WATCHDOG: mesmo risco de realizarLogin() — em janela anônima/privada com
+  // cookies de terceiros bloqueados, o iframe sandbox do Apps Script pode
+  // nunca responder, deixando nenhum dos dois handlers disparar. Sem isto o
+  // usuário ficava indefinidamente sem retorno visível ao reabrir a aba com
+  // um token salvo; agora cai no login com uma mensagem explicativa.
+  let respondeuSessao = false;
+  const timeoutSessaoId = setTimeout(() => {
+    if (respondeuSessao) return;
+    respondeuSessao = true;
+    mostrarToast(
+      'Não foi possível validar a sessão. Se você estiver em uma janela anônima/privada, tente uma janela normal — este sistema depende de cookies de terceiros, que costumam vir bloqueados no modo anônimo.',
+      'erro'
+    );
+    _mostrarLogin();
+  }, 15000);
+
   google.script.run
     .withSuccessHandler(function(valido) {
+      if (respondeuSessao) return;
+      respondeuSessao = true;
+      clearTimeout(timeoutSessaoId);
       if (valido) {
         const nomeGuardado = sessionStorage.getItem('vigi_nome');
         if (nomeGuardado) _exibirNomeUsuario(nomeGuardado);
@@ -325,6 +344,9 @@ function inicializar() {
       }
     })
     .withFailureHandler(function() {
+      if (respondeuSessao) return;
+      respondeuSessao = true;
+      clearTimeout(timeoutSessaoId);
       sessionStorage.removeItem('vigi_token');
       sessionStorage.removeItem('vigi_nome');
       sessionStorage.removeItem('vigi_perfil');
@@ -368,8 +390,30 @@ function realizarLogin(event) {
   btn.disabled   = true;
   btn.classList.add('btn-carregando');
 
+  // WATCHDOG: em janela anônima/privada (ou com cookies de terceiros
+  // bloqueados), o iframe sandbox do Apps Script pode nunca conseguir
+  // estabelecer o canal do google.script.run — nesse caso NENHUM dos dois
+  // handlers (success/failure) é chamado, e o botão "Entrando…" fica travado
+  // para sempre, sem qualquer mensagem de erro. O timeout abaixo garante que
+  // o usuário sempre recebe um retorno, mesmo quando a ponte RPC nunca responde.
+  let respondeu = false;
+  const timeoutId = setTimeout(() => {
+    if (respondeu) return;
+    respondeu = true;
+    mostrarToast(
+      'Não foi possível conectar ao servidor. Se você estiver em uma janela anônima/privada, tente uma janela normal — este sistema depende de cookies de terceiros, que costumam vir bloqueados no modo anônimo.',
+      'erro'
+    );
+    btn.innerHTML = originalHtml;
+    btn.disabled  = false;
+    btn.classList.remove('btn-carregando');
+  }, 15000);
+
   google.script.run
     .withSuccessHandler(res => {
+      if (respondeu) return;
+      respondeu = true;
+      clearTimeout(timeoutId);
       if (res.sucesso) {
         sessionStorage.setItem('vigi_token', res.token);
         sessionStorage.setItem('vigi_nome', res.nome);
@@ -393,6 +437,9 @@ function realizarLogin(event) {
       }
     })
     .withFailureHandler(() => {
+      if (respondeu) return;
+      respondeu = true;
+      clearTimeout(timeoutId);
       mostrarToast('Falha na comunicação com o servidor.', 'erro');
       btn.innerHTML = originalHtml;
       btn.disabled  = false;
