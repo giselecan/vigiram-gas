@@ -311,6 +311,19 @@ function alterarStatusUsuario(email, ativo, token) {
 // LOGS E AUDITORIA (somente leitura)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// PERF: listarLogsAuditoria é chamada toda vez que a "Visão Geral" (limite=6)
+// ou a aba "Logs e Auditoria" (limite=300) do painel Admin abre. Sem cache,
+// isso também repete o pior caso — o fallback de fsListarTodos_ (varredura
+// da coleção INTEIRA de logs, que só cresce, ordenando em memória) sempre
+// que a query ordenada não devolver exatamente `max` docs (índice ausente
+// ou algum doc sem o campo `data`). TTL curto: é uma trilha de auditoria
+// (não precisa ser 100% em tempo real) e o botão "Atualizar" da aba Logs
+// ainda funciona — só mostra a mesma foto de até LOGS_CACHE_SEG segundos
+// atrás em vez de reprocessar tudo de novo a cada clique. Chave por `max`
+// porque Visão Geral e a aba Logs pedem quantidades diferentes.
+const LOGS_CACHE_PREFIXO = 'ADMIN_LOGS_';
+const LOGS_CACHE_SEG     = 20;
+
 /**
  * Lista os registros mais recentes da coleção Firestore SCHEMA.FS.LOG
  * (trilha de auditoria), ordenados do mais novo para o mais antigo.
@@ -320,6 +333,13 @@ function alterarStatusUsuario(email, ativo, token) {
 function listarLogsAuditoria(token, limite) {
   return _comAdmin_(token, function () {
     const max = Math.min(Number(limite) || 200, 500);
+    const cache = CacheService.getScriptCache();
+    const chaveCache = LOGS_CACHE_PREFIXO + max;
+    const hit = cache.get(chaveCache);
+    if (hit) {
+      try { return JSON.parse(hit); } catch (e) { /* cache corrompido: relê abaixo */ }
+    }
+
     // Caminho rápido: ordena e limita no SERVIDOR (orderBy data desc + limit) —
     // traz só os `max` mais recentes em um round-trip, sem paginar a coleção
     // inteira. PORÉM o orderBy do Firestore (a) EXCLUI docs que não têm o campo
@@ -347,7 +367,7 @@ function listarLogsAuditoria(token, limite) {
         })
         .slice(0, max);
     }
-    return docs.map(function (d) {
+    const resultado = docs.map(function (d) {
       return {
         data:    dataParaIsoSegura_(d.data),
         usuario: String(d.usuario || '').trim(),
@@ -356,5 +376,8 @@ function listarLogsAuditoria(token, limite) {
         detalhe: String(d.detalhe || '').trim()
       };
     });
+
+    try { cache.put(chaveCache, JSON.stringify(resultado), LOGS_CACHE_SEG); } catch (e) {}
+    return resultado;
   });
 }

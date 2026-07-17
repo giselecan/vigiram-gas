@@ -526,10 +526,31 @@
           medicamento: document.getElementById('iptMedicamento').value,
           descricao:   document.getElementById('iptDescricao').value,
           condutas:    document.getElementById('iptCondutas').value,
-          outraConduta: document.getElementById('iptOutraConduta').value
+          outraConduta: document.getElementById('iptOutraConduta').value,
+          // Preserva a idempotencyKey já gerada (se houver) — ver
+          // _persistirIdempotencyKey_ para o motivo de existir.
+          idempotencyKey: idempotencyKeyAtual
         };
         try { sessionStorage.setItem(SS_RASCUNHO, JSON.stringify(r)); } catch (e) { /* storage indisponível — degrada sem quebrar fluxo */ }
       }, 300);
+    }
+
+    /**
+     * Persiste a idempotencyKey no rascunho IMEDIATAMENTE ao gerá-la (não
+     * espera o debounce de 300ms de _salvarRascunho) — antes, a chave vivia
+     * só em variável JS. Se o envio fosse salvo com sucesso no backend mas a
+     * resposta se perdesse (rede caiu) e o usuário recarregasse a página
+     * antes do retry, uma chave NOVA era gerada no reenvio — o backend
+     * (salvarDemandaEspontanea, Cases.gs) não reconhecia como duplicata e
+     * podia criar um segundo caso para a mesma notificação.
+     */
+    function _persistirIdempotencyKey_() {
+      try {
+        const raw = sessionStorage.getItem(SS_RASCUNHO);
+        const r = raw ? JSON.parse(raw) : {};
+        r.idempotencyKey = idempotencyKeyAtual;
+        sessionStorage.setItem(SS_RASCUNHO, JSON.stringify(r));
+      } catch (e) { /* storage indisponível — degrada sem quebrar fluxo */ }
     }
 
     function _lerRascunho() {
@@ -542,6 +563,11 @@
     function _restaurarRascunho() {
       const r = _lerRascunho();
       if (!r) return;
+      // Restaura a idempotencyKey de uma tentativa de envio anterior que não
+      // chegou a confirmar sucesso (ver _persistirIdempotencyKey_) — assim um
+      // reenvio após reload usa a MESMA chave, em vez de gerar uma nova e
+      // arriscar duplicar o caso caso o envio anterior tenha sido salvo.
+      if (r.idempotencyKey) idempotencyKeyAtual = r.idempotencyKey;
       if (r.prontuario)  document.getElementById('iptProntuario').value = r.prontuario;
       if (r.iniciais)    document.getElementById('iptIniciais').value   = r.iniciais;
       if (r.nascimento)  document.getElementById('iptNascimento').value = r.nascimento;
@@ -847,6 +873,7 @@
         idempotencyKeyAtual = (crypto && crypto.randomUUID)
           ? crypto.randomUUID()
           : ('id_' + Date.now() + '_' + Math.random().toString(36).slice(2));
+        _persistirIdempotencyKey_();
       }
 
       const dados = {
