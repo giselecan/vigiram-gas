@@ -18,6 +18,17 @@
  *  qualquer pasta acessível ao deployer.
  *
  *  Helpers de hash/hex/comparação são reutilizados por Auth.gs (#3).
+ *
+ *  CONTENÇÃO DO PILOTO — verificarAmbienteAutorizado_() (chamada em todo
+ *  doGet/doPost, ver Router.gs) trava três coisas, todas via Script
+ *  Properties (nunca hardcoded): (1) hash de adulteração da autoria,
+ *  (2) e-mail do deployer / scriptId autorizado — bloqueia cópia do projeto
+ *  feita por outra conta/unidade, e (3) validade do piloto (opcional, ver
+ *  definirValidadePiloto_()) — bloqueia o uso, mesmo do ambiente já
+ *  autorizado, após a data combinada, para evitar que o piloto se estenda
+ *  ou seja replicado para outra unidade hospitalar sem um novo acordo.
+ *  Isto NÃO substitui um acordo formal de uso/piloto com a instituição —
+ *  é só a trava técnica, redundante com o combinado por escrito.
  */
 
 const _PROP_ETL_SECRET   = 'ETL_SECRET';
@@ -156,6 +167,7 @@ function validarFolderPermitido_(folderId) {
 
 const _PROP_ENV_EMAIL     = 'VIGIRAM_OWNER_EMAIL';
 const _PROP_ENV_SCRIPT_ID = 'VIGIRAM_AUTHORIZED_SCRIPT_ID';
+const _PROP_PILOT_EXPIRA  = 'VIGIRAM_PILOT_EXPIRA'; // AAAA-MM-DD — opcional, ver definirValidadePiloto_()
 
 const _AUTORIA_GISELE_ = Object.freeze({
   AUTOR:   'GISELE CRISTINE ARAUJO NASCIMENTO',
@@ -211,7 +223,59 @@ function verificarAmbienteAutorizado_() {
     );
   }
 
+  // Validade do piloto (opcional — sem PILOT_EXPIRA definido, sem expiração automática).
+  // Ver definirValidadePiloto_(). Passada a data, bloqueia até renovação manual, mesmo
+  // para o ambiente já autorizado — evita que o piloto continue (ou seja estendido a
+  // outra unidade) indefinidamente sem um novo acordo.
+  const dataExpiracaoPiloto = props.getProperty(_PROP_PILOT_EXPIRA);
+  if (dataExpiracaoPiloto) {
+    const limite = new Date(dataExpiracaoPiloto + 'T23:59:59-03:00');
+    if (!isNaN(limite.getTime()) && Date.now() > limite.getTime()) {
+      throw new Error(
+        'VigiRAM: piloto expirado em ' + dataExpiracaoPiloto + '. ' +
+        'Este sistema é um piloto de propriedade intelectual de ' + _AUTORIA_GISELE_.AUTOR +
+        ', licenciado por prazo determinado. O uso contínuo ou a expansão para outra ' +
+        'unidade após esse prazo não está autorizado. Para renovar ou negociar o uso ' +
+        'comercial, entre em contato com ' + _AUTORIA_GISELE_.AUTOR + '.'
+      );
+    }
+  }
+
   return true;
+}
+
+// SEGURANÇA: setters de validade do piloto terminam em "_" DE PROPÓSITO — mesmo motivo
+// dos setters do ETL_SECRET acima: sem o sufixo ficariam expostos a google.script.run e
+// qualquer visitante anônimo poderia apagar/estender o prazo do piloto. Rodar manualmente
+// pelo editor do Apps Script.
+
+/**
+ * Define a data-limite do piloto. Após 23:59 (horário de Brasília) dessa data,
+ * verificarAmbienteAutorizado_() passa a bloquear doGet/doPost até alguém rodar
+ * de novo esta função com uma nova data (renovação) ou removerValidadePiloto_().
+ * Ex.: definirValidadePiloto_('2026-12-31')
+ */
+function definirValidadePiloto_(dataISO) {
+  const data = String(dataISO || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || isNaN(new Date(data + 'T23:59:59-03:00').getTime())) {
+    throw new Error("Use o formato AAAA-MM-DD. Ex.: definirValidadePiloto_('2026-12-31')");
+  }
+  PropertiesService.getScriptProperties().setProperty(_PROP_PILOT_EXPIRA, data);
+  return 'Validade do piloto definida para ' + data + ' 23:59 (horário de Brasília).';
+}
+
+/** Consulta a data-limite atual do piloto (ou confirma que não há expiração automática). */
+function verValidadePiloto_() {
+  const data = PropertiesService.getScriptProperties().getProperty(_PROP_PILOT_EXPIRA);
+  Logger.log(data ? ('Piloto expira em ' + data + ' 23:59 (horário de Brasília).')
+                   : 'Sem validade definida — piloto sem expiração automática.');
+  return data || null;
+}
+
+/** Remove a expiração automática do piloto (uso manual, ex. após virar contrato comercial). */
+function removerValidadePiloto_() {
+  PropertiesService.getScriptProperties().deleteProperty(_PROP_PILOT_EXPIRA);
+  return 'Validade do piloto removida — sistema sem expiração automática.';
 }
 
 function travarAmbienteAtual_() {
