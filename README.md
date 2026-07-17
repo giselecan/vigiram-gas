@@ -221,6 +221,14 @@ Detalhes completos, incluindo onde colar o resultado, em
   terminam propositalmente com `_` para ficarem fora do
   `google.script.run` — só executáveis manualmente pelo editor do Apps
   Script (ver `Security.gs` e `Manuntenção.gs`).
+- **Contenção do piloto:** `verificarAmbienteAutorizado_()` (`Security.gs`,
+  chamada em todo `doGet`/`doPost`) trava o ambiente por e-mail do
+  deployer + `scriptId` autorizado (bloqueia cópia do projeto para outra
+  conta/unidade) e, opcionalmente, por data de validade
+  (`definirValidadePiloto_()`) — passado o prazo combinado com a
+  instituição, o sistema bloqueia até renovação manual. É uma trava
+  técnica redundante com o acordo formal do piloto, não um substituto
+  dele.
 - **LGPD:** PII do notificador foi isolada em colunas próprias (ver
   `migration.gs`), e toda gravação relevante é carimbada com autor e
   timestamp (`Audit.gs`) e preservada em log de auditoria imutável.
