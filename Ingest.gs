@@ -57,7 +57,23 @@ function handleUploadRaw(e) {
  * Insere múltiplos casos estruturados na base (Camada Ouro).
  * Anti-duplicação por id_caso (lookup individual no Firestore) e alertas
  * por setor (Notify.gs, inalterado).
+ *
+ * DEDUP POR PRONTUÁRIO+GATILHO (não mais por dia — ver ETL v3.2): o robô
+ * PowerShell manda id_caso = "VIGI-{prontuario}-{gatilho}", estável enquanto
+ * o mesmo antídoto continuar sendo dispensado pro mesmo paciente. Isso já
+ * elimina caso novo por dia (ver comentário no loop abaixo).
+ *
+ * JANELA DE REABERTURA (15 dias): se o gatilho disparar de novo para o
+ * MESMO prontuário+medicamento depois que o caso anterior já foi ENCERRADO
+ * (CONCLUÍDO/DESCARTADO) há mais de 15 dias, trata como um episódio novo
+ * (ex.: reinternação) — o caso antigo é ARQUIVADO sob um id separado (cópia
+ * integral, nunca é sobrescrito) e o id_caso limpo volta a ficar disponível
+ * para um caso novo do zero. Casos ainda ABERTOS (pendente triagem/em
+ * investigação) nunca são duplicados, não importa a idade — reabrir um
+ * trabalho que já está em andamento não ajuda o farmacêutico.
  */
+const JANELA_REABERTURA_DIAS = 15;
+
 function handleInsertDB(e) {
   try {
     const dados = JSON.parse(e.postData.contents);
@@ -69,15 +85,33 @@ function handleInsertDB(e) {
     // caminho de resposta ao robô.
     const paraInserir = [];               // [{ id, objeto }]
     const novosCasosPorSetor = {};
+    const agora = new Date();
+    const JANELA_REABERTURA_MS = JANELA_REABERTURA_DIAS * 24 * 60 * 60 * 1000;
 
     dados.forEach(function (caso) {
       const idLimpo = String(caso.id_caso).trim();
 
       // Anti-duplicação: lookup direto O(1), não precisa carregar a base inteira.
       const existente = fsGetDoc_(SCHEMA.FS.CASOS, idLimpo);
-      if (existente) return;
+      if (existente) {
+        const terminal = existente.status === SCHEMA.STATUS.CONCLUIDO ||
+                          existente.status === SCHEMA.STATUS.DESCARTADO;
+        if (!terminal) return; // ainda em aberto — não duplica, não reabre
 
-      const agora = new Date();
+        const criadoEm = existente.criadoEm ? new Date(existente.criadoEm) : null;
+        const dentroDaJanela = criadoEm && ((agora.getTime() - criadoEm.getTime()) <= JANELA_REABERTURA_MS);
+        if (dentroDaJanela) return; // encerrado recentemente — mesmo contexto, não reabre
+
+        // Passou a janela de 15 dias com o caso já encerrado: ARQUIVA o caso
+        // antigo inteiro sob um id próprio (fsSetDoc_ é PATCH/upsert — nunca
+        // perde dado) antes de liberar o id_caso limpo para o episódio novo.
+        // NUNCA reaproveita o doc antigo diretamente: fsBatchSet_/fsSetDoc_
+        // fazem overwrite por id, e sobrescrever destruiria a investigação/
+        // E2B/VigiMed do caso anterior.
+        const idArquivo = idLimpo + '-ARQ-' + Utilities.formatDate(criadoEm, Session.getScriptTimeZone(), 'yyyyMMddHHmmss');
+        fsSetDoc_(SCHEMA.FS.CASOS, idArquivo, existente);
+      }
+
       // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #5): grava `data`
       // como Date real sempre que o robô PowerShell mandar um formato
       // reconhecível (BR ou ISO — ver _parseDataFlexivel_, Utils.gs), em vez
@@ -103,6 +137,7 @@ function handleInsertDB(e) {
         dataVigimed: '', observacoes: '', naranjoRespostas: '',
         lote: '', laboratorio: '', relatoNotificador: '', condutaNotificador: '',
         notificador: { nome: '', categoria: '', email: '', dataNotificacao: '' },
+        criadoEm: agora,
         auditoria: { atualizadoPor: 'ETL', atualizadoEm: agora }
       };
 
