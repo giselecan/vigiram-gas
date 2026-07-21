@@ -1,10 +1,12 @@
 /**
  * @fileoverview Router.gs — Pontos de entrada HTTP. Só roteamento.
- * A lógica vive nos módulos Cases / Ingest / Notify. Segurança em Security.gs.
+ * A lógica de negócio vive na library Backend (projeto pessoal, ver
+ * github.com/giselecan/vigiram-backend). Este projeto institucional
+ * mantém só o front-end (HTML) e este roteamento fino.
  *
- * FASE 7 (#2): doPost agora EXIGE assinatura HMAC (verificarAssinaturaETL_)
- * para as ações de escrita do ETL (uploadRaw, insertDB). Sem assinatura válida,
- * a requisição é rejeitada antes de qualquer escrita.
+ * FASE 7 (#2): doPost EXIGE assinatura HMAC (Backend.validarAssinaturaEtl)
+ * para as ações de escrita do ETL (uploadRaw, insertDB). Sem assinatura
+ * válida, a requisição é rejeitada antes de qualquer escrita.
  */
 
 /**
@@ -12,15 +14,15 @@
  */
 function doPost(e) {
   try {
-    verificarAmbienteAutorizado_();
+    Backend.autorizarAmbiente();
     const acao = e.parameter.action;
     switch (acao) {
       case 'uploadRaw':
-        verificarAssinaturaETL_(e); // Security.gs — lança se inválida
-        return handleUploadRaw(e);  // Ingest.gs
+        Backend.validarAssinaturaEtl(e); // lança se inválida
+        return Backend.handleUploadRaw(e);
       case 'insertDB':
-        verificarAssinaturaETL_(e);
-        return handleInsertDB(e);   // Ingest.gs
+        Backend.validarAssinaturaEtl(e);
+        return Backend.handleInsertDB(e);
       default:
         throw new Error(`Ação POST não reconhecida ou ausente: ${acao}`);
     }
@@ -29,7 +31,7 @@ function doPost(e) {
     // ou falhar, o payload de erro para o robô PowerShell já está pronto.
     const resposta = createJsonResponse({ status: 'erro', mensagem: erro.toString() });
     try {
-      fsRegistrarLog_('ERRO_DOPOST', 'N/A',
+      Backend.registrarLogErro('ERRO_DOPOST', 'N/A',
         String(e && e.parameter && e.parameter.action) + ' — ' + erro.toString());
     } catch (e2) { /* best-effort — nunca bloqueia a resposta */ }
     return resposta;
@@ -45,11 +47,11 @@ function doPost(e) {
  */
 function doGet(e) {
   try {
-    verificarAmbienteAutorizado_();
+    Backend.autorizarAmbiente();
 
     // 1. Rota do robô PowerShell
     if (e.parameter && e.parameter.action === 'getTriggers') {
-      return handleGetTriggers(); // Ingest.gs
+      return Backend.handleGetTriggers();
     }
 
     // 2. Formulário da assistência
@@ -72,7 +74,7 @@ function doGet(e) {
   } catch (erro) {
     const resposta = createJsonResponse({ erro: erro.toString() });
     try {
-      fsRegistrarLog_('ERRO_DOGET', 'N/A',
+      Backend.registrarLogErro('ERRO_DOGET', 'N/A',
         String(e && e.parameter && (e.parameter.action || e.parameter.page)) + ' — ' + erro.toString());
     } catch (e2) { /* best-effort — nunca bloqueia a resposta */ }
     return resposta;
