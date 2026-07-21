@@ -11,6 +11,12 @@ inteiramente como um **Google Apps Script Web App**, sem servidor próprio.
 > Repositório fonte-única para `clasp push`/`clasp pull`. O deploy real
 > acontece no editor do Apps Script ou via integração GitHub ↔ Apps Script.
 
+> **Este repositório é só a casca institucional** (front-end + roteamento
+> fino). Toda a lógica de negócio (autenticação, casos, config, ETL,
+> notificações, Firestore, E2B) vive numa **Apps Script Library** separada,
+> em [`vigiram-backend`](https://github.com/giselecan/vigiram-backend),
+> mantida em conta própria — ver [Arquitetura](#arquitetura).
+
 ---
 
 ## Sumário
@@ -52,18 +58,35 @@ Principais funcionalidades:
   clínicos/laboratoriais.
 - **Dashboard analítico** (`js_dashboard.html`) com indicadores do
   programa de farmacovigilância.
-- **Exportação E2B(R3)** (`E2b.gs`) — gera XML ICH validado
+- **Exportação E2B(R3)** (`E2b.gs`, no backend) — gera XML ICH validado
   estruturalmente para importação no VigiMed.
-- **Notificações por e-mail** (`Notify.gs`) para farmacêuticos por setor,
-  em cada etapa relevante do fluxo.
-- **Autenticação e perfis** (`Auth.gs`, `Admin.gs`) com sessão via
-  `CacheService`, senha com hash salgado (SHA-256) e perfis
+- **Notificações por e-mail** (`Notify.gs`, no backend) para farmacêuticos
+  por setor, em cada etapa relevante do fluxo.
+- **Autenticação e perfis** (`Auth.gs`, `Admin.gs`, no backend) com sessão
+  via `CacheService`, senha com hash salgado (SHA-256) e perfis
   farmacêutico/admin.
-- **Auditoria completa** (`Audit.gs`, `Mirror.gs`) — todo caso é
-  carimbado com autor/timestamp e espelhado de forma append-only no
+- **Auditoria completa** (`Audit.gs`, `Mirror.gs`, no backend) — todo caso
+  é carimbado com autor/timestamp e espelhado de forma append-only no
   Google Sheets como trilha de auditoria LGPD.
 
 ## Arquitetura
+
+O sistema é dividido em **dois projetos Apps Script, em duas contas
+Google diferentes**, ligados por uma [Library](https://developers.google.com/apps-script/guides/libraries):
+
+- **`vigiram-gas`** (este repo, conta institucional): só o front-end
+  (`index.html`, `form.html`, `js_*.html`, `styles.html`, `icons.html`),
+  `Favicon.gs`, e três arquivos finos de roteamento — `Router.gs`
+  (`doGet`/`doPost`), `Triggers.gs` (handlers de trigger) e
+  `FrontendApi.gs` (repasse das funções chamadas por `google.script.run`).
+  Nenhum segredo (Firestore, HMAC do ETL) fica aqui.
+- **[`vigiram-backend`](https://github.com/giselecan/vigiram-backend)**
+  (conta pessoal, importado como library `Backend`): toda a lógica —
+  `Security.gs`, `Auth.gs`, `Admin.gs`, `Cases.gs`, `Config.gs`/
+  `Config write.gs`, `Ingest.gs`, `Notify.gs`, `Firestore.gs`, `Mirror.gs`,
+  `Audit.gs`, `Schema.gs`, `E2b.gs`, scripts de migração/manutenção. As
+  Script Properties com credenciais (Service Account do Firestore, segredo
+  do ETL) ficam só aqui.
 
 ```
                          ┌─────────────────────┐
@@ -72,34 +95,41 @@ Principais funcionalidades:
             │            │  gatilho             │
             │            └─────────────────────┘
             ▼
-   doPost/doGet (Router.gs) ── Security.gs (HMAC, allowlist de pastas)
-            │
-            ▼
-   ┌──────────────────────────── Google Apps Script (V8) ─────────────────────────────┐
-   │  Ingest.gs → Cases.gs → Config.gs → Auth.gs → Admin.gs → Notify.gs → E2b.gs        │
-   │                              │                                                     │
-   │                              ▼                                                     │
-   │                     Firestore.gs (REST API, Service Account/JWT)                   │
-   │                     ── fonte única de verdade (casos, config, usuários, gatilhos)  │
-   │                              │                                                     │
-   │                              ▼                                                     │
-   │                     Mirror.gs → Google Sheets (append-only, auditoria LGPD)        │
-   └────────────────────────────────────────────────────────────────────────────────────┘
-            │
-            ▼
-   Painel Kanban / Formulário (HTML Service: index.html, form.html, js_*.html + Tailwind)
+┌─────────────── vigiram-gas (institucional) ───────────────┐
+│  doGet/doPost (Router.gs) → Backend.autorizarAmbiente()    │
+│  FrontendApi.gs / Triggers.gs → Backend.<função>()         │
+│  index.html, form.html, js_*.html, styles.html, icons.html │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ Apps Script Library
+                           ▼
+┌─────────── vigiram-backend (conta pessoal, library) ───────────┐
+│  Security.gs → Ingest.gs → Cases.gs → Config.gs → Auth.gs →      │
+│  Admin.gs → Notify.gs → E2b.gs                                   │
+│                              │                                   │
+│                              ▼                                   │
+│                     Firestore.gs (REST API, Service Account/JWT) │
+│                     ── fonte única de verdade ──                 │
+│                              │                                   │
+│                              ▼                                   │
+│                     Mirror.gs → Google Sheets (append-only)      │
+└───────────────────────────────────────────────────────────────────┘
             │
             ▼
    E2B(R3) XML  →  importação manual no VigiFlow/VigiMed (Anvisa)
 ```
 
-O Firestore é a **fonte única de verdade** (single source of truth) para
-casos, configuração, usuários e gatilhos. O Google Sheets deixou de ser um
-espelho bidirecional: hoje é só um livro-razão *append-only* usado como
+O Firestore **continua hospedado no domínio da instituição** (projeto GCP
+institucional) — é a **fonte única de verdade** para casos, configuração,
+usuários e gatilhos. O Google Sheets deixou de ser um espelho
+bidirecional: hoje é só um livro-razão *append-only* usado como
 backup/trilha de auditoria — nenhuma rotina do sistema volta a lê-lo para
-decidir comportamento (ver cabeçalho de `Mirror.gs`).
+decidir comportamento (ver cabeçalho de `Mirror.gs`, no backend).
 
 ## Fluxo de um caso
+
+> Os arquivos citados abaixo (`Ingest.gs`, `Cases.gs`, `Audit.gs`,
+> `Mirror.gs`, `E2b.gs`) vivem hoje no repositório
+> [`vigiram-backend`](https://github.com/giselecan/vigiram-backend).
 
 1. **Gatilho detectado** → robô PowerShell envia o alerta via `doPost`
    (`Ingest.gs`, ação `insertDB`), assinado por HMAC.
@@ -116,26 +146,15 @@ decidir comportamento (ver cabeçalho de `Mirror.gs`).
 
 ## Estrutura do repositório
 
+Este repositório (`vigiram-gas`) é só a **casca institucional**:
+
 | Arquivo | Responsabilidade |
 |---|---|
-| `Router.gs` | Pontos de entrada HTTP (`doGet`/`doPost`) — só roteamento. |
-| `Security.gs` | Camada de segurança de borda: HMAC-SHA256 do ETL, allowlist de pastas do Drive. |
-| `Auth.gs` | Autenticação, sessão (`CacheService`) e identidade do usuário. |
-| `Admin.gs` | Gestão de usuários (somente perfil ADMIN). |
-| `Cases.gs` | Operações de caso (triagem, investigação, transações Firestore). |
-| `Config.gs` / `Config write.gs` | Configuração externalizada (setores, listas, Naranjo) — leitura e escrita. |
-| `Ingest.gs` | Camada de ingestão/ETL: recebe alertas do robô, expõe lista de gatilhos. |
-| `Notify.gs` | Disparo de e-mails (alertas, demanda espontânea, conclusão de investigação). |
-| `Firestore.gs` | Cliente REST do Cloud Firestore autenticado por Service Account (JWT/OAuth2). |
-| `Mirror.gs` | Backup append-only Firestore → Google Sheets (auditoria LGPD). |
-| `Audit.gs` | Resolução da identidade do usuário atual para carimbo de auditoria. |
-| `Schema.gs` | Fonte única de verdade de colunas, status e nomes de coleção/aba. |
-| `E2b.gs` | Geração do XML ICH E2B(R3) para importação no VigiMed. |
+| `Router.gs` | Pontos de entrada HTTP (`doGet`/`doPost`) — repassa para a library `Backend` e renderiza os templates HTML (que só existem neste projeto). |
+| `Triggers.gs` | Instalação/remoção/verificação dos triggers de tempo + handlers de 1 linha que chamam `Backend.*` (triggers instaláveis não podem apontar para função de library). |
+| `FrontendApi.gs` | Repasse de 1 linha para cada função que os HTMLs chamam via `google.script.run` (que só consegue chamar função do próprio projeto). |
 | `Favicon.gs` | Ícone da aba do navegador via `setFaviconUrl` (contorna sandbox do iframe do Apps Script). |
-| `Diagnostico.gs` | Utilitário de investigação/diagnóstico (rodar manualmente no editor). |
-| `Manuntenção.gs` | Rotinas administrativas pontuais (limpeza de casos, reset pré go-live). |
-| `MigracaoFirestore.gs`, `migration.gs`, `Migracao schemae2b.gs` | Scripts de migração pontual Sheets → Firestore e de reordenação de schema. |
-| `EXPORT COD.gs` | Exporta o projeto Apps Script inteiro para Markdown (backup/documentação). |
+| `Utils.gs` | Só `createJsonResponse` e `include()` — o resto dos helpers foi para o backend. |
 | `index.html` | Painel Kanban (aplicação principal). |
 | `form.html` | Formulário público de notificação espontânea. |
 | `js_core.html` | Núcleo JS compartilhado do painel (autenticação, config, utilidades). |
@@ -147,8 +166,15 @@ decidir comportamento (ver cabeçalho de `Mirror.gs`).
 | `js_triagem.html` | Fluxo de triagem. |
 | `styles.html` | CSS pré-compilado (Tailwind + estilos customizados), embutido nas páginas. |
 | `icons.html` | Sprite/definições de ícones (Font Awesome). |
-| `appsscript.json` | Manifesto do Apps Script (escopos OAuth, biblioteca OAuth2, config do webapp). |
+| `appsscript.json` | Manifesto do Apps Script (escopos OAuth, biblioteca `Backend`, config do webapp). |
 | `tailwind.config.js`, `tw-input.css`, `build-icons.js` | Tooling de build do CSS/ícones (dev-only, não sobe ao Apps Script). |
+
+Toda a lógica de negócio (`Security.gs`, `Auth.gs`, `Admin.gs`, `Cases.gs`,
+`Config.gs`/`Config write.gs`, `Ingest.gs`, `Notify.gs`, `Firestore.gs`,
+`Mirror.gs`, `Audit.gs`, `Schema.gs`, `E2b.gs`, `Diagnostico.gs`,
+`Manuntenção.gs`, scripts de migração, `EXPORT COD.gs`) está em
+[`vigiram-backend`](https://github.com/giselecan/vigiram-backend) — ver o
+README de lá para a responsabilidade de cada arquivo.
 
 Documentação complementar:
 
@@ -159,17 +185,22 @@ Documentação complementar:
 ## Stack tecnológica
 
 - **Backend:** Google Apps Script (runtime V8), Node.js apenas para tooling de build.
-- **Persistência:** Cloud Firestore (modo Nativo, via REST API) como fonte de verdade; Google Sheets como backup append-only.
+- **Persistência:** Cloud Firestore (modo Nativo, via REST API, projeto institucional) como fonte de verdade; Google Sheets como backup append-only.
 - **Frontend:** HTML Service do Apps Script + Tailwind CSS (pré-compilado) + Font Awesome.
-- **Autenticação:** sessão própria via `CacheService`, hash salgado SHA-256; biblioteca [OAuth2 for Apps Script](https://github.com/googleworkspace/apps-script-oauth2) para o Service Account do Firestore.
+- **Autenticação:** sessão própria via `CacheService`, hash salgado SHA-256; biblioteca [OAuth2 for Apps Script](https://github.com/googleworkspace/apps-script-oauth2) para o Service Account do Firestore (declarada no manifesto do `vigiram-backend`).
 - **Integrações:** robô ETL em PowerShell (fora deste repositório), VigiFlow/VigiMed (Anvisa) via importação manual de XML.
+- **Separação de projetos:** este projeto (casca) consome a lógica de
+  [`vigiram-backend`](https://github.com/giselecan/vigiram-backend) como
+  [Apps Script Library](https://developers.google.com/apps-script/guides/libraries).
 
 ## Configuração e deploy
 
-Pré-requisitos: [clasp](https://github.com/google/clasp) instalado e autenticado, com acesso ao projeto Apps Script.
+Pré-requisitos: [clasp](https://github.com/google/clasp) instalado e
+autenticado, com acesso aos **dois** projetos Apps Script (este e o
+`vigiram-backend`, em contas diferentes).
 
 ```bash
-clasp login          # uma vez por máquina
+clasp login          # uma vez por máquina (conta institucional)
 clasp pull           # traz o estado atual do projeto Apps Script
 # ... editar código ...
 clasp push            # envia o repositório para o Apps Script
@@ -179,20 +210,40 @@ clasp push            # envia o repositório para o Apps Script
 Tailwind, `.md`, `favicon.png` etc.) — o Apps Script recebe apenas os
 arquivos `.gs`/`.html`/`.json` de runtime.
 
-### Script Properties necessárias (Apps Script → Configurações do projeto)
+### Ligar este projeto à library `vigiram-backend`
 
-| Propriedade | Uso |
-|---|---|
-| `FIRESTORE_PROJECT_ID`, `FIRESTORE_CLIENT_EMAIL`, `FIRESTORE_PRIVATE_KEY` | Credenciais do Service Account para `Firestore.gs`. |
-| `FIRESTORE_DATABASE_ID` | Opcional, se não usar o banco `(default)`. |
-| `ETL_SECRET` | Segredo HMAC compartilhado com o robô PowerShell (ver `Security.gs`). Gerar com `gerarSegredoETL_()` e definir com `definirSegredoETL_()`, rodando manualmente no editor — nunca hardcode no código. |
-| `ETL_FOLDER_IDS` | Opcional — CSV de IDs de pasta do Drive permitidos para `uploadRaw`. |
+1. Siga o `README.md` do [`vigiram-backend`](https://github.com/giselecan/vigiram-backend)
+   para criar o projeto na conta pessoal, configurar as Script Properties
+   lá e salvar uma versão.
+2. Edite `appsscript.json` deste repo: troque
+   `COLOQUE_AQUI_O_SCRIPT_ID_DO_PROJETO_BACKEND_PESSOAL` pelo Script ID
+   real e `"version"` pelo número da versão salva (ou adicione a library
+   pelo editor do Apps Script — `Libraries` (+) → colar o Script ID →
+   identificador **`Backend`** — o que gera a mesma entrada em
+   `appsscript.json` automaticamente).
+3. `clasp push` neste projeto.
+
+Sem esse passo, `doGet`/`doPost`/os HTMLs não funcionam — todos dependem
+de `Backend.*`.
+
+### Script Properties
+
+Não ficam mais aqui. `FIRESTORE_PROJECT_ID`, `FIRESTORE_CLIENT_EMAIL`,
+`FIRESTORE_PRIVATE_KEY`, `FIRESTORE_DATABASE_ID`, `ETL_SECRET`,
+`ETL_FOLDER_IDS` são configuradas nas Script Properties do projeto
+**`vigiram-backend`** (conta pessoal) — ver o README de lá.
 
 ### Dependências do manifesto (`appsscript.json`)
 
-- Biblioteca **OAuth2 for Apps Script** (Script ID em `appsscript.json`).
-- Escopos: Drive, Sheets, envio de e-mail, requisições externas (Firestore REST) e leitura do próprio projeto.
-- Web app publicado como `USER_DEPLOYING`, acesso `ANYONE_ANONYMOUS` (o formulário e o painel exigem login próprio via `Auth.gs`, não o login do Google).
+- Biblioteca **`Backend`** (aponta para o `vigiram-backend`, Script ID +
+  versão).
+- Escopos: Drive, Sheets, envio de e-mail, requisições externas (Firestore
+  REST) e leitura do próprio projeto — precisam continuar declarados aqui
+  porque a autorização de quem executa o Web App (este projeto) vale
+  também para o código da library que ele chama.
+- Web app publicado como `USER_DEPLOYING`, acesso `ANYONE_ANONYMOUS` (o
+  formulário e o painel exigem login próprio via `Auth.gs`, no backend,
+  não o login do Google).
 
 ## Build do CSS (Tailwind)
 
@@ -210,6 +261,10 @@ Detalhes completos, incluindo onde colar o resultado, em
 
 ## Segurança
 
+> `Security.gs`, `Auth.gs`, `Admin.gs`, `Config write.gs`, `Manuntenção.gs`
+> e `Audit.gs`, citados abaixo, vivem no
+> [`vigiram-backend`](https://github.com/giselecan/vigiram-backend).
+
 - **ETL (robô PowerShell):** toda escrita (`insertDB`, `uploadRaw`) exige
   assinatura HMAC-SHA256 com janela anti-replay de ±5 min e comparação em
   tempo constante (`Security.gs`).
@@ -219,8 +274,17 @@ Detalhes completos, incluindo onde colar o resultado, em
   verificado no servidor (`Admin.gs`, `Config write.gs`).
 - **Funções perigosas** (definir segredo, apagar casos, resetar base)
   terminam propositalmente com `_` para ficarem fora do
-  `google.script.run` — só executáveis manualmente pelo editor do Apps
-  Script (ver `Security.gs` e `Manuntenção.gs`).
+  `google.script.run` **e** fora do alcance deste projeto institucional —
+  funções terminadas em `_` não são visíveis para quem consome a library
+  `Backend` — só executáveis manualmente pelo editor do próprio
+  `vigiram-backend` (ver `Security.gs` e `Manuntenção.gs`). `PublicApi.gs`,
+  no backend, expõe deliberadamente só 3 atalhos para o `Router.gs` desta
+  casca chamar.
+- **Trava de ambiente:** `verificarAmbienteAutorizado_` (`Security.gs`,
+  backend) verifica e-mail de deploy autorizado e `ScriptApp.getScriptId()`
+  contra um ID travado — dentro de uma library, `getScriptId()` retorna o
+  ID de quem chama (este projeto institucional), então a trava continua
+  valendo sem alterações mesmo após a separação.
 - **LGPD:** PII do notificador foi isolada em colunas próprias (ver
   `migration.gs`), e toda gravação relevante é carimbada com autor e
   timestamp (`Audit.gs`) e preservada em log de auditoria imutável.
@@ -245,8 +309,9 @@ Implementation Guide oficial do ICH — está em
 
 ## Scripts utilitários
 
-Rodar sempre manualmente pelo editor do Apps Script (não expostos ao
-frontend):
+Vivem no [`vigiram-backend`](https://github.com/giselecan/vigiram-backend),
+rodar sempre manualmente pelo editor do Apps Script daquele projeto (não
+expostos a este front-end):
 
 - `Diagnostico.gs` → `diagnosticarAdmin()`: inspeciona coleções do
   Firestore sem alterar nada, útil para depurar problemas de dados.
