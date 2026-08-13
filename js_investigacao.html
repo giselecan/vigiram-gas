@@ -640,7 +640,7 @@ function _adicionarLinhaExameEstruturado(exame) {
     <td class="py-1 px-2"><input type="text" class="exame-nome w-full border rounded px-2 py-1 text-xs uppercase" value="${escapeHtml(e.nome || '')}"></td>
     <td class="py-1 px-2"><input type="date" class="exame-data w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.data || '')}"></td>
     <td class="py-1 px-2"><input type="text" class="exame-valor w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.valor || '')}"></td>
-    <td class="py-1 px-2"><input type="text" class="exame-unidade w-full border rounded px-2 py-1 text-xs" placeholder="mg/dL" value="${escapeHtml(e.unidade || '')}"></td>
+    <td class="py-1 px-2"><input type="text" class="exame-unidade w-full border rounded px-2 py-1 text-xs" placeholder="mg/dL" list="listaUnidadesExame" value="${escapeHtml(e.unidade || '')}"></td>
     <td class="py-1 px-2"><input type="text" class="exame-refmin w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMin || '')}"></td>
     <td class="py-1 px-2"><input type="text" class="exame-refmax w-full border rounded px-2 py-1 text-xs" value="${escapeHtml(e.refMax || '')}"></td>
     <td class="py-1 px-2"><button type="button" data-acao="remover-exame" data-linha="${id}" class="text-red-400 hover:text-red-600" title="Remover exame"><i class="fas fa-trash-alt"></i></button></td>`;

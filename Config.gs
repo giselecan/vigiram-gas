@@ -54,7 +54,11 @@ const DEFAULT_LISTAS = {
                                "USO APÓS VALIDADE", "LOTE TESTADO — DENTRO DAS ESPECIFICAÇÕES",
                                "LOTE TESTADO — FORA DAS ESPECIFICAÇÕES", "ERRO DE MEDICAÇÃO",
                                "USO INDEVIDO", "ABUSO", "EXPOSIÇÃO OCUPACIONAL", "USO OFF-LABEL"],
-  unidade_intervalo:          ["HORA(S)", "DIA(S)", "SEMANA(S)", "MÊS(ES)", "ANO(S)"]
+  unidade_intervalo:          ["HORA(S)", "DIA(S)", "SEMANA(S)", "MÊS(ES)", "ANO(S)"],
+  // Melhoria UCUM/VigiFlow — dropdown fechado p/ G.k.4.r.1b (Unidade da
+  // Dose). Rótulos aqui precisam bater (após toUpperCase) com as chaves de
+  // SCHEMA.E2B.DOSE_UNIDADE_MAP — ver Schema.gs.
+  dose_unidade:               ["mg", "g", "mcg", "mL", "L", "UI", "%"]
 };
 
 const DEFAULT_NARANJO = [
