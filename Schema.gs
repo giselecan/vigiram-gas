@@ -243,6 +243,31 @@ const SCHEMA = {
       'ANO(S)':    'a'
     },
 
+    // Melhoria UCUM/VigiFlow — G.k.4.r.1b Unidade da Dose (doseQuantity/@unit,
+    // PQ). UCUM é case-sensitive e sem sinônimo: "UI"/"ui"/"U.I." não é
+    // "[iU]", "MG" não é "mg" — unidade fora do token exato faz o VigiFlow
+    // rejeitar ou descartar o bloco de posologia na importação. Chaves em
+    // maiúsculo porque o lookup em E2b.gs faz .toUpperCase() antes (mesmo
+    // padrão do UNIDADE_INTERVALO_MAP acima), o que já resolve variação de
+    // caixa sozinho — entradas como 'U.I.' cobrem variação de PONTUAÇÃO, que
+    // toUpperCase() não resolve. Cobre só os rótulos do dropdown fechado
+    // (invDoseUnidade) + variações mais comuns já vistas em casos antigos
+    // (texto livre, pré-dropdown). Adicionar aqui ao adicionar opção nova no
+    // dropdown de Unidade da Dose (painel admin → Listas e Dropdowns).
+    DOSE_UNIDADE_MAP: {
+      'MG':          'mg',
+      'G':           'g',
+      'MCG':         'ug',
+      'MICROGRAMA':  'ug',
+      'MICROGRAMAS': 'ug',
+      'ML':          'mL',
+      'L':           'L',
+      'UI':          '[iU]',
+      'U.I.':        '[iU]',
+      'UI.':         '[iU]',
+      '%':           '%'
+    },
+
     // D.5 — espelha valores livres vindos do ETL (relatório de entradas).
     // Cobre variações comuns de grafia da origem bruta.
     SEXO_MAP: {

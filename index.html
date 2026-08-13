@@ -730,6 +730,19 @@
                       <tbody id="corpoExamesEstruturados"></tbody>
                     </table>
                   </div>
+                  <!-- Melhoria UCUM/VigiFlow: sugestões de unidade (texto livre continua
+                       permitido — unidades de laboratório variam demais p/ dropdown
+                       fechado). Normalização p/ token UCUM acontece na exportação
+                       (SCHEMA.E2B.DOSE_UNIDADE_MAP em E2b.gs), não aqui. -->
+                  <datalist id="listaUnidadesExame">
+                    <option value="mg/dL"></option>
+                    <option value="g/dL"></option>
+                    <option value="mmol/L"></option>
+                    <option value="mEq/L"></option>
+                    <option value="UI/L"></option>
+                    <option value="%"></option>
+                    <option value="/mm3"></option>
+                  </datalist>
                 </div>
 
                 <!-- F2-13 — visibilidade controlada por _preencherFormularioInvestigacao
@@ -790,10 +803,15 @@
                 </div>
                 <div>
                   <label class="block text-xs font-bold text-gray-600 mb-1">Unidade</label>
-                  <input type="text" id="invDoseUnidade"
-                         oninput="agendarAutosave(); atualizarProgresso()"
-                         placeholder="Ex: mg"
-                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                  <!-- Melhoria UCUM/VigiFlow: dropdown fechado (era texto livre) —
+                       elimina variação de grafia (UI/ui/U.I., MG/mg…) que o
+                       VigiFlow rejeita por não bater com o token UCUM exato.
+                       Populado via _aplicarConfig() (config.listas.dose_unidade). -->
+                  <select id="invDoseUnidade"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
                 </div>
               </div>
 

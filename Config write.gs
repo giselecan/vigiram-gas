@@ -300,7 +300,9 @@ function salvarListas(listas, token) {
                            'motivo_descarte', 'readministrado', 'evolucao',
                            // Fase 2 (roadmap) — dropdowns novos da tela de investigação
                            'acao_adotada', 'relacao_medicamento_evento',
-                           'problemas_adicionais', 'unidade_intervalo'];
+                           'problemas_adicionais', 'unidade_intervalo',
+                           // Melhoria UCUM/VigiFlow
+                           'dose_unidade'];
 
     let salvos = 0;
     Object.entries(listas).forEach(function (par) {

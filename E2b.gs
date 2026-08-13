@@ -395,7 +395,14 @@ function _diasEntreE2B_(inicioYYYYMMDD, fimYYYYMMDD) {
 function _montarComponenteExameE2B_(exame) {
   const nome     = escaparHtml_(String((exame && exame.nome) || 'EXAME COMPLEMENTAR').trim().toUpperCase());
   const dataExame = _formatarDataE2B_(exame && exame.data);
-  const unidade  = escaparHtml_(String((exame && exame.unidade) || '').trim());
+  // Melhoria UCUM/VigiFlow — mesmo problema do doseQuantity (F.r.3.2/3.3
+  // também é PQ, `unit` precisa ser token UCUM exato). Campo continua texto
+  // livre aqui (unidade de exame é variada demais para dropdown fechado —
+  // "mg/dL", "mmol/L" etc.), mas corrige os casos simples que batem
+  // exatamente com o mapa (ex.: "UI"); unidades compostas sem match no mapa
+  // passam como digitadas, sem tentativa de parsing do composto.
+  const unidadeBruta = String((exame && exame.unidade) || '').trim();
+  const unidade  = escaparHtml_(SCHEMA.E2B.DOSE_UNIDADE_MAP[unidadeBruta.toUpperCase()] || unidadeBruta);
   const valorRaw = String((exame && exame.valor) || '').trim();
   // CORREÇÃO (auditoria_qa_datas_tipagem_2026-07-13.md #2): valorRaw="150.000"
   // (ex.: plaquetas, convenção BR de milhar) virava Number("150.000")=150 —
@@ -654,7 +661,15 @@ function _montarXmlE2B_(caso, usuario, config) {
   // "1.000,5" virava "1.000.5" (dois pontos → PQ inválido). _normalizarNumeroE2B_
   // resolve as convenções BR de forma determinística (ver helper).
   const dose          = _normalizarNumeroE2B_(caso.doseMedicamento);
-  const doseUnidade   = escaparHtml_(String(caso.doseUnidade || '').toLowerCase()) || 'mg';
+  // Melhoria UCUM/VigiFlow — G.k.4.r.1b exige token UCUM exato no atributo
+  // `unit` (case-sensitive, sem sinônimo): "UI"/"ui"/"U.I." não é "[iU]".
+  // invDoseUnidade agora é dropdown fechado (SCHEMA.E2B.DOSE_UNIDADE_MAP
+  // cobre os rótulos + variações de casos antigos, texto livre pré-dropdown).
+  // Sem match: mantém o valor digitado como está (não força fallback 'mg' —
+  // um default fabricado é pior que um valor que pode falhar a validação,
+  // porque erra silenciosamente em vez de sinalizar o problema).
+  const doseUnidadeBruta = String(caso.doseUnidade || '').trim();
+  const doseUnidade   = escaparHtml_(SCHEMA.E2B.DOSE_UNIDADE_MAP[doseUnidadeBruta.toUpperCase()] || doseUnidadeBruta);
   const lote          = escaparHtml_(String(caso.lote || '').toUpperCase());
   // F0-09 — G.k.3.3 Nome do detentor/fabricante.
   const laboratorioE2B = escaparHtml_(String(caso.laboratorio || '').toUpperCase());
