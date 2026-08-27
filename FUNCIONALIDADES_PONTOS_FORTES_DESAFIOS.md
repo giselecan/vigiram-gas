@@ -20,11 +20,16 @@ alerta até o envio do caso para a Anvisa.
 ## 2. O problema que existia antes do sistema
 
 Antes do VigiRAM, identificar uma reação adversa a medicamento dependia quase inteiramente
-de pessoas:
+da capacidade individual do farmacêutico:
 
-- Um farmacêutico precisava **lembrar de revisar** os prontuários dos pacientes que
-  usaram certos medicamentos de risco, um a um, sem nenhuma lista automática de quem
-  precisava ser olhado.
+- A identificação de um possível caso dependia da **própria análise do farmacêutico** —
+  ele precisava conhecer de cabeça os medicamentos "sinalizadores" (aqueles que costumam
+  indicar uma reação em andamento) e cruzar essa informação manualmente com os prontuários,
+  sem nenhuma ferramenta que fizesse essa varredura por ele.
+- **Já existia gestão do processo** — a farmácia acompanhava o tema, sim — mas faltava uma
+  **ação detalhada e aprofundada** por trás dela: não havia um método padronizado para
+  investigar cada caso a fundo (causalidade, gravidade, desfecho), então o acompanhamento
+  ficava mais na intenção do que na prática.
 - Quando a enfermagem ou a equipe médica percebia algo estranho num paciente, o relato
   acontecia de forma **informal** — um comentário verbal, um bilhete, uma mensagem avulsa —
   fácil de se perder ou de nunca chegar a quem deveria avaliar.
@@ -35,8 +40,12 @@ de pessoas:
 - Notificar a Anvisa, quando o caso merecia, significava **digitar tudo de novo** em outro
   sistema — repetindo dados que já tinham sido levantados durante a investigação.
 
-Esses pontos custam tempo da equipe, atrasam decisões clínicas e — o mais importante —
-aumentam a chance de uma reação adversa real passar despercebida.
+O resultado de tudo isso tinha um nome conhecido no setor: **a subnotificação reinava.**
+Sem uma ferramenta que sustentasse a análise do dia a dia, boa parte dos casos suspeitos
+nunca chegava a ser formalmente registrada nem acompanhada até o fim — não por falta de
+atenção da equipe, mas por falta de um processo que desse conta do volume real de trabalho.
+Isso custa tempo da equipe, atrasa decisões clínicas e — o mais importante — aumenta a
+chance de uma reação adversa real passar despercebida.
 
 ---
 
@@ -63,8 +72,9 @@ A partir daí, o farmacêutico:
    tenha causado aquela reação.
 3. **Conclui o caso**, registrando a gravidade e o desfecho (o paciente recuperou-se? foi
    preciso internar? houve óbito?).
-4. **Se necessário, gera o material para notificar a Anvisa**, aproveitando boa parte dos
-   dados que já foram levantados na investigação.
+4. **Cria o arquivo pronto para importar no VigiMed** (o sistema de notificação da Anvisa),
+   aproveitando boa parte dos dados que já foram levantados na investigação — o farmacêutico
+   não digita o caso de novo, só confere e importa.
 
 Tudo isso fica visível, em tempo real, num painel único — sem planilhas paralelas, e-mails
 perdidos ou anotações em papel.
@@ -187,13 +197,14 @@ farmacovigilância do hospital, organizado em quatro blocos:
 Tudo isso pode ser filtrado por setor, farmacêutico e período — permitindo tanto uma visão
 ampla do hospital quanto um recorte específico para uma reunião de setor.
 
-### 4.9 Geração do documento de notificação à Anvisa (VigiMed)
+### 4.9 Criação do arquivo de notificação à Anvisa (VigiMed)
 
-Quando um caso investigado precisa ser formalmente notificado à Anvisa, o sistema gera boa
-parte do arquivo exigido pelo módulo **VigiMed**, reaproveitando os dados que já foram
-levantados durante a investigação — o farmacêutico não precisa digitar o caso inteiro de
-novo em outro lugar. Isso reduz bastante o tempo gasto nessa etapa, que hoje é uma das mais
-demoradas do processo manual tradicional.
+O sistema **cria o arquivo pronto para ser importado no VigiMed**, o sistema de notificação
+da Anvisa, reaproveitando os dados que já foram levantados durante a investigação. Não é um
+recurso condicional ou reservado a poucos casos: sempre que a investigação é concluída como
+um caso a notificar, o arquivo já sai pronto para o farmacêutico só conferir e importar — sem
+digitar o caso inteiro de novo em outro sistema. Isso reduz bastante o tempo gasto nessa
+etapa, que hoje é uma das mais demoradas do processo manual tradicional.
 
 ### 4.10 Alertas automáticos por e-mail
 
@@ -254,9 +265,9 @@ Sem entrar em detalhes técnicos, vale destacar como princípio de gestão:
 - **Tempo de resposta visível e mensurável.** A gestão passa a enxergar, com dados reais,
   quanto tempo a farmácia leva para responder a um alerta — informação essencial para
   planejar equipe e prioridades.
-- **Notificação à Anvisa muito mais rápida.** O trabalho de preencher o caso na investigação
-  já alimenta boa parte do que a Anvisa pede, evitando repetir a digitação de dados que o
-  sistema já tem.
+- **Notificação à Anvisa muito mais rápida.** O sistema já cria o arquivo pronto para
+  importar no VigiMed a partir do que foi preenchido na investigação — evita repetir a
+  digitação de dados que o sistema já tem.
 - **Histórico protegido.** Um caso concluído (principalmente se já foi enviado à Anvisa) não
   corre o risco de ser alterado por engano — qualquer mudança exige uma ação deliberada e
   fica registrada.
@@ -270,11 +281,13 @@ Sem entrar em detalhes técnicos, vale destacar como princípio de gestão:
 
 | Problema antes do sistema | Solução entregue pelo VigiRAM |
 |---|---|
-| Revisão manual de prontuário, sem lista de quem observar | Detecção automática dos pacientes que usaram medicamentos de risco |
+| Identificação dependia da análise individual do farmacêutico sobre os medicamentos sinalizadores, sem apoio automático | Detecção automática dos pacientes que usaram medicamentos de risco |
+| Havia gestão do tema, mas sem uma ação detalhada e aprofundada de investigação por trás dela | Investigação clínica estruturada, com método padronizado do início ao fim |
+| Subnotificação reinava — muitos casos suspeitos nunca chegavam a ser registrados | Canal de notificação aberto a toda a equipe assistencial, não só à farmácia |
 | Relatos informais da equipe, fáceis de perder | Formulário único, direto para o farmacêutico responsável |
 | Julgamento "no olho" sobre causalidade | Questionário clínico padronizado, com resultado objetivo |
 | Nenhum indicador consolidado para a gestão | Painel com números, gravidade, tempo de resposta e ranking por setor |
-| Notificação à Anvisa exigia redigitar tudo | Boa parte do arquivo é gerada a partir do que já foi investigado |
+| Notificação à Anvisa exigia redigitar tudo | O sistema já cria o arquivo pronto para importar no VigiMed |
 | Sem trilha clara de quem fez o quê | Toda ação relevante registrada com autor, data e hora |
 | Caso concluído podia ser alterado por engano | Trava de edição após conclusão, só reaberta por ação deliberada |
 
