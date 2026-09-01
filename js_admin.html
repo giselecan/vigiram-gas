@@ -1075,7 +1075,7 @@ function _renderSecaoSetores(area, geracao) {
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Setor</th>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Farmacêutico(s) Responsável(is)</th>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">E-mail(s)</th>
-                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase w-32">Varredura</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase w-28">Varredura</th>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase w-10"></th>
               </tr>
             </thead>
@@ -1096,7 +1096,7 @@ function _renderSecaoSetores(area, geracao) {
 function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails, ativo) {
   const lig = ativo !== false; // undefined (linha nova) nasce ativo
   return `
-        <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm ${lig ? '' : 'bg-gray-50/60'}" id="setorLinha_${idx}">
+        <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm ${lig ? '' : 'bg-gray-50 opacity-60'}" id="setorLinha_${idx}">
           <td class="px-4 py-2.5">
             <input type="text" value="${escapeHtml(setor || '')}" data-campo="setor" data-idx="${idx}" placeholder="NOME DO SETOR"
                    class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
@@ -1110,12 +1110,24 @@ function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails, ativo) {
                    class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
           </td>
           <td class="px-4 py-2.5">
-            <label class="inline-flex items-center gap-2 cursor-pointer" title="Desligado: o robô para de gerar casos para este setor.">
-              <input type="checkbox" class="sr-only peer" data-campo="ativo" data-idx="${idx}" ${lig ? 'checked' : ''}
-                     onchange="_cfgAtualizarRotuloVarredura(${idx})">
-              <span class="relative w-9 h-5 bg-gray-300 peer-checked:bg-teal-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform peer-checked:after:translate-x-4"></span>
+            <!-- ATENCAO: o Tailwind aqui e PRE-COMPILADO dentro de styles.html
+                 (ver README-build-css.md) - classe que nao esta no CSS gerado
+                 simplesmente nao existe em runtime. Este toggle reusa
+                 EXATAMENTE o vocabulario do toggle de Gatilhos (acima, em
+                 _gatRenderTabela), que ja esta compilado. Nao troque pelos
+                 utilitarios "after:" sem rodar "npm run build:css" e recolar
+                 o resultado em styles.html.
+                 (Sem crase neste comentario: ele vive DENTRO do template
+                 literal desta funcao - uma crase aqui encerraria a string.) -->
+            <div class="flex items-center gap-2" title="Desligado: o robô para de gerar casos para este setor.">
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" class="sr-only peer" data-campo="ativo" data-idx="${idx}" ${lig ? 'checked' : ''}
+                       onchange="_cfgAtualizarRotuloVarredura(${idx})">
+                <div class="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:bg-teal-600 transition-colors"></div>
+                <span class="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform peer-checked:translate-x-5"></span>
+              </label>
               <span id="setorRotuloVarredura_${idx}" class="text-xs font-bold uppercase ${lig ? 'text-teal-700' : 'text-gray-400'}">${lig ? 'Ativo' : 'Inativo'}</span>
-            </label>
+            </div>
           </td>
           <td class="px-4 py-2.5 text-center">
             <button onclick="_cfgRemoverSetor(${idx})"
@@ -1135,7 +1147,8 @@ function _cfgAtualizarRotuloVarredura(idx) {
   const lig = !!(chk && chk.checked);
   rotulo.textContent = lig ? 'Ativo' : 'Inativo';
   rotulo.className = 'text-xs font-bold uppercase ' + (lig ? 'text-teal-700' : 'text-gray-400');
-  linha.classList.toggle('bg-gray-50/60', !lig);
+  linha.classList.toggle('bg-gray-50', !lig);
+  linha.classList.toggle('opacity-60', !lig);
 }
 
 function _cfgAdicionarSetor() {
