@@ -719,3 +719,162 @@ function registrarImportacaoVigimed(dados, token) {
     }
   });
 }
+
+// ============================================================
+// EXCLUSÃO DEFINITIVA DE CASO — SOMENTE ADMIN
+//
+// Para notificação criada por engano (gatilho disparado errado, demanda
+// espontânea duplicada, teste que vazou para produção). NÃO é o caminho
+// normal de encerrar caso sem RAM — para isso existe a triagem com
+// DESCARTADO, que preserva o caso e o motivo.
+//
+// APAGA DE VERDADE: fsDeleteDoc_ em casos_ram + remoção da linha espelho no
+// Sheets. Não há status "EXCLUÍDO", não há cópia do caso guardada em outra
+// coleção (seria contraditório com "apagar" e manteria PII do paciente —
+// prontuário, iniciais, dados clínicos — indefinidamente).
+//
+// A LÁPIDE (casos_excluidos) é o que resta, e é obrigatória: handleInsertDB
+// (Ingest.gs) deduplica por EXISTÊNCIA do documento em casos_ram. Sem a
+// lápide, o robô PowerShell recria o caso apagado no ciclo seguinte (a cada
+// 15 min) — a exclusão se desfaria sozinha e pareceria um bug. A lápide
+// guarda apenas id + motivo + quem + quando; nenhum dado clínico.
+//
+// Reversível só no sentido de destravar: reverterExclusaoCaso() remove a
+// lápide e deixa o robô recriar o caso do zero no próximo ciclo (só faz
+// efeito para caso tipo BA — demanda espontânea não tem quem recrie).
+// ============================================================
+
+/** Justificativa curta demais não é auditoria, é campo preenchido no chute. */
+const _MIN_MOTIVO_EXCLUSAO = 10;
+
+/**
+ * Apaga definitivamente um caso. Exige perfil ADMIN e justificativa.
+ *
+ * @param {string} idCaso
+ * @param {string} motivo  Justificativa (mín. _MIN_MOTIVO_EXCLUSAO caracteres).
+ * @param {string} token
+ * @returns {{sucesso: boolean, mensagem: string, id: string}}
+ */
+function excluirCaso(idCaso, motivo, token) {
+  return _comAdmin_(token, function () {
+    const idLimpo     = String(idCaso || '').trim();
+    const motivoLimpo = String(motivo || '').trim();
+
+    if (!idLimpo) throw new Error('ID do caso não informado.');
+    if (motivoLimpo.length < _MIN_MOTIVO_EXCLUSAO) {
+      throw new Error('Descreva o motivo da exclusão com pelo menos ' +
+                      _MIN_MOTIVO_EXCLUSAO + ' caracteres — fica registrado na auditoria.');
+    }
+
+    const caso = fsGetDoc_(SCHEMA.FS.CASOS, idLimpo);
+    if (!caso) throw new Error('Caso não localizado (já foi excluído?).');
+
+    // Resumo para o log ANTES de apagar — depois não há de onde tirar.
+    // Só o que identifica a operação; nada de dado clínico.
+    const resumo = [
+      'tipo=' + (caso.tipo || '?'),
+      'status=' + (caso.status || '?'),
+      'setor=' + (caso.setor || '?'),
+      'medicamento=' + (caso.medicamento || '?'),
+      caso.numVigimed ? 'numVigimed=' + caso.numVigimed : null
+    ].filter(Boolean).join(' | ');
+
+    // 1) LÁPIDE PRIMEIRO. Se gravar a lápide falhar, o caso continua de pé e o
+    //    admin tenta de novo — situação recuperável. Na ordem inversa, uma
+    //    falha aqui deixaria o caso apagado E destravado para o robô recriar,
+    //    ou seja: a exclusão "funcionava" e se desfazia sozinha 15 min depois.
+    fsSetDoc_(SCHEMA.FS.CASOS_EXCLUIDOS, idLimpo, {
+      id:          idLimpo,
+      motivo:      motivoLimpo,
+      excluidoPor: __emailSessaoAtual,
+      excluidoEm:  new Date(),
+      tipoOriginal:   String(caso.tipo || ''),
+      statusOriginal: String(caso.status || '')
+    });
+
+    // 2) Apaga o caso.
+    fsDeleteDoc_(SCHEMA.FS.CASOS, idLimpo);
+
+    // 3) Remove a linha espelho no Sheets. Best-effort: o Firestore é a fonte
+    //    única (Fase 9) e já foi apagado — falhar aqui não pode reverter nem
+    //    abortar a exclusão, só fica registrado. Sob comTrava_ porque
+    //    deleteRow desloca índices e colide com Mirror/ETL na mesma aba.
+    try {
+      const planilha = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SCHEMA.ABAS.CASOS);
+      if (planilha) {
+        comTrava_(function () {
+          const linha = localizarLinhaCaso_(planilha, idLimpo); // -1 quando não acha
+          if (linha > 0) planilha.deleteRow(linha);
+        });
+      }
+    } catch (e) {
+      console.error('excluirCaso: espelho no Sheets não pôde ser limpo para ' + idLimpo + ' — ' + e.message);
+      try {
+        fsRegistrarLog_('CASO_EXCLUIDO_ESPELHO_FALHOU', idLimpo, e.message);
+      } catch (e2) { /* log é best-effort */ }
+    }
+
+    invalidarCasosCache_();
+    fsRegistrarLog_('CASO_EXCLUIDO', idLimpo,
+      'MOTIVO: ' + motivoLimpo + ' | ' + resumo + ' | Por: ' + __emailSessaoAtual);
+
+    return { sucesso: true, id: idLimpo, mensagem: 'Caso ' + idLimpo + ' excluído definitivamente.' };
+  });
+}
+
+/**
+ * Lista as exclusões já feitas (para a aba de auditoria do painel admin).
+ * Devolve só a lápide — o caso em si não existe mais.
+ */
+function listarCasosExcluidos(token) {
+  return _comAdmin_(token, function () {
+    const docs = fsListarTodos_(SCHEMA.FS.CASOS_EXCLUIDOS);
+    return docs.map(function (d) {
+      return {
+        id:             String(d.id || d._id || ''),
+        motivo:         String(d.motivo || ''),
+        excluidoPor:    String(d.excluidoPor || ''),
+        excluidoEm:     d.excluidoEm instanceof Date
+          ? Utilities.formatDate(d.excluidoEm, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm')
+          : String(d.excluidoEm || ''),
+        tipoOriginal:   String(d.tipoOriginal || ''),
+        statusOriginal: String(d.statusOriginal || '')
+      };
+    }).sort(function (a, b) { return String(b.excluidoEm).localeCompare(String(a.excluidoEm)); });
+  });
+}
+
+/**
+ * Remove a lápide, destravando o id para o robô.
+ *
+ * NÃO restaura o caso — ele foi apagado de verdade e não há cópia. O que isto
+ * faz é permitir que o ETL crie o caso DE NOVO, do zero, no próximo ciclo, se
+ * o gatilho continuar valendo (dispensação ainda dentro da janela do
+ * relatório). Serve para o caso de o admin ter excluído o registro errado.
+ * Toda a investigação que existia no caso apagado está perdida.
+ *
+ * Sem efeito para caso tipo DE (demanda espontânea): não há robô que o recrie,
+ * a notificação teria de ser refeita pelo formulário.
+ */
+function reverterExclusaoCaso(idCaso, token) {
+  return _comAdmin_(token, function () {
+    const idLimpo = String(idCaso || '').trim();
+    if (!idLimpo) throw new Error('ID do caso não informado.');
+
+    const lapide = fsGetDoc_(SCHEMA.FS.CASOS_EXCLUIDOS, idLimpo);
+    if (!lapide) throw new Error('Não há registro de exclusão para este ID.');
+
+    fsDeleteDoc_(SCHEMA.FS.CASOS_EXCLUIDOS, idLimpo);
+    fsRegistrarLog_('CASO_EXCLUSAO_REVERTIDA', idLimpo,
+      'Lápide removida; ETL pode recriar o caso. Por: ' + __emailSessaoAtual);
+
+    const ehBA = String(lapide.tipoOriginal || '').toUpperCase() === 'BA';
+    return {
+      sucesso: true,
+      id: idLimpo,
+      mensagem: ehBA
+        ? 'Destravado. Se o gatilho ainda constar no relatório do Pentaho, o robô recria o caso no próximo ciclo (até 15 min) — vazio, sem a investigação anterior.'
+        : 'Destravado, mas este era um caso de demanda espontânea: nada o recria automaticamente, a notificação precisa ser refeita pelo formulário.'
+    };
+  });
+}

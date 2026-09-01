@@ -101,6 +101,7 @@ function handleInsertDB(e) {
     // o ETL manda dezenas de casos por ciclo e isso é 1 leitura do Firestore.
     const setoresInativos = _setoresInativosMapa_();
     const descartadosPorSetor = {};
+    const bloqueadosPorExclusao = [];
 
     dados.forEach(function (caso) {
       const idLimpo = String(caso.id_caso).trim();
@@ -116,6 +117,21 @@ function handleInsertDB(e) {
 
       // Anti-duplicação: lookup direto O(1), não precisa carregar a base inteira.
       const existente = fsGetDoc_(SCHEMA.FS.CASOS, idLimpo);
+
+      // Caso apagado de propósito pelo admin (excluirCaso, Cases.gs) não pode
+      // voltar. A dedup acima é por EXISTÊNCIA do documento — apagar o caso o
+      // torna "novo" de novo, e o robô o recriaria no ciclo seguinte. A lápide
+      // em casos_excluidos é o que segura. Consultada só quando NÃO existe
+      // caso (ou seja, no exato momento em que iríamos inserir): 1 leitura a
+      // mais apenas para os ids realmente novos, nada no caminho comum.
+      if (!existente) {
+        const lapide = fsGetDoc_(SCHEMA.FS.CASOS_EXCLUIDOS, idLimpo);
+        if (lapide) {
+          bloqueadosPorExclusao.push(idLimpo);
+          return;
+        }
+      }
+
       if (existente) {
         const terminal = existente.status === SCHEMA.STATUS.CONCLUIDO ||
                           existente.status === SCHEMA.STATUS.DESCARTADO;
@@ -210,6 +226,16 @@ function handleInsertDB(e) {
         nomesDescartados.map(function (n) { return n + '=' + descartadosPorSetor[n]; }).join(', '));
     }
 
+    if (bloqueadosPorExclusao.length > 0) {
+      // Log em nível de LOTE. Recorrente por definição: enquanto a dispensação
+      // continuar aparecendo no relatório do Pentaho, o robô reenvia esse id a
+      // cada ciclo e a lápide o barra de novo. É o comportamento correto —
+      // serve de prova de que a exclusão do admin segue valendo.
+      fsRegistrarLog_('ETL_BLOQUEADO_POR_EXCLUSAO', 'N/A',
+        bloqueadosPorExclusao.length + ' caso(s) nao recriados (excluidos pelo admin): ' +
+        bloqueadosPorExclusao.join(', '));
+    }
+
     // `detalhes` já é consumido pelo robô (Gravar-AuditoriaDedup, Pipeline_v3.ps1):
     // vira linha no CSV mensal de auditoria e sobe pra pasta do Drive sem
     // precisar de nenhuma alteração no lado PowerShell.
@@ -228,10 +254,11 @@ function handleInsertDB(e) {
     });
 
     return createJsonResponse({
-      status:            'sucesso',
-      inseridos:         inseridos,
-      descartadosSetor:  totalDescartados,
-      detalhes:          detalhes
+      status:              'sucesso',
+      inseridos:           inseridos,
+      descartadosSetor:    totalDescartados,
+      bloqueadosExclusao:  bloqueadosPorExclusao.length,
+      detalhes:            detalhes
     });
   } catch (erro) {
     // Resposta montada ANTES do log best-effort — nunca atrasa/bloqueia o

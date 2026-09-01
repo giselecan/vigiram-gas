@@ -686,6 +686,16 @@ function _aplicarModoSomenteLeitura(somenteLeitura) {
   if (btnReabrir)      btnReabrir.classList.toggle('hidden', !somenteLeitura);
   if (btnExportarE2B)  btnExportarE2B.classList.toggle('hidden', !somenteLeitura);
   if (blocoVigimed)    blocoVigimed.classList.toggle('hidden', !somenteLeitura);
+
+  // Excluir: só ADMIN, em qualquer status (inclusive caso já concluído — a
+  // exclusão existe justamente para notificação feita errada, que muitas
+  // vezes só é percebida depois). Isto é conveniência de interface; quem
+  // autoriza de fato é o _comAdmin_ do backend, que não confia no cliente.
+  const btnExcluir = document.getElementById('btnExcluirCaso');
+  if (btnExcluir) {
+    const ehAdmin = (sessionStorage.getItem('vigi_perfil') || '').toUpperCase() === 'ADMIN';
+    btnExcluir.classList.toggle('hidden', !ehAdmin);
+  }
 }
 
 // ---------------------------------------------------------
@@ -718,6 +728,64 @@ function reabrirCaso() {
     .withSuccessHandler(wd.sucesso)
     .withFailureHandler(wd.falha)
     .reabrirInvestigacao(_invIdAtual, tokenSessao);
+}
+
+// ---------------------------------------------------------
+// EXCLUSÃO DEFINITIVA (SOMENTE ADMIN)
+//
+// Apaga o caso de verdade (ver excluirCaso, Cases.gs) — não é o mesmo que
+// DESCARTAR na triagem, que preserva o caso e o motivo. Serve para
+// notificação criada por engano.
+//
+// Duas barreiras antes de disparar: justificativa escrita (vai para o log de
+// auditoria) e confirmação com o ID à vista. Sem desfazer: a investigação
+// que existir no caso é perdida junto.
+// ---------------------------------------------------------
+function excluirCasoAtual() {
+  if (!_invIdAtual) return;
+
+  const motivo = (prompt(
+    'EXCLUIR DEFINITIVAMENTE o caso ' + _invIdAtual + '.\n\n' +
+    'Isto apaga a notificação e toda a investigação dela. Não há como desfazer.\n' +
+    'Se a intenção é apenas encerrar um caso sem RAM, use DESCARTAR na triagem.\n\n' +
+    'Descreva o motivo (fica registrado na auditoria, mín. 10 caracteres):'
+  ) || '').trim();
+
+  if (!motivo) return;                       // cancelou
+  if (motivo.length < 10) {
+    mostrarToast('Motivo muito curto — descreva com pelo menos 10 caracteres.', 'erro');
+    return;
+  }
+  if (!confirm('Confirma a exclusão definitiva de ' + _invIdAtual + '?\n\nMotivo: ' + motivo)) return;
+
+  const btn = document.getElementById('btnExcluirCaso');
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  btn.disabled  = true;
+  const restaurarBotao = () => { btn.innerHTML = originalHtml; btn.disabled = false; };
+
+  const idExcluido = _invIdAtual;
+
+  const wd = criarWatchdogRPC_(20000, res => {
+    restaurarBotao();
+    fecharModalInvestigacao();
+    removerCasoLocal(idExcluido);            // js_core.html
+    mostrarToast((res && res.mensagem) || 'Caso excluído.', 'sucesso');
+  }, err => {
+    restaurarBotao();
+    mostrarToast('Erro ao excluir: ' + (err.message || err), 'erro');
+  }, () => {
+    // Timeout não é prova de que falhou — a escrita pode ter ido. Recarrega a
+    // base para o Kanban refletir o estado real em vez de adivinhar.
+    restaurarBotao();
+    mostrarToast('O servidor demorou demais. Recarregando a lista para conferir se o caso foi excluído.', 'erro');
+    carregarCasos();
+  });
+
+  google.script.run
+    .withSuccessHandler(wd.sucesso)
+    .withFailureHandler(wd.falha)
+    .excluirCaso(idExcluido, motivo, tokenSessao);
 }
 
 // ---------------------------------------------------------

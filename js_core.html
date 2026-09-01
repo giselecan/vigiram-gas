@@ -395,6 +395,10 @@ function iniciarAppSeguro() {
   _aplicarTema(_temaAtual());                // reflete no ícone o tema já aplicado no <head>
   _configurarAbaAdmin();
   construirNaranjo();
+  // Pinta o estado inicial do toggle Finalizados/Descartados (js_kanban.html).
+  // Os botões nascem só com as classes de base no HTML — sem esta chamada,
+  // nenhum apareceria como selecionado até o primeiro clique.
+  _sincronizarChipsFinalizados();
   carregarConfig();
   _iniciarSincronizacaoPeriodica_();
 }
@@ -871,6 +875,34 @@ function atualizarCasoLocal(casoAtualizado) {
     selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>' +
       setores.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
     if (setores.includes(setorAtual)) selectSetor.value = setorAtual;
+  }
+
+  paginaAtual.triagem = paginaAtual.investigacao = paginaAtual.concluidos = 1;
+  processarFiltros();
+}
+
+/**
+ * Tira um caso da lista local sem recarregar a base inteira — contraparte de
+ * atualizarCasoLocal para a exclusão definitiva (excluirCaso, Cases.gs), em
+ * que o caso deixa de existir e não há "resumo atualizado" para mesclar.
+ */
+function removerCasoLocal(idCaso) {
+  const id = String(idCaso || '').trim();
+  if (!id) return;
+
+  const idx = casosGlobais.findIndex(c => c.id === id);
+  if (idx === -1) return;
+  casosGlobais.splice(idx, 1);
+
+  // Repopula o filtro de setor: o caso excluído pode ter sido o último daquele
+  // setor, e a opção ficaria órfã no dropdown apontando para lista vazia.
+  const selectSetor = document.getElementById('filtroSetor');
+  if (selectSetor) {
+    const setorAtual = selectSetor.value;
+    const setores = [...new Set(casosGlobais.map(c => c.setor))].filter(Boolean).sort();
+    selectSetor.innerHTML = '<option value="TODOS">Todos os Setores</option>' +
+      setores.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+    selectSetor.value = setores.includes(setorAtual) ? setorAtual : 'TODOS';
   }
 
   paginaAtual.triagem = paginaAtual.investigacao = paginaAtual.concluidos = 1;
