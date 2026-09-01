@@ -58,7 +58,38 @@ const DEFAULT_LISTAS = {
   // Melhoria UCUM/VigiFlow — dropdown fechado p/ G.k.4.r.1b (Unidade da
   // Dose). Rótulos aqui precisam bater (após toUpperCase) com as chaves de
   // SCHEMA.E2B.DOSE_UNIDADE_MAP — ver Schema.gs.
-  dose_unidade:               ["mg", "g", "mcg", "mL", "L", "UI", "%"]
+  //
+  // INCIDENTE (motivo desta lista ter sido ampliada): a lista tinha sido
+  // reduzida a ["GOTAS"] pelo painel admin. Como lerListasFirestore_ SUBSTITUI
+  // a lista inteira (não mescla), todas as demais unidades sumiram do
+  // dropdown; e como "GOTAS" não existia no DOSE_UNIDADE_MAP, E2b.gs caía no
+  // fallback "mantém o que foi digitado" e emitia unit="GOTAS" — token UCUM
+  // inválido, que faz o VigiFlow descartar o bloco de posologia inteiro.
+  // Toda opção adicionada aqui PRECISA ter entrada correspondente no
+  // DOSE_UNIDADE_MAP (validado por _validarUnidadesDose_ em Config write.gs).
+  dose_unidade:               ["mg", "g", "mcg", "ng", "kg", "mL", "L",
+                               "UI", "mEq", "mmol", "mol", "%", "GOTAS",
+                               "mg/kg", "mcg/kg", "mg/m2", "UI/kg"],
+  // G.k.4.r.9.1 — Forma Farmacêutica (apresentação). Era texto livre: cada
+  // farmacêutico escrevia de um jeito ("CP", "comp.", "Comprimido") e o E2B
+  // saía com originalText inconsistente. Vocabulário fechado alinhado aos
+  // termos padrão EDQM/ANVISA usados no VigiMed. Continua exportado como
+  // texto livre no XML (o campo é ST no E2B(R3)), mas agora padronizado.
+  forma_farmaceutica:         ["COMPRIMIDO", "COMPRIMIDO REVESTIDO",
+                               "COMPRIMIDO DE LIBERAÇÃO PROLONGADA",
+                               "CÁPSULA", "CÁPSULA DE LIBERAÇÃO PROLONGADA",
+                               "DRÁGEA", "PÓ PARA SOLUÇÃO INJETÁVEL",
+                               "SOLUÇÃO INJETÁVEL", "SUSPENSÃO INJETÁVEL",
+                               "EMULSÃO INJETÁVEL", "SOLUÇÃO PARA INFUSÃO",
+                               "SOLUÇÃO ORAL", "SOLUÇÃO ORAL EM GOTAS",
+                               "SUSPENSÃO ORAL", "XAROPE", "ELIXIR",
+                               "PÓ PARA SUSPENSÃO ORAL", "GRANULADO",
+                               "SOLUÇÃO NASAL", "SOLUÇÃO OFTÁLMICA",
+                               "SOLUÇÃO OTOLÓGICA", "SOLUÇÃO INALATÓRIA",
+                               "AEROSSOL", "PÓ INALATÓRIO",
+                               "CREME", "POMADA", "GEL", "LOÇÃO",
+                               "ADESIVO TRANSDÉRMICO", "SUPOSITÓRIO",
+                               "ÓVULO", "SOLUÇÃO RETAL", "OUTRA"]
 };
 
 const DEFAULT_NARANJO = [
@@ -197,6 +228,52 @@ function lerSetoresFirestore_() {
     console.error('lerSetoresFirestore_: falha ao ler Firestore — ' + e.message);
     return [];
   }
+}
+
+/**
+ * Setores DESATIVADOS — usado por handleInsertDB (Ingest.gs) para descartar
+ * os gatilhos que o robô varreu em setores que a farmácia não monitora mais
+ * (ex.: ala desativada, setor terceirizado, unidade em reforma).
+ *
+ * Um setor pode ter VÁRIOS documentos (1 por setor+farmacêutico — ver
+ * _idDocSetor_). Só conta como desativado quando NENHUM dos seus documentos
+ * está ativo: se ao menos um responsável segue ativo, o setor continua sendo
+ * varrido. Desativar por engano a varredura inteira de um setor é pior que
+ * gerar um alerta a mais.
+ *
+ * Pelo mesmo motivo, falha de leitura do Firestore devolve mapa VAZIO (nada
+ * bloqueado) em vez de propagar o erro — indisponibilidade da config nunca
+ * pode virar "hospital sem busca ativa de RAM", que é uma falha silenciosa
+ * com risco assistencial.
+ *
+ * Chave = nome normalizado por _normalizarSetorComparacao_ (sem acento,
+ * maiúsculo, espaços colapsados): o robô manda o setor já passado pelo
+ * Normalizar-Clinica do PowerShell, que remove acento — comparar direto
+ * deixaria "OBSTETRÍCIA" (Firestore) nunca casar com "OBSTETRICIA" (ETL).
+ *
+ * @returns {{ [chaveNormalizada: string]: string }} chave → nome original
+ */
+function _setoresInativosMapa_() {
+  const estado = {};
+  try {
+    const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+    docs.forEach(function (doc) {
+      const setor = String(doc.setor || '').trim();
+      if (!setor) return;
+      const chave = _normalizarSetorComparacao_(setor);
+      if (!estado[chave]) estado[chave] = { algumAtivo: false, nome: setor };
+      if (_ativoComoBooleano_(doc.ativo)) estado[chave].algumAtivo = true;
+    });
+  } catch (e) {
+    console.error('_setoresInativosMapa_: falha ao ler Firestore, nenhum setor será bloqueado — ' + e.message);
+    return {};
+  }
+
+  const inativos = {};
+  Object.keys(estado).forEach(function (chave) {
+    if (!estado[chave].algumAtivo) inativos[chave] = estado[chave].nome;
+  });
+  return inativos;
 }
 
 /**

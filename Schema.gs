@@ -76,7 +76,13 @@ const SCHEMA = {
     LOG:           'log_auditoria',
     USUARIOS:      'usuarios',
     GATILHOS:      'gatilhos',          // medicamentos monitorados (Trigger Tool / robô PowerShell)
-    EMAILS_LEGADO: 'config_emails_legado'
+    EMAILS_LEGADO: 'config_emails_legado',
+    // Lápides da exclusão definitiva de caso pelo admin (excluirCaso, Cases.gs).
+    // NÃO guarda o caso — só id + quem/quando/por quê. Existe porque
+    // handleInsertDB deduplica por EXISTÊNCIA do documento em casos_ram: sem
+    // esta marca, o robô recriaria o caso apagado no ciclo seguinte (15 min)
+    // e a exclusão se desfaria sozinha.
+    CASOS_EXCLUIDOS: 'casos_excluidos'
   },
 
   // ── Posição das colunas em DB_Casos_RAM (1-based) ─────────────────────────
@@ -260,12 +266,41 @@ const SCHEMA = {
       'MCG':         'ug',
       'MICROGRAMA':  'ug',
       'MICROGRAMAS': 'ug',
+      'UG':          'ug',
+      'NG':          'ng',
+      'KG':          'kg',
       'ML':          'mL',
       'L':           'L',
       'UI':          '[iU]',
       'U.I.':        '[iU]',
       'UI.':         '[iU]',
-      '%':           '%'
+      'U':           '[iU]',
+      '%':           '%',
+      // GOTAS — a unidade que estava emitindo unit="GOTAS" (inválido) no XML.
+      // UCUM para gota é [drp]. As variações cobrem o texto livre gravado nos
+      // casos antigos, antes de o campo virar dropdown.
+      'GOTAS':       '[drp]',
+      'GOTA':        '[drp]',
+      'GTS':         '[drp]',
+      'GTS.':        '[drp]',
+      'GT':          '[drp]',
+      'MEQ':         'meq',
+      'MEQ.':        'meq',
+      'MILIEQUIVALENTE':  'meq',
+      'MILIEQUIVALENTES': 'meq',
+      'MMOL':        'mmol',
+      'MOL':         'mol',
+      // Doses ajustadas por peso/superfície corporal (pediatria, oncologia).
+      // UCUM aceita a expressão composta literal — não precisa de parsing.
+      'MG/KG':       'mg/kg',
+      'MCG/KG':      'ug/kg',
+      'UG/KG':       'ug/kg',
+      'G/KG':        'g/kg',
+      'ML/KG':       'mL/kg',
+      'MG/M2':       'mg/m2',
+      'MG/M²':       'mg/m2',
+      'MCG/M2':      'ug/m2',
+      'UI/KG':       '[iU]/kg'
     },
 
     // D.5 — espelha valores livres vindos do ETL (relatório de entradas).

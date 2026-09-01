@@ -258,12 +258,21 @@
             <i class="fas fa-check-double text-gray-500 flex-shrink-0"></i> <span class="truncate">Finalizados / Descartados</span>
           </h2>
           <div class="flex items-center gap-2 flex-shrink-0">
-            <select id="filtroFinalizados" onchange="processarFiltros()"
-                    class="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white focus:ring-2 focus:ring-teal-500 outline-none">
-              <option value="TODOS">Todos</option>
-              <option value="CONCLUIDO">Só concluídos</option>
-              <option value="DESCARTADO">Só descartados</option>
-            </select>
+            <!-- Toggle segmentado (era <select>): os 3 estados ficam visíveis
+                 de uma vez, sem precisar abrir o dropdown pra descobrir que dá
+                 pra separar concluídos de descartados.
+                 O <input hidden> preserva o id/.value que processarFiltros() e
+                 limparFiltros() já leem (js_kanban.html) — a lógica de filtro
+                 não muda, só o controle. -->
+            <input type="hidden" id="filtroFinalizados" value="TODOS">
+            <div id="filtroFinalizadosChips" class="inline-flex items-center gap-1 select-none">
+              <button type="button" data-fin="TODOS" onclick="definirFiltroFinalizados('TODOS')"
+                      class="px-2 py-0.5 rounded-lg text-xs font-bold border transition">Todos</button>
+              <button type="button" data-fin="CONCLUIDO" onclick="definirFiltroFinalizados('CONCLUIDO')"
+                      class="px-2 py-0.5 rounded-lg text-xs font-bold border transition">Concluídos</button>
+              <button type="button" data-fin="DESCARTADO" onclick="definirFiltroFinalizados('DESCARTADO')"
+                      class="px-2 py-0.5 rounded-lg text-xs font-bold border transition">Descartados</button>
+            </div>
             <span id="contador-concluidos" class="bg-gray-300 text-gray-700 py-0.5 px-2.5 rounded-full text-xs font-bold">0</span>
           </div>
         </div>
@@ -818,10 +827,17 @@
               <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <div>
                   <label class="block text-xs font-bold text-gray-600 mb-1">Forma Farmacêutica</label>
-                  <input type="text" id="invFormaFarmaceutica"
-                         oninput="agendarAutosave(); atualizarProgresso()"
-                         placeholder="Ex: Comprimido, Solução injetável…"
-                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                  <!-- G.k.4.r.9.1 (apresentação): dropdown fechado (era texto
+                       livre). Padroniza "CP"/"comp."/"Comprimido" num termo só
+                       no originalText do E2B. Populado via _aplicarConfig()
+                       (config.listas.forma_farmaceutica). Valor legado fora da
+                       lista é preservado como opção extra — ver
+                       _definirValorSelectComLegado(). -->
+                  <select id="invFormaFarmaceutica"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
                 </div>
                 <div>
                   <label class="block text-xs font-bold text-gray-600 mb-1">
@@ -1083,10 +1099,21 @@
 
         <!-- Footer do modal -->
         <div class="bg-white px-5 py-4 border-t flex justify-between items-center flex-shrink-0 rounded-b-xl">
-          <button type="button" onclick="fecharModalInvestigacao()"
-                  class="px-5 py-2.5 bg-white border border-gray-300 rounded-lg font-bold text-sm hover:bg-gray-50 transition">
-            Cancelar
-          </button>
+          <div class="flex items-center gap-3">
+            <button type="button" onclick="fecharModalInvestigacao()"
+                    class="px-5 py-2.5 bg-white border border-gray-300 rounded-lg font-bold text-sm hover:bg-gray-50 transition">
+              Cancelar
+            </button>
+            <!-- Exclusão definitiva: só ADMIN. Fica separado, à esquerda e
+                 discreto, longe dos botões de fluxo normal — é destrutivo e
+                 sem volta. Exibido por abrirModalInvestigacao() conforme o
+                 perfil; a autorização de verdade é o _comAdmin_ no backend. -->
+            <button type="button" onclick="excluirCasoAtual()" id="btnExcluirCaso"
+                    class="hidden px-4 py-2.5 bg-red-50 border border-red-200 text-red-600 rounded-lg font-bold text-sm hover:bg-red-100 transition flex items-center gap-2"
+                    title="Apagar definitivamente esta notificação (somente administrador)">
+              <i class="fas fa-trash"></i> Excluir
+            </button>
+          </div>
           <div class="flex items-center gap-3">
             <button type="button" onclick="reabrirCaso()" id="btnReabrir"
                     class="hidden px-5 py-2.5 bg-amber-500 text-white rounded-lg font-bold text-sm hover:bg-amber-600 transition flex items-center gap-2"

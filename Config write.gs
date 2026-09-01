@@ -67,12 +67,47 @@ function salvarConfigGeral(dados, token) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Lista os setores para o painel admin — INCLUSIVE os desativados.
+ *
+ * getConfig().setores não serve aqui: lerSetoresFirestore_ (Config.gs) filtra
+ * os inativos, que é o certo para dropdowns e para o envio do relatório
+ * diário, mas na tela de administração faria o setor SUMIR ao ser desativado,
+ * sem nenhum caminho de volta para reativá-lo.
+ *
+ * Mesmo formato de lerSetoresFirestore_ + o campo `ativo`.
+ * @returns {Array<{setor, email, farmaceutico, ativo}>}
+ */
+function listarSetoresAdmin(token) {
+  return _comAdmin_(token, function () {
+    const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+    const lista = [];
+    docs.forEach(function (doc) {
+      const setor = String(doc.setor || '').trim();
+      if (!setor) return;
+      lista.push({
+        setor:        setor,
+        email:        String(doc.emailResponsavel || '').trim(),
+        farmaceutico: String(doc.farmaceuticoResponsavel || '').trim(),
+        ativo:        _ativoComoBooleano_(doc.ativo)
+      });
+    });
+    return lista;
+  });
+}
+
+/**
  * Substitui todos os documentos da coleção setores.
  * Estratégia: exclui todos os docs existentes e reinsere.
  * ID do documento = setor + e-mail do responsável (ver _idDocSetor_ em
  * Utils.gs) — permite MAIS DE UM farmacêutico responsável pelo mesmo setor
  * (ex.: "TODOS") sem que o segundo cadastrado apague o primeiro.
- * @param {Array<{setor, farmaceutico, email}>} setores
+ *
+ * `ativo` (opcional, default true) desliga o setor: some dos dropdowns e do
+ * relatório diário (lerSetoresFirestore_) e, principalmente, faz o
+ * handleInsertDB DESCARTAR os gatilhos que o robô varrer nele
+ * (_setoresInativosMapa_, Config.gs). Como o toggle da tela é por setor, o
+ * mesmo valor precisa vir em todas as linhas do setor.
+ * @param {Array<{setor, farmaceutico, email, ativo?}>} setores
  */
 function salvarSetores(setores, token) {
   return _comAdmin_(token, function () {
@@ -109,7 +144,12 @@ function salvarSetores(setores, token) {
         id: id,
         dados: {
           setor:                   setor,
-          ativo:                   true, // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'
+          // CORREÇÃO #7: boolean a partir de agora, não mais 'SIM'.
+          // Antes era `true` fixo: qualquer "Salvar Setores" REATIVAVA todos
+          // os setores, então desativar um setor era impossível na prática.
+          // _ativoComoBooleano_ mantém a compatibilidade com quem não manda o
+          // campo (undefined ⇒ ativo) e com o legado em texto ('SIM'/'NAO').
+          ativo:                   _ativoComoBooleano_(s.ativo),
           farmaceuticoResponsavel: String(s.farmaceutico || '').trim().toUpperCase(),
           emailResponsavel:        email
         }
@@ -302,9 +342,12 @@ function salvarListas(listas, token) {
                            'acao_adotada', 'relacao_medicamento_evento',
                            'problemas_adicionais', 'unidade_intervalo',
                            // Melhoria UCUM/VigiFlow
-                           'dose_unidade'];
+                           'dose_unidade',
+                           // G.k.4.r.9.1 — apresentação (era texto livre)
+                           'forma_farmaceutica'];
 
     let salvos = 0;
+    const recusadas = [];
     Object.entries(listas).forEach(function (par) {
       const campo  = String(par[0] || '').trim();
       const opcoes = par[1];
@@ -313,15 +356,58 @@ function salvarListas(listas, token) {
 
       const opcoesLimpas = opcoes.map(function (o) { return String(o || '').trim(); })
                                  .filter(Boolean);
+
+      // Unidade da Dose alimenta doseQuantity/@unit (PQ, UCUM estrito). Uma
+      // opção sem tradução no DOSE_UNIDADE_MAP vaza como token inválido para
+      // o XML e o VigiFlow descarta a posologia — silenciosamente, porque o
+      // E2b.gs por decisão de projeto não fabrica fallback. Foi exatamente
+      // assim que "GOTAS" entrou. Recusa aqui, na origem, em vez de deixar
+      // quebrar meses depois na importação do VigiMed.
+      if (campo === 'dose_unidade') {
+        const semMapa = _unidadesDoseSemMapa_(opcoesLimpas);
+        if (semMapa.length) {
+          recusadas.push('dose_unidade (sem equivalente UCUM: ' + semMapa.join(', ') + ')');
+          return;
+        }
+      }
+
       fsSetDoc_(SCHEMA.FS.LISTAS, campo, { campo: campo, opcoes: opcoesLimpas });
       salvos++;
     });
+
+    if (recusadas.length) {
+      invalidarConfig();
+      fsRegistrarLog_('LISTAS_RECUSADAS', 'listas',
+        recusadas.join(' | ') + ' | Por: ' + __emailSessaoAtual);
+      return {
+        sucesso: false,
+        mensagem: 'Lista recusada — ' + recusadas.join(' | ') +
+                  '. Cadastre o equivalente UCUM em SCHEMA.E2B.DOSE_UNIDADE_MAP ' +
+                  '(Schema.gs) antes de adicionar a unidade aqui, senão o ' +
+                  'VigiMed descarta a posologia do caso.'
+      };
+    }
 
     invalidarConfig();
     fsRegistrarLog_('LISTAS_ATUALIZADAS', 'listas',
       salvos + ' lista(s) salvas | Por: ' + __emailSessaoAtual);
 
     return { sucesso: true, mensagem: salvos + ' lista(s) salvas com sucesso.' };
+  });
+}
+
+/**
+ * Devolve as opções de Unidade da Dose que NÃO têm equivalente UCUM em
+ * SCHEMA.E2B.DOSE_UNIDADE_MAP. O lookup em E2b.gs faz .toUpperCase() antes de
+ * consultar o mapa, então a comparação aqui usa a mesma chave — o que também
+ * significa que diferença só de caixa ("ML" vs "mL") não é problema.
+ * @param {string[]} opcoes
+ * @returns {string[]} opções órfãs (vazio = tudo mapeado)
+ */
+function _unidadesDoseSemMapa_(opcoes) {
+  const mapa = (SCHEMA.E2B && SCHEMA.E2B.DOSE_UNIDADE_MAP) || {};
+  return opcoes.filter(function (o) {
+    return !Object.prototype.hasOwnProperty.call(mapa, String(o).toUpperCase());
   });
 }
 

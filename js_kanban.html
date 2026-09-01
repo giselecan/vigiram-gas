@@ -50,7 +50,42 @@ function limparFiltros() {
   document.getElementById('filtroDe').value            = '';
   document.getElementById('filtroAte').value           = '';
   document.getElementById('filtroFinalizados').value   = 'TODOS';
+  _sincronizarChipsFinalizados();   // o toggle é visual: precisa acompanhar o reset
   processarFiltros();
+}
+
+// ---------------------------------------------------------
+// TOGGLE "Finalizados / Descartados" (era um <select>)
+//
+// O valor continua vivendo no #filtroFinalizados (agora <input hidden>), que
+// é o que processarFiltros() lê — trocar o controle não mexeu na filtragem.
+// ---------------------------------------------------------
+const _CLS_FIN_ATIVO   = 'bg-teal-600 text-white border-teal-600';
+const _CLS_FIN_INATIVO = 'bg-white text-gray-600 border-gray-300 hover:bg-gray-200';
+
+function definirFiltroFinalizados(valor) {
+  const campo = document.getElementById('filtroFinalizados');
+  if (!campo) return;
+  campo.value = valor;
+  _sincronizarChipsFinalizados();
+  processarFiltros();
+}
+
+/** Pinta o chip selecionado e apaga os demais, lendo o estado do input. */
+function _sincronizarChipsFinalizados() {
+  const campo = document.getElementById('filtroFinalizados');
+  const grupo = document.getElementById('filtroFinalizadosChips');
+  if (!campo || !grupo) return;
+
+  const atual = campo.value || 'TODOS';
+  grupo.querySelectorAll('button[data-fin]').forEach(btn => {
+    const ativo = btn.dataset.fin === atual;
+    // Base fixa + variante: reescrever a className inteira evita acúmulo de
+    // classes de estado a cada clique.
+    btn.className = 'px-2 py-0.5 rounded-lg text-xs font-bold border transition ' +
+                    (ativo ? _CLS_FIN_ATIVO : _CLS_FIN_INATIVO);
+    btn.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+  });
 }
 
 // Debounce da busca por texto: sem isto, cada tecla em #inputBusca disparava
