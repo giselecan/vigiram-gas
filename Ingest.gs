@@ -14,6 +14,14 @@
  * hospital: envolvida em try/catch, com um array HARDCODED de fallback
  * (ver _GATILHOS_FALLBACK_HARDCODED) usado só quando o Firestore falha.
  *
+ * SETORES DESATIVADOS: handleInsertDB descarta, na entrada, os casos cujo
+ * `unidade_setor` pertence a um setor marcado como inativo no painel admin
+ * (Setores → coluna "Varredura"). O robô PowerShell continua varrendo e
+ * enviando tudo — o corte é aqui, do lado do GAS, para não exigir uma versão
+ * nova do script na máquina do hospital a cada mudança de configuração. Os
+ * descartes voltam na resposta em `detalhes` (motivo SETOR_DESATIVADO), que o
+ * robô já grava no CSV mensal de auditoria sem precisar de alteração.
+ *
  * DEDUPLICAÇÃO: a versão Sheets lia toda a planilha pra montar um Set de
  * IDs existentes antes de inserir (O(n) de leitura). Na versão Firestore,
  * cada caso é verificado individualmente via fsGetDoc_ (lookup O(1) por
@@ -88,8 +96,23 @@ function handleInsertDB(e) {
     const agora = new Date();
     const JANELA_REABERTURA_MS = JANELA_REABERTURA_DIAS * 24 * 60 * 60 * 1000;
 
+    // Setores desativados no painel admin não devem gerar caso, mesmo que o
+    // robô tenha varrido a dispensação. Lido UMA vez por lote (não por caso):
+    // o ETL manda dezenas de casos por ciclo e isso é 1 leitura do Firestore.
+    const setoresInativos = _setoresInativosMapa_();
+    const descartadosPorSetor = {};
+
     dados.forEach(function (caso) {
       const idLimpo = String(caso.id_caso).trim();
+
+      // Descarte por setor desativado ANTES do lookup de dedup — não faz
+      // sentido gastar uma leitura do Firestore por caso que já vai fora.
+      const chaveSetor = _normalizarSetorComparacao_(caso.unidade_setor);
+      if (setoresInativos[chaveSetor]) {
+        const nome = setoresInativos[chaveSetor];
+        descartadosPorSetor[nome] = (descartadosPorSetor[nome] || 0) + 1;
+        return;
+      }
 
       // Anti-duplicação: lookup direto O(1), não precisa carregar a base inteira.
       const existente = fsGetDoc_(SCHEMA.FS.CASOS, idLimpo);
@@ -174,7 +197,42 @@ function handleInsertDB(e) {
       invalidarCasosCache_();
     }
 
-    return createJsonResponse({ status: 'sucesso', inseridos: inseridos });
+    // Trilha do que foi descartado por setor desativado. Sem isto o farmacêutico
+    // veria "8 gatilhos viraram 0 casos" sem nenhuma explicação — exatamente a
+    // falha silenciosa que a auditoria de dedup do ETL v3.4 veio resolver.
+    const nomesDescartados = Object.keys(descartadosPorSetor);
+    let totalDescartados = 0;
+    nomesDescartados.forEach(function (n) { totalDescartados += descartadosPorSetor[n]; });
+
+    if (totalDescartados > 0) {
+      fsRegistrarLog_('ETL_DESCARTE_SETOR_INATIVO', 'N/A',
+        totalDescartados + ' caso(s) descartados | ' +
+        nomesDescartados.map(function (n) { return n + '=' + descartadosPorSetor[n]; }).join(', '));
+    }
+
+    // `detalhes` já é consumido pelo robô (Gravar-AuditoriaDedup, Pipeline_v3.ps1):
+    // vira linha no CSV mensal de auditoria e sobe pra pasta do Drive sem
+    // precisar de nenhuma alteração no lado PowerShell.
+    const detalhes = nomesDescartados.map(function (n) {
+      return {
+        id:          'SETOR:' + n,
+        motivo:      'SETOR_DESATIVADO',
+        statusAtual: 'DESCARTADO',
+        criadoEm:    '',
+        diasDesde:   '',
+        prontuario:  '',
+        medicamento: '',
+        setor:       n,
+        quantidade:  descartadosPorSetor[n]
+      };
+    });
+
+    return createJsonResponse({
+      status:            'sucesso',
+      inseridos:         inseridos,
+      descartadosSetor:  totalDescartados,
+      detalhes:          detalhes
+    });
   } catch (erro) {
     // Resposta montada ANTES do log best-effort — nunca atrasa/bloqueia o
     // retorno ao robô PowerShell.

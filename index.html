@@ -818,10 +818,17 @@
               <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                 <div>
                   <label class="block text-xs font-bold text-gray-600 mb-1">Forma Farmacêutica</label>
-                  <input type="text" id="invFormaFarmaceutica"
-                         oninput="agendarAutosave(); atualizarProgresso()"
-                         placeholder="Ex: Comprimido, Solução injetável…"
-                         class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                  <!-- G.k.4.r.9.1 (apresentação): dropdown fechado (era texto
+                       livre). Padroniza "CP"/"comp."/"Comprimido" num termo só
+                       no originalText do E2B. Populado via _aplicarConfig()
+                       (config.listas.forma_farmaceutica). Valor legado fora da
+                       lista é preservado como opção extra — ver
+                       _definirValorSelectComLegado(). -->
+                  <select id="invFormaFarmaceutica"
+                          onchange="agendarAutosave(); atualizarProgresso()"
+                          class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 transition">
+                    <option value="">Selecione…</option>
+                  </select>
                 </div>
                 <div>
                   <label class="block text-xs font-bold text-gray-600 mb-1">

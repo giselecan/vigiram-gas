@@ -1026,21 +1026,28 @@ function _cfgSalvarSLA(btn) {
 // CONFIGURAÇÕES · SETORES
 // ─────────────────────────────────────────────────────────
 function _renderSecaoSetores(area, geracao) {
-  _getConfigCacheado(cfg => {
+  // listarSetoresAdmin (não getConfig): precisa trazer também os DESATIVADOS,
+  // que lerSetoresFirestore_ filtra — senão o setor some da tela ao ser
+  // desativado e não há como reativá-lo.
+  google.script.run
+    .withSuccessHandler(todos => {
       if (geracao !== _cfgGeracaoSub) return;
-      // Agrupado por SETOR (1 linha por setor) — cfg.setores continua sendo
-      // 1 par {setor,email} por documento (usado em outros lugares, como o
-      // envio do relatório diário), só a exibição/edição aqui é agrupada
-      // pra não repetir o mesmo setor numa linha por farmacêutico.
+      // Agrupado por SETOR (1 linha por setor) — a coleção guarda 1 par
+      // {setor,email} por documento (usado em outros lugares, como o envio do
+      // relatório diário), só a exibição/edição aqui é agrupada pra não
+      // repetir o mesmo setor numa linha por farmacêutico.
       const porSetor = {};
-      (cfg.setores || []).forEach(s => {
-        if (!porSetor[s.setor]) porSetor[s.setor] = { setor: s.setor, farmaceuticos: [], emails: [] };
+      (todos || []).forEach(s => {
+        if (!porSetor[s.setor]) porSetor[s.setor] = { setor: s.setor, farmaceuticos: [], emails: [], ativo: false };
         porSetor[s.setor].farmaceuticos.push(s.farmaceutico || '');
         porSetor[s.setor].emails.push(s.email || '');
+        // Mesma regra do backend (_setoresInativosMapa_): o setor conta como
+        // ativo se QUALQUER responsável dele estiver ativo.
+        if (s.ativo) porSetor[s.setor].ativo = true;
       });
       const setores = Object.values(porSetor).sort((a, b) => a.setor.localeCompare(b.setor));
 
-      const linhas = setores.map((s, i) => _cfgHtmlLinhaSetor(i, s.setor, s.farmaceuticos.filter(Boolean).join(', '), s.emails.filter(Boolean).join(', '))).join('');
+      const linhas = setores.map((s, i) => _cfgHtmlLinhaSetor(i, s.setor, s.farmaceuticos.filter(Boolean).join(', '), s.emails.filter(Boolean).join(', '), s.ativo)).join('');
 
       area.innerHTML = `
         <div class="flex items-center justify-between mb-5">
@@ -1058,7 +1065,8 @@ function _renderSecaoSetores(area, geracao) {
             </button>
           </div>
         </div>
-        <p class="text-xs text-gray-400 mb-3">Mais de um farmacêutico no mesmo setor? Separe os nomes por vírgula e os e-mails por vírgula, NA MESMA ORDEM (ex.: "João Silva, Maria Souza" / "joao@x.com, maria@x.com").</p>
+        <p class="text-xs text-gray-400 mb-1">Mais de um farmacêutico no mesmo setor? Separe os nomes por vírgula e os e-mails por vírgula, NA MESMA ORDEM (ex.: "João Silva, Maria Souza" / "joao@x.com, maria@x.com").</p>
+        <p class="text-xs text-gray-400 mb-3"><i class="fas fa-circle-info mr-1"></i>Setor <b>Inativo</b> deixa de ser varrido: os gatilhos que o robô encontrar nele são descartados na entrada, não viram caso nem e-mail. O descarte fica registrado no log e na auditoria.</p>
         <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
           <div class="overflow-x-auto">
           <table class="w-full text-left" id="tabelaSetores">
@@ -1067,6 +1075,7 @@ function _renderSecaoSetores(area, geracao) {
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Setor</th>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">Farmacêutico(s) Responsável(is)</th>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase">E-mail(s)</th>
+                <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase w-32">Varredura</th>
                 <th class="px-4 py-3 text-xs font-bold text-gray-500 uppercase w-10"></th>
               </tr>
             </thead>
@@ -1078,13 +1087,16 @@ function _renderSecaoSetores(area, geracao) {
                 class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-5 py-2.5 rounded-lg text-sm flex items-center gap-2 transition">
           <i class="fas fa-save"></i> Salvar Setores
         </button>`;
-  }, e => { if (geracao === _cfgGeracaoSub) area.innerHTML = _erroHtml(e.message); });
+    })
+    .withFailureHandler(e => { if (geracao === _cfgGeracaoSub) area.innerHTML = _erroHtml(e.message); })
+    .listarSetoresAdmin(tokenSessao);
 }
 
 /** Monta uma linha da tabela de Setores — usada tanto na carga inicial quanto ao adicionar uma linha nova. */
-function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails) {
+function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails, ativo) {
+  const lig = ativo !== false; // undefined (linha nova) nasce ativo
   return `
-        <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm" id="setorLinha_${idx}">
+        <tr class="border-b border-gray-100 hover:bg-gray-50 text-sm ${lig ? '' : 'bg-gray-50/60'}" id="setorLinha_${idx}">
           <td class="px-4 py-2.5">
             <input type="text" value="${escapeHtml(setor || '')}" data-campo="setor" data-idx="${idx}" placeholder="NOME DO SETOR"
                    class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
@@ -1097,6 +1109,14 @@ function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails) {
             <input type="text" value="${escapeHtml(emails || '')}" data-campo="email" data-idx="${idx}" placeholder="email1@x.com, email2@x.com…"
                    class="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-teal-400 outline-none bg-transparent hover:bg-white">
           </td>
+          <td class="px-4 py-2.5">
+            <label class="inline-flex items-center gap-2 cursor-pointer" title="Desligado: o robô para de gerar casos para este setor.">
+              <input type="checkbox" class="sr-only peer" data-campo="ativo" data-idx="${idx}" ${lig ? 'checked' : ''}
+                     onchange="_cfgAtualizarRotuloVarredura(${idx})">
+              <span class="relative w-9 h-5 bg-gray-300 peer-checked:bg-teal-600 rounded-full transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform peer-checked:after:translate-x-4"></span>
+              <span id="setorRotuloVarredura_${idx}" class="text-xs font-bold uppercase ${lig ? 'text-teal-700' : 'text-gray-400'}">${lig ? 'Ativo' : 'Inativo'}</span>
+            </label>
+          </td>
           <td class="px-4 py-2.5 text-center">
             <button onclick="_cfgRemoverSetor(${idx})"
                     class="text-red-400 hover:text-red-600 transition text-xs">
@@ -1106,11 +1126,23 @@ function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails) {
         </tr>`;
 }
 
+/** Sincroniza o rótulo Ativo/Inativo com o toggle da linha (só visual). */
+function _cfgAtualizarRotuloVarredura(idx) {
+  const linha = document.getElementById('setorLinha_' + idx);
+  const rotulo = document.getElementById('setorRotuloVarredura_' + idx);
+  if (!linha || !rotulo) return;
+  const chk = linha.querySelector('input[data-campo="ativo"]');
+  const lig = !!(chk && chk.checked);
+  rotulo.textContent = lig ? 'Ativo' : 'Inativo';
+  rotulo.className = 'text-xs font-bold uppercase ' + (lig ? 'text-teal-700' : 'text-gray-400');
+  linha.classList.toggle('bg-gray-50/60', !lig);
+}
+
 function _cfgAdicionarSetor() {
   const tbody = document.getElementById('setoresBody');
   if (!tbody) return;
   const i = tbody.rows.length;
-  tbody.insertAdjacentHTML('beforeend', _cfgHtmlLinhaSetor(i, '', '', ''));
+  tbody.insertAdjacentHTML('beforeend', _cfgHtmlLinhaSetor(i, '', '', '', true));
   const novaLinha = document.getElementById('setorLinha_' + i);
   novaLinha.querySelector('input').focus();
 }
@@ -1145,11 +1177,20 @@ function _cfgExpandirLinhasSetores(tbody) {
   tbody.querySelectorAll('tr').forEach(tr => {
     if (erro) return;
     const campos = {};
-    tr.querySelectorAll('input[data-campo]').forEach(inp => { campos[inp.dataset.campo] = inp.value.trim(); });
+    // Checkbox é lido pelo .checked — .value devolveria "on" sempre, o que
+    // marcaria todo setor como ativo e reintroduziria o bug de "desativar não
+    // funciona" pelo outro lado.
+    tr.querySelectorAll('input[data-campo]').forEach(inp => {
+      campos[inp.dataset.campo] = inp.type === 'checkbox' ? inp.checked : inp.value.trim();
+    });
     if (!campos.setor) return;
 
     const nomes  = campos.farmaceutico ? campos.farmaceutico.split(',').map(s => s.trim()).filter(Boolean) : [];
     const emails = campos.email        ? campos.email.split(',').map(s => s.trim()).filter(Boolean)        : [];
+    // O toggle é por SETOR, mas a coleção guarda 1 doc por setor+farmacêutico:
+    // o mesmo valor vai em todas as linhas expandidas do setor, senão
+    // _setoresInativosMapa_ (que exige TODOS inativos) nunca bloquearia nada.
+    const ativo = campos.ativo !== false;
 
     if (nomes.length !== emails.length) {
       erro = `Setor "${campos.setor}": ${nomes.length} farmacêutico(s) e ${emails.length} e-mail(s) não batem. Separe cada farmacêutico e seu e-mail por vírgula, na mesma ordem.`;
@@ -1157,9 +1198,9 @@ function _cfgExpandirLinhasSetores(tbody) {
     }
 
     if (!nomes.length) {
-      setores.push({ setor: campos.setor, farmaceutico: '', email: '' });
+      setores.push({ setor: campos.setor, farmaceutico: '', email: '', ativo: ativo });
     } else {
-      nomes.forEach((nome, i) => setores.push({ setor: campos.setor, farmaceutico: nome, email: emails[i] }));
+      nomes.forEach((nome, i) => setores.push({ setor: campos.setor, farmaceutico: nome, email: emails[i], ativo: ativo }));
     }
   });
 
@@ -1283,7 +1324,8 @@ const _CAMPOS_LISTA = {
   relacao_medicamento_evento: 'Relação Medicamento × Evento',
   unidade_intervalo:          'Unidade do Intervalo (Posologia)',
   problemas_adicionais:       'Problemas Adicionais do Medicamento',
-  dose_unidade:               'Unidade da Dose'
+  dose_unidade:               'Unidade da Dose',
+  forma_farmaceutica:         'Forma Farmacêutica (Apresentação)'
 };
 
 function _renderSecaoListas(area, geracao) {

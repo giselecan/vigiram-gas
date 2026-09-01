@@ -643,6 +643,7 @@ function aplicarConfig(cfg) {
     _popularSelect('invRelacaoMedicamentoEvento', cfg.listas.relacao_medicamento_evento);
     _popularSelect('invUnidadeIntervalo',         cfg.listas.unidade_intervalo);
     _popularSelect('invDoseUnidade',              cfg.listas.dose_unidade);
+    _popularSelect('invFormaFarmaceutica',        cfg.listas.forma_farmaceutica);
     _popularCheckboxes('invProblemasAdicionais',  cfg.listas.problemas_adicionais);
   }
 }
@@ -655,7 +656,42 @@ function _popularSelect(id, lista) {
   // <select> a cada opção; _popularSelect roda p/ ~11 selects a cada getConfig).
   el.innerHTML = '<option value="">Selecione…</option>' +
     lista.map(opt => `<option value="${escapeHtml(opt)}">${escapeHtml(opt)}</option>`).join('');
-  if (lista.includes(atual)) el.value = atual;
+  if (lista.includes(atual)) { el.value = atual; return; }
+  // Valor fora da lista: NÃO pode ser descartado em silêncio. Acontece com
+  // caso antigo gravado quando o campo ainda era texto livre, e com opção
+  // removida da lista pelo admin depois do caso já existir. Sem isto o
+  // <select> voltava para "" e o próximo salvamento APAGAVA o dado do caso —
+  // inclusive do XML já notificado. Reinjetado como opção marcada.
+  if (atual) _injetarOpcaoLegado(el, atual);
+}
+
+/**
+ * Acrescenta `valor` ao <select> como opção fora do vocabulário atual e a
+ * seleciona. Rotulada para o farmacêutico saber que aquele termo não faz mais
+ * parte da lista padrão e deve ser revisto antes de exportar para o VigiMed.
+ */
+function _injetarOpcaoLegado(el, valor) {
+  const opt = document.createElement('option');
+  opt.value = valor;
+  opt.textContent = valor + ' (fora da lista padrão)';
+  opt.dataset.legado = '1';
+  el.appendChild(opt);
+  el.value = valor;
+}
+
+/**
+ * Define o valor de um <select> preservando valor legado (ver
+ * _injetarOpcaoLegado). Use no lugar de `el.value = x` sempre que o dado vier
+ * de um caso salvo — atribuição direta em <select> falha SILENCIOSAMENTE
+ * quando a opção não existe, deixando o campo vazio.
+ */
+function _definirValorSelectComLegado(id, valor) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const v = String(valor == null ? '' : valor);
+  if (!v) { el.value = ''; return; }
+  el.value = v;
+  if (el.value !== v) _injetarOpcaoLegado(el, v);
 }
 
 /**
