@@ -484,8 +484,10 @@ function _preencherFormularioInvestigacao(caso) {
   if (elReacaoTermo) elReacaoTermo.value = caso.reacaoTermo || '';
   const elDose = document.getElementById('invDoseMedicamento');
   if (elDose) elDose.value = caso.doseMedicamento || '';
-  const elDoseUnidade = document.getElementById('invDoseUnidade');
-  if (elDoseUnidade) elDoseUnidade.value = caso.doseUnidade || '';
+  // <select> com vocabulário fechado: atribuição direta some com o valor
+  // quando ele não está na lista (caso antigo de quando era texto livre, ou
+  // opção retirada pelo admin). _definirValorSelectComLegado preserva.
+  _definirValorSelectComLegado('invDoseUnidade', caso.doseUnidade);
   const elVia = document.getElementById('invViaAdministracao');
   if (elVia) elVia.value = caso.viaAdministracao || '';
   const elDataReacao = document.getElementById('invDataInicioReacao');
@@ -498,8 +500,7 @@ function _preencherFormularioInvestigacao(caso) {
   // Fase 2 (roadmap) — campos novos, opcionais no DOM
   const elIndicacaoUso = document.getElementById('invIndicacaoUso');
   if (elIndicacaoUso) elIndicacaoUso.value = caso.indicacaoUso || '';
-  const elFormaFarm = document.getElementById('invFormaFarmaceutica');
-  if (elFormaFarm) elFormaFarm.value = caso.formaFarmaceutica || '';
+  _definirValorSelectComLegado('invFormaFarmaceutica', caso.formaFarmaceutica);
   const elDataFimAdm = document.getElementById('invDataFimAdministracao');
   if (elDataFimAdm) elDataFimAdm.value = paraInputDateTimeLocal(caso.dataFimAdministracao);
   const elNumDoses = document.getElementById('invNumeroDosesIntervalo');
@@ -879,7 +880,12 @@ function _carregarRascunhoMemoria(id) {
   // subtabela ficam de fora do rascunho em memória por simplicidade (o
   // "Salvar Rascunho" via backend continua persistindo tudo normalmente).
   mesclar('invIndicacaoUso',      dados.indicacaoUso);
-  mesclar('invFormaFarmaceutica', dados.formaFarmaceutica);
+  // invFormaFarmaceutica virou <select>: `mesclar` (el.value = val) falharia
+  // em silêncio para termo fora do vocabulário salvo no rascunho local.
+  const elFF = document.getElementById('invFormaFarmaceutica');
+  if (elFF && dados.formaFarmaceutica && !elFF.value) {
+    _definirValorSelectComLegado('invFormaFarmaceutica', dados.formaFarmaceutica);
+  }
   atualizarProgresso();
 }
 
