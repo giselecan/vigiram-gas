@@ -67,7 +67,7 @@ duas estratégias diferentes por tipo de recurso:
 | Projeto Google Cloud (Firestore) | **Permanece institucional — fora do escopo desta migração** | Autenticação é por Service Account (JWT), independente de quem publica o Apps Script. Nenhuma mudança necessária. |
 | Projeto Apps Script | **Recriação sob a conta pessoal** (`clasp clone`/`push`), rodando em paralelo até o corte | Apps Script/Drive normalmente não permite mudar o dono para fora do domínio Workspace. |
 | Planilha-espelho de auditoria (Sheets) | **Nova planilha na conta pessoal a partir da data de corte**; a antiga fica congelada como arquivo histórico | Mesma restrição de domínio. Um espelho *append-only* pode perfeitamente "trocar de arquivo" numa data — desde que ambos fiquem preservados e rastreáveis. |
-| Repositório GitHub | Depende de quem é hoje o *owner*/organização do repo | Ver Seção 6, item 2. |
+| Repositório GitHub | Depende de quem é hoje o *owner*/organização do repo | Ver Seção 7, item 2. |
 
 ---
 
@@ -83,9 +83,8 @@ aproximar de 100/dia, a migração pode causar **falha silenciosa de
 notificações** sem nenhum erro visível no painel.
 → **Ação antes de migrar:** contar quantos e-mails o sistema envia num dia
 típico (dá para estimar olhando `enviarRelatorioDiarioGatilhos` e o volume
-de casos). Se estiver perto do limite, considere manter o envio de e-mail
-na conta institucional (ou usar uma conta Workspace paga) mesmo depois de
-migrar o resto.
+de casos). Se estiver perto do limite, ver as opções para manter o envio
+de e-mail no institucional na **Seção 2** deste documento.
 
 ### 1.2 Dado de saúde (LGPD) — governança, não só técnica
 O VigiRAM processa dados de **farmacovigilância com dados pessoais/dados
@@ -136,7 +135,62 @@ Uma nova implantação (deploy) sob a conta pessoal gera uma **nova URL**
 
 ---
 
-## 2. Pré-requisitos (Fase 0 — preparação, sem impacto em produção)
+## 2. Manter o envio de e-mail no institucional (opcional)
+
+Resposta curta: **dá para manter o remetente institucional, mas as duas
+formas de fazer isso resolvem problemas diferentes** — uma é cosmética,
+a outra resolve a cota de verdade (item 1.1). Importante decidir com essa
+distinção clara antes de implementar.
+
+### Opção A — Alias "Enviar como" (baixo esforço, NÃO resolve a cota)
+1. Na conta institucional: gerar uma **senha de app** em
+   myaccount.google.com → Segurança → Senhas de app (exige verificação em
+   duas etapas ativada; se o Workspace bloquear, um admin precisa liberar
+   em Admin Console → Segurança → Acesso a apps menos seguros/senhas de
+   app).
+2. Na conta **pessoal**, Gmail → Configurações → Contas e importação →
+   "Enviar e-mail como" → Adicionar outro endereço de e-mail.
+3. Informar o endereço institucional, marcar "Tratar como alias" e
+   "Enviar através dos servidores SMTP" (`smtp.gmail.com`, porta 587,
+   usuário = e-mail institucional, senha = senha de app do passo 1).
+4. Confirmar o e-mail de verificação que o Google manda para a caixa
+   institucional.
+5. No código (`Notify.gs`, `Mirror.gs`), adicionar
+   `from: 'endereco@isgh.org.br'` nas chamadas `MailApp.sendEmail(...)`.
+
+⚠️ **A cota consumida continua sendo a da conta pessoal** (~100/dia) —
+quem processa o envio de fato é sempre quem executa o Apps Script. Essa
+opção só muda a aparência do remetente, não resolve o risco 1.1.
+
+### Opção B — Relay de e-mail rodando na conta institucional (resolve a cota, mais esforço)
+Criar um **segundo projeto Apps Script**, minúsculo, publicado como Web
+App **sob a conta institucional** (esse projeto nunca migra), com a única
+função de receber um pedido de envio via `doPost` — autenticado com HMAC,
+reaproveitando o mesmo padrão de `Security.gs` usado hoje para o ETL — e
+chamar `MailApp.sendEmail()` rodando como institucional (usa a cota do
+Workspace, ~1.500/dia).
+
+No VigiRAM (conta pessoal), trocar as chamadas diretas a
+`MailApp.sendEmail()` em `Notify.gs`/`Mirror.gs` por uma chamada HTTP
+(`UrlFetchApp.fetch`) a esse relay, com fallback para envio direto pela
+conta pessoal se o relay não responder — mesma lógica de degradação
+graciosa já usada em `getConfig()` (`Config.gs`).
+
+Vantagem: resolve a cota de verdade, sem tag "via" no e-mail. Desvantagem:
+mais um projeto para manter, que continua sendo uma dependência da conta
+institucional — avaliar se isso é aceitável dado o motivo da migração
+(Seção 6, item 2 das decisões em aberto).
+
+### Recomendação
+Meça o volume real primeiro (item 1.1). Bem abaixo de 100/dia → nem vale
+implementar a Opção A, deixe o remetente ser a conta pessoal mesmo. Perto
+ou acima do limite → só a Opção B resolve de verdade; a Opção A sozinha
+apenas maquia o problema e o sistema continuará falhando silenciosamente
+acima da cota.
+
+---
+
+## 3. Pré-requisitos (Fase 0 — preparação, sem impacto em produção)
 
 1. **Backup completo do código-fonte:** rodar
    `exportarProjetoCompletoParaMD()` (`EXPORT COD.gs`) e guardar o `.md`
@@ -163,7 +217,7 @@ Uma nova implantação (deploy) sob a conta pessoal gera uma **nova URL**
 
 ---
 
-## 3. Fases da migração
+## 4. Fases da migração
 
 ### Fase 1 — Novo projeto Apps Script (paralelo, sem afetar produção)
 1. `clasp login` com a conta pessoal (`giselechereese@gmail.com`), numa
@@ -240,6 +294,11 @@ Mudanças pequenas e não-destrutivas:
    `usuario@isgh.org.br`) — cosmético, atualizar só se o domínio
    institucional deixar de fazer sentido para os usuários finais do
    formulário/admin (pode manter como está sem nenhum efeito técnico).
+5. Se a decisão da Seção 2 for manter o e-mail institucional: implementar
+   aqui a Opção A (`from: 'endereco@isgh.org.br'` nas chamadas
+   `MailApp.sendEmail` de `Notify.gs`/`Mirror.gs`) ou a Opção B
+   (substituir essas chamadas por `UrlFetchApp.fetch` ao relay
+   institucional, com fallback para envio direto).
 
 *Risco: baixo — mudanças pequenas, revisáveis em PR antes de ir para o ar.*
 
@@ -282,7 +341,7 @@ com cada passo validado antes do próximo:
 
 ---
 
-## 4. Checklist de testes de fumaça (rodar na Fase 2 e de novo na Fase 5)
+## 5. Checklist de testes de fumaça (rodar na Fase 2 e de novo na Fase 5)
 
 - [ ] Login de farmacêutico e de admin funcionam.
 - [ ] Kanban carrega os casos existentes (lendo do mesmo Firestore).
@@ -303,7 +362,7 @@ com cada passo validado antes do próximo:
 
 ---
 
-## 5. Plano de rollback por fase
+## 6. Plano de rollback por fase
 
 | Fase | Se algo der errado | Como reverter |
 |---|---|---|
@@ -313,7 +372,7 @@ com cada passo validado antes do próximo:
 
 ---
 
-## 6. Decisões em aberto (só você pode definir)
+## 7. Decisões em aberto (só você pode definir)
 
 1. O e-mail de coordenação (`EMAIL_COORDENACAO`, hoje configurável no
    painel Admin) também deve deixar de ser institucional, ou só a
@@ -325,3 +384,6 @@ com cada passo validado antes do próximo:
 4. Volume diário real de e-mail (item 1.1) — vale a pena medir antes de
    decidir se o envio também migra para a conta pessoal ou fica
    separado.
+5. Qual opção da Seção 2 adotar para o envio de e-mail — nenhuma (segue
+   pela conta pessoal), Opção A (alias cosmético) ou Opção B (relay
+   institucional) — depende diretamente da resposta ao item 4.
