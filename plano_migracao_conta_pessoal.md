@@ -188,6 +188,13 @@ ou acima do limite → só a Opção B resolve de verdade; a Opção A sozinha
 apenas maquia o problema e o sistema continuará falhando silenciosamente
 acima da cota.
 
+✅ **Decidido:** volume medido está bem abaixo de 100 e-mails/dia. O envio
+segue **direto pela conta pessoal**, sem alias e sem relay institucional —
+`MailApp.sendEmail()` continua como está em `Notify.gs`/`Mirror.gs`, sem
+nenhuma mudança de código. Reavaliar essa decisão só se o volume crescer
+de forma relevante no futuro (ex.: mais setores/unidades usando o
+sistema).
+
 ---
 
 ## 3. Pré-requisitos (Fase 0 — preparação, sem impacto em produção)
@@ -294,11 +301,10 @@ Mudanças pequenas e não-destrutivas:
    `usuario@isgh.org.br`) — cosmético, atualizar só se o domínio
    institucional deixar de fazer sentido para os usuários finais do
    formulário/admin (pode manter como está sem nenhum efeito técnico).
-5. Se a decisão da Seção 2 for manter o e-mail institucional: implementar
-   aqui a Opção A (`from: 'endereco@isgh.org.br'` nas chamadas
-   `MailApp.sendEmail` de `Notify.gs`/`Mirror.gs`) ou a Opção B
-   (substituir essas chamadas por `UrlFetchApp.fetch` ao relay
-   institucional, com fallback para envio direto).
+5. ~~Se a decisão da Seção 2 for manter o e-mail institucional...~~ —
+   **decidido (Seção 2): não é necessário.** Volume medido está bem
+   abaixo da cota da conta pessoal, envio segue direto por ela, sem
+   mudança de código neste item.
 
 *Risco: baixo — mudanças pequenas, revisáveis em PR antes de ir para o ar.*
 
@@ -381,9 +387,7 @@ com cada passo validado antes do próximo:
    organização/owner também, ou já está sob sua conta pessoal?
 3. Alinhar com a coordenação do hospital (item 1.2) antes do corte —
    quem precisa ser avisado formalmente?
-4. Volume diário real de e-mail (item 1.1) — vale a pena medir antes de
-   decidir se o envio também migra para a conta pessoal ou fica
-   separado.
-5. Qual opção da Seção 2 adotar para o envio de e-mail — nenhuma (segue
-   pela conta pessoal), Opção A (alias cosmético) ou Opção B (relay
-   institucional) — depende diretamente da resposta ao item 4.
+4. ✅ **Resolvido** — Volume diário real de e-mail (item 1.1): medido,
+   bem abaixo de 100/dia.
+5. ✅ **Resolvido** (Seção 2) — Envio de e-mail segue direto pela conta
+   pessoal, sem alias e sem relay institucional.
