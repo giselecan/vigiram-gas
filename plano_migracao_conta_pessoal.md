@@ -251,6 +251,20 @@ sistema).
    atual) — vai gerar uma **URL de teste** própria.
 2. Rodar `Diagnostico.gs → diagnosticarAdmin()` para conferir leitura do
    Firestore sem alterar nada.
+2.1. **Checar a planilha (Fase 3) antes de qualquer outro teste.** No
+   editor do projeto novo, criar e rodar manualmente uma função de teste
+   (pode apagar depois):
+   ```js
+   function testarPlanilha_() {
+     const ss = getPlanilha_();
+     Logger.log(ss ? ('OK: ' + ss.getName()) : 'FALHOU: getPlanilha_() retornou null');
+   }
+   ```
+   No log de execução: se aparecer `FALHOU`, é porque a Script Property
+   `PLANILHA_ID` ainda não foi configurada (Fase 3, passo 3) ou a
+   planilha ainda não foi compartilhada com a conta pessoal (Fase 3,
+   passo 1) — resolva isso antes de seguir, senão o espelho de auditoria
+   e outras rotinas que dependem do Sheets vão falhar silenciosamente.
 3. Testar manualmente, só você, na URL nova:
    - Login (`Auth.gs`).
    - Abrir um caso de teste no Kanban.
@@ -269,19 +283,38 @@ sistema).
 continuam usando a URL institucional normalmente.*
 
 ### Fase 3 — Planilha-espelho e pasta de auditoria
-1. Criar uma nova planilha (Sheets) de auditoria, sob a conta pessoal,
-   com a mesma estrutura de colunas da atual (`Mirror.gs` documenta o
-   formato).
-2. Não copiar o histórico linha a linha (evita duplicar/errar hashes de
-   auditoria) — em vez disso, **arquivar** a planilha institucional como
-   somente-leitura na data do corte e começar o espelho novo do zero a
-   partir dali. Documentar essa transição (data + link da planilha antiga)
-   no topo da planilha nova, para manter rastreabilidade LGPD.
-3. Mesma lógica para a pasta do Drive usada pelo `Ingest.gs`
-   (`ETL_FOLDER_IDS`) — criar pasta nova sob a conta pessoal e atualizar
-   a Script Property no novo projeto.
 
-*Risco: baixo — não altera nada em produção; só prepara o destino.*
+✅ **Decidido:** manter a **mesma planilha** institucional (não criar uma
+nova) — mantém o histórico de auditoria contínuo, sem precisar arquivar
+nada. Isso é possível porque o Apps Script grava numa planilha por
+**permissão de acesso**, não por ser dono do arquivo.
+
+1. Na planilha institucional (Drive), **Compartilhar** →  adicionar
+   `giselechereese@gmail.com` como **Editor**.
+2. ⚠️ **Achado técnico importante:** todo o código que lê/escreve na
+   planilha (`getSheet_()` em `Utils.gs`, usado por `Mirror.gs` — o
+   espelho de auditoria LGPD —, `Cases.gs`, `Manuntenção.gs` etc.) usava
+   `SpreadsheetApp.getActiveSpreadsheet()` **sem nenhum ID explícito**.
+   Isso só funciona se o projeto Apps Script for **vinculado
+   (container-bound)** à planilha — que é o caso do projeto institucional
+   original. Um projeto **novo/avulso** (criado via `clasp create`, como
+   o da Fase 1) **não tem planilha "ativa" nenhuma** — a chamada retorna
+   `null`, e o espelho de auditoria falharia silenciosamente. Isso já foi
+   corrigido no código (`Utils.gs` → `getPlanilha_()`): agora ele usa a
+   Script Property `PLANILHA_ID` quando ela existe, e só cai no
+   `getActiveSpreadsheet()` como fallback (mantém compatível com o
+   projeto institucional, que não precisa dessa propriedade).
+3. No projeto **pessoal**, adicionar a Script Property `PLANILHA_ID` com
+   o ID da planilha institucional (fica na URL dela:
+   `docs.google.com/spreadsheets/d/{ID}/edit`).
+4. Mesma lógica para a pasta do Drive usada pelo `Ingest.gs`
+   (`ETL_FOLDER_IDS`): compartilhar a pasta existente como Editor com a
+   conta pessoal (em vez de criar uma nova) e manter o mesmo valor de
+   `ETL_FOLDER_IDS` no projeto novo.
+
+*Risco: baixo, mas é o item mais fácil de esquecer — sem o passo 1
+(compartilhar) e o passo 3 (`PLANILHA_ID`), o espelho de auditoria falha
+sem aviso nenhum na tela.*
 
 ### Fase 4 — Ajustes de código (branch dedicada, revisão antes de subir)
 Mudanças pequenas e não-destrutivas:
@@ -328,7 +361,7 @@ com cada passo validado antes do próximo:
    o **novo `ETL_SECRET`** gerado na Fase 1, passo 5.
 7. Comunicar a equipe de farmácia clínica sobre a nova URL (atualizar
    favoritos/atalhos).
-8. Rodar o checklist de fumaça completo (Seção 4 abaixo) na URL nova,
+8. Rodar o checklist de fumaça completo (Seção 5 abaixo) na URL nova,
    agora com dados reais.
 9. Manter a implantação institucional **publicada, mas sem triggers**,
    por alguns dias como plano B (ver Fase 6).
@@ -349,6 +382,9 @@ com cada passo validado antes do próximo:
 
 ## 5. Checklist de testes de fumaça (rodar na Fase 2 e de novo na Fase 5)
 
+- [ ] **`getPlanilha_()` resolve a planilha correta** (rodar antes de
+      tudo o resto — ver Fase 3 acima e o passo a passo logo abaixo). Se
+      falhar, nada que dependa do Sheets vai funcionar.
 - [ ] Login de farmacêutico e de admin funcionam.
 - [ ] Kanban carrega os casos existentes (lendo do mesmo Firestore).
 - [ ] Novo caso via ETL (`insertDB`, assinado HMAC) é aceito com o novo

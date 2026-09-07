@@ -18,9 +18,22 @@ function comTrava_(operacao) {
   }
 }
 
+/**
+ * Retorna a planilha do sistema. Um projeto vinculado (container-bound) a
+ * ela resolve via getActiveSpreadsheet() sem configuração nenhuma — é o
+ * caso de implantações mais antigas. Um projeto avulso (standalone, ex.:
+ * criado via `clasp create`) não tem planilha "ativa" nenhuma, então
+ * precisa da Script Property PLANILHA_ID (planilha precisa estar
+ * compartilhada como Editor com a conta que executa o script).
+ */
+function getPlanilha_() {
+  const id = PropertiesService.getScriptProperties().getProperty('PLANILHA_ID');
+  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
+}
+
 /** Retorna a aba pelo nome, ou null se não existir (sem lançar erro). */
 function getSheet_(nomeAba) {
-  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(nomeAba);
+  return getPlanilha_().getSheetByName(nomeAba);
 }
 
 /** Retorna a aba pelo nome, lançando erro claro se não existir. */

@@ -800,7 +800,7 @@ function excluirCaso(idCaso, motivo, token) {
     //    abortar a exclusão, só fica registrado. Sob comTrava_ porque
     //    deleteRow desloca índices e colide com Mirror/ETL na mesma aba.
     try {
-      const planilha = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SCHEMA.ABAS.CASOS);
+      const planilha = getSheet_(SCHEMA.ABAS.CASOS);
       if (planilha) {
         comTrava_(function () {
           const linha = localizarLinhaCaso_(planilha, idLimpo); // -1 quando não acha
