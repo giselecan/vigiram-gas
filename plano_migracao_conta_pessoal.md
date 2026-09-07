@@ -1,10 +1,22 @@
 # Plano de Migração — Conta Institucional → Conta Pessoal
 
-> Escopo: migrar a **hospedagem/propriedade** de toda a infraestrutura do
-> VigiRAM (Apps Script, Drive/Sheets, projeto Google Cloud do Firestore,
-> envio de e-mail, repositório) da conta institucional (`@isgh.org.br`)
-> para a conta pessoal `giselechereese@gmail.com`, com o sistema em
-> **produção** e sem perda de dados/histórico de auditoria.
+> Escopo: migrar a **hospedagem/propriedade** do projeto Apps Script, do
+> Drive/Sheets de auditoria, do envio de e-mail e do gate de
+> licenciamento do VigiRAM da conta institucional (`@isgh.org.br`) para a
+> conta pessoal `giselechereese@gmail.com`, com o sistema em **produção**
+> e sem perda de dados/histórico de auditoria.
+>
+> **Decisão explícita:** o **Firestore/projeto Google Cloud permanece na
+> conta institucional** — não faz parte desta migração. Isso é
+> tecnicamente tranquilo: o `Firestore.gs` autentica por **Service
+> Account (JWT)**, não pelo usuário humano que fez o deploy do Apps
+> Script. A mesma chave de Service Account funciona de dentro de um
+> projeto Apps Script pessoal, apontando para o mesmo banco Firestore
+> institucional, sem nenhuma mudança de dados, de IAM ou de billing no
+> GCP. Isso também significa que os dados clínicos em si (e o controle
+> institucional sobre eles) **não saem** da governança do hospital — só a
+> "porta de entrada" (Apps Script/deploy/e-mail) passa a ser administrada
+> por você.
 >
 > Situação declarada: acesso total de administrador ainda ativo nas contas
 > institucionais; motivo é manter propriedade/controle pessoal do projeto
@@ -38,9 +50,11 @@ O VigiRAM roda inteiramente como Google Apps Script Web App, publicado com
 Já o **Firestore é independente disso**: a autenticação é feita por
 Service Account (JWT), via `FIRESTORE_PROJECT_ID` /
 `FIRESTORE_CLIENT_EMAIL` / `FIRESTORE_PRIVATE_KEY` nas Script Properties
-(`Firestore.gs`). Trocar o "dono" do sistema **não exige mexer nos dados
-do Firestore** — só na propriedade do projeto Google Cloud onde ele vive
-(ver Fase 2).
+(`Firestore.gs`). Por isso o Firestore pode continuar 100% institucional
+(decisão tomada na introdução deste documento) enquanto só o "dono" do
+Apps Script muda — as mesmas credenciais de Service Account são apenas
+copiadas para as Script Properties do novo projeto pessoal, sem tocar em
+nenhum dado.
 
 O Google também **restringe transferência de propriedade de arquivos do
 Drive/Apps Script para fora do domínio Workspace** (não existe um
@@ -50,10 +64,10 @@ duas estratégias diferentes por tipo de recurso:
 
 | Recurso | Estratégia | Por quê |
 |---|---|---|
-| Projeto Google Cloud (Firestore) | **Transferência de propriedade (IAM)** — mesmo projeto, mesmos dados | GCP permite adicionar qualquer conta Google como "Owner" via IAM, mesmo fora do domínio. Não precisa exportar/importar dados. |
+| Projeto Google Cloud (Firestore) | **Permanece institucional — fora do escopo desta migração** | Autenticação é por Service Account (JWT), independente de quem publica o Apps Script. Nenhuma mudança necessária. |
 | Projeto Apps Script | **Recriação sob a conta pessoal** (`clasp clone`/`push`), rodando em paralelo até o corte | Apps Script/Drive normalmente não permite mudar o dono para fora do domínio Workspace. |
 | Planilha-espelho de auditoria (Sheets) | **Nova planilha na conta pessoal a partir da data de corte**; a antiga fica congelada como arquivo histórico | Mesma restrição de domínio. Um espelho *append-only* pode perfeitamente "trocar de arquivo" numa data — desde que ambos fiquem preservados e rastreáveis. |
-| Repositório GitHub | Depende de quem é hoje o *owner*/organização do repo | Ver Fase 1. |
+| Repositório GitHub | Depende de quem é hoje o *owner*/organização do repo | Ver Seção 6, item 2. |
 
 ---
 
@@ -80,7 +94,7 @@ apenas a *propriedade administrativa* da infraestrutura mude (e os dados
 continuem os mesmos, no mesmo Firestore), isso muda quem tecnicamente
 tem acesso root às credenciais e ao Drive de auditoria. Isso pode ter
 implicação contratual/institucional além do técnico.
-→ **Recomendação:** antes do corte final (Fase 6), alinhar formalmente
+→ **Recomendação:** antes do corte final (Fase 5), alinhar formalmente
 com a coordenação/DPO do hospital que a operação do sistema passará a
 rodar sob uma conta pessoal — mesmo que você mantenha a "unidade
 autorizada" como usuária exclusiva por licença (`Security.gs`). Isso evita
@@ -97,7 +111,23 @@ está documentada no README**), pode estar limitada só ao institucional.
 `Configurações do projeto → Script Properties` se `VIGIRAM_OWNER_EMAIL`
 existe e o que contém.
 
-### 1.4 URL da implantação muda
+### 1.4 Credencial institucional do Firestore vai residir num projeto pessoal
+Como o Firestore fica institucional mas o Apps Script passa a ser
+pessoal, a chave de Service Account (`FIRESTORE_PRIVATE_KEY` e
+`FIRESTORE_CLIENT_EMAIL`) — que é um segredo institucional — vai ficar
+armazenada nas Script Properties de um projeto que só você administra.
+Tecnicamente isso já é assim hoje (o segredo já passa por Script
+Properties), mas vale confirmar dois pontos antes do corte:
+- A Service Account tem **permissão mínima necessária** no GCP (só
+  Firestore, não "Owner" do projeto todo) — se ainda não for esse o caso,
+  vale restringir o papel IAM dela antes de migrar.
+- Se um dia a Service Account precisar ser **rotacionada** (nova chave),
+  isso terá que ser feito por quem ainda tem acesso ao GCP institucional
+  e comunicado a você para atualizar a Script Property no projeto
+  pessoal — documentar esse contato/processo evita um "segredo expirado"
+  travar o sistema sem aviso.
+
+### 1.5 URL da implantação muda
 Uma nova implantação (deploy) sob a conta pessoal gera uma **nova URL**
 (`.../macros/s/{deploymentId}/exec`). Isso afeta:
 - O robô ETL PowerShell (precisa apontar para a nova URL).
@@ -117,15 +147,17 @@ Uma nova implantação (deploy) sob a conta pessoal gera uma **nova URL**
 3. **Levantar todas as Script Properties atuais** (`FIRESTORE_*`,
    `ETL_SECRET`, `ETL_FOLDER_IDS`, `VIGIRAM_*`) e guardar os valores em um
    cofre de senhas pessoal (nunca em arquivo de texto solto).
-4. **Confirmar quem é o Owner atual** do projeto Google Cloud do Firestore
-   (Console GCP → IAM) e se você já tem permissão de "Owner" ou
-   "Resource Manager Admin" para adicionar a si mesmo.
+4. **Confirmar que a Service Account do Firestore continua ativa e com
+   permissão mínima necessária** (Console GCP → IAM) — o Firestore
+   permanece institucional nesta migração (ver decisão na introdução),
+   então não há transferência de propriedade a fazer aqui, só confirmar
+   que a chave em uso é válida e o papel IAM é escopado (item 1.4).
 5. **Confirmar o dono do repositório GitHub** `giselecan/vigiram-gas` —
    se está sob organização institucional, avaliar se também precisa
    migrar para conta/organização pessoal (fora do escopo técnico deste
    plano, é uma decisão de governança à parte).
 6. **Estimar volume diário de e-mail** (item 1.1).
-7. **Definir uma janela de baixo uso** para o corte final (Fase 6) — por
+7. **Definir uma janela de baixo uso** para o corte final (Fase 5) — por
    exemplo, fim de semana ou fora do horário de triagem, mesmo a migração
    sendo desenhada para near-zero-downtime.
 
@@ -133,19 +165,7 @@ Uma nova implantação (deploy) sob a conta pessoal gera uma **nova URL**
 
 ## 3. Fases da migração
 
-### Fase 1 — Projeto Google Cloud / Firestore (baixo risco)
-1. No Console GCP, abrir o projeto associado a `FIRESTORE_PROJECT_ID`.
-2. IAM → **Adicionar** `giselechereese@gmail.com` como **Owner**.
-3. Validar o acesso logando no Console GCP com a conta pessoal.
-4. **Não mexer ainda** nas credenciais de Service Account usadas pelo
-   `Firestore.gs` — elas continuam funcionando iguais, independente de
-   quem é o Owner humano do projeto.
-5. Só depois de o resto da migração estar validado (Fase 5+), remover o
-   Owner institucional (Fase 7).
-
-*Risco: baixo — não toca em dados, é só uma mudança de permissão IAM.*
-
-### Fase 2 — Novo projeto Apps Script (paralelo, sem afetar produção)
+### Fase 1 — Novo projeto Apps Script (paralelo, sem afetar produção)
 1. `clasp login` com a conta pessoal (`giselechereese@gmail.com`), numa
    sessão separada da institucional.
 2. Criar um **novo** projeto Apps Script vazio, já sob a conta pessoal:
@@ -164,7 +184,7 @@ Uma nova implantação (deploy) sob a conta pessoal gera uma **nova URL**
 
 *Risco: baixo — projeto novo, isolado, não interfere no que já está no ar.*
 
-### Fase 3 — Implantação de teste (paralela)
+### Fase 2 — Implantação de teste (paralela)
 1. No novo projeto, publicar uma implantação Web App
    (`executeAs: USER_DEPLOYING`, `access: ANYONE_ANONYMOUS`, igual ao
    atual) — vai gerar uma **URL de teste** própria.
@@ -187,7 +207,7 @@ Uma nova implantação (deploy) sob a conta pessoal gera uma **nova URL**
 *Risco: baixo/nenhum — ambiente de teste isolado, farmacêuticos
 continuam usando a URL institucional normalmente.*
 
-### Fase 4 — Planilha-espelho e pasta de auditoria
+### Fase 3 — Planilha-espelho e pasta de auditoria
 1. Criar uma nova planilha (Sheets) de auditoria, sob a conta pessoal,
    com a mesma estrutura de colunas da atual (`Mirror.gs` documenta o
    formato).
@@ -202,11 +222,11 @@ continuam usando a URL institucional normalmente.*
 
 *Risco: baixo — não altera nada em produção; só prepara o destino.*
 
-### Fase 5 — Ajustes de código (branch dedicada, revisão antes de subir)
+### Fase 4 — Ajustes de código (branch dedicada, revisão antes de subir)
 Mudanças pequenas e não-destrutivas:
 1. `Security.gs:157-166` — opcional: manter os dois e-mails na lista
    padrão por segurança (não remover o institucional do array até a
-   Fase 7 estar validada — assim, se algo der errado, o deploy
+   Fase 6 estar validada — assim, se algo der errado, o deploy
    institucional continua autorizado a rodar como plano B).
 2. `Config.gs:26`, `Notify.gs:208,325`, `Mirror.gs:431`, `E2b.gs:564` —
    `EMAIL_COORDENACAO`: **normalmente não precisa mudar no código** — é
@@ -223,7 +243,7 @@ Mudanças pequenas e não-destrutivas:
 
 *Risco: baixo — mudanças pequenas, revisáveis em PR antes de ir para o ar.*
 
-### Fase 6 — Corte (cutover) — na janela de baixo uso definida na Fase 0
+### Fase 5 — Corte (cutover) — na janela de baixo uso definida na Fase 0
 Esta é a única fase com impacto direto em produção. Fazer nesta ordem,
 com cada passo validado antes do próximo:
 
@@ -240,28 +260,29 @@ com cada passo validado antes do próximo:
 5. Atualizar `URL_SISTEMA` no painel Admin (Firestore config) para a nova
    URL da implantação pessoal.
 6. Atualizar a configuração do robô ETL PowerShell com a **nova URL** e
-   o **novo `ETL_SECRET`** gerado na Fase 2.5.
+   o **novo `ETL_SECRET`** gerado na Fase 1, passo 5.
 7. Comunicar a equipe de farmácia clínica sobre a nova URL (atualizar
    favoritos/atalhos).
 8. Rodar o checklist de fumaça completo (Seção 4 abaixo) na URL nova,
    agora com dados reais.
 9. Manter a implantação institucional **publicada, mas sem triggers**,
-   por alguns dias como plano B (ver Fase 7).
+   por alguns dias como plano B (ver Fase 6).
 
-### Fase 7 — Estabilização e desligamento do acesso institucional
+### Fase 6 — Estabilização e desligamento do acesso institucional
 1. Observar por 3–7 dias: e-mails chegando, ETL inserindo casos,
    espelho de auditoria gravando, XML E2B gerando corretamente.
-2. Só depois desse período: remover o `giselechereese@gmail.com` da
-   lista institucional (Fase 1) se aplicável, revogar `clasp login`
-   institucional, e — o passo mais delicado — **arquivar (não excluir)**
-   a implantação/projeto Apps Script institucional (mantém histórico e
-   serve de restauração de emergência).
+2. Só depois desse período: revogar `clasp login` institucional e — o
+   passo mais delicado — **arquivar (não excluir)** a
+   implantação/projeto Apps Script institucional (mantém histórico e
+   serve de restauração de emergência). O Firestore/GCP institucional
+   **não é tocado** neste passo — continua exatamente como está, já que
+   permanece fora do escopo desta migração.
 3. Nunca excluir a planilha de auditoria antiga nem o projeto Apps
    Script antigo — são registro histórico/LGPD.
 
 ---
 
-## 4. Checklist de testes de fumaça (rodar na Fase 3 e de novo na Fase 6)
+## 4. Checklist de testes de fumaça (rodar na Fase 2 e de novo na Fase 5)
 
 - [ ] Login de farmacêutico e de admin funcionam.
 - [ ] Kanban carrega os casos existentes (lendo do mesmo Firestore).
@@ -286,10 +307,9 @@ com cada passo validado antes do próximo:
 
 | Fase | Se algo der errado | Como reverter |
 |---|---|---|
-| 1 (GCP IAM) | Nenhum impacto em produção | Remover a permissão IAM adicionada |
-| 2–5 (projeto/URL de teste) | Nenhum impacto — ambiente paralelo | Excluir o projeto de teste, nada muda para os usuários |
-| 6 (corte) | E-mails não saem / ETL falha / painel fora do ar | Reinstalar os 3 triggers na implantação institucional (ainda publicada), reverter `URL_SISTEMA` e a config do ETL para a URL antiga — restaura o serviço em minutos, pois nada foi apagado |
-| 7 (desligamento) | Só executar depois de dias estáveis — praticamente sem necessidade de rollback | Reverter é reativar acessos institucionais, se ainda não revogados definitivamente |
+| 1–4 (projeto/URL de teste) | Nenhum impacto — ambiente paralelo | Excluir o projeto de teste, nada muda para os usuários |
+| 5 (corte) | E-mails não saem / ETL falha / painel fora do ar | Reinstalar os 3 triggers na implantação institucional (ainda publicada), reverter `URL_SISTEMA` e a config do ETL para a URL antiga — restaura o serviço em minutos, pois nada foi apagado |
+| 6 (desligamento) | Só executar depois de dias estáveis — praticamente sem necessidade de rollback | Reverter é reativar `clasp login` institucional e reabrir os triggers na implantação antiga, se ainda não arquivada definitivamente |
 
 ---
 
