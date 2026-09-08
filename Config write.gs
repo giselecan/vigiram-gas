@@ -1634,3 +1634,26 @@ function normalizarSetoresBanco(token) {
 function normalizarBancoCompleto(token) {
   return normalizarSetoresBanco(token);
 }
+
+/**
+ * Sincroniza retroativamente os setores dos casos cadastrados a partir do relatório de saídas (Drive).
+ * Lê os arquivos SAIDAS_*.csv na pasta do Drive a partir da data de corte (padrão 01/09/2026),
+ * extrai a coluna SETOR das dispensações de gatilhos e atualiza os casos no Firestore e Sheets.
+ * @param {string} token
+ * @param {string=} dataCorteStr
+ * @returns {{ sucesso: boolean, mensagem: string, alterados: number, totalDispensacoes: number, divergencias: any[] }}
+ */
+function sincronizarSetoresComRelatorioSaidas(token, dataCorteStr) {
+  return _comAdmin_(token, function () {
+    const res = varreduraGatilhosRetroativaRelatorioSaidas_(true, dataCorteStr || '01/09/2026');
+    return {
+      sucesso: true,
+      mensagem: 'Varredura concluída! ' + res.casosAtualizados + ' caso(s) tiveram o setor atualizado conforme o relatório de saídas (' + res.sheetsAtualizados + ' linhas no Sheets).',
+      alterados: res.casosAtualizados,
+      sheetsAtualizados: res.sheetsAtualizados,
+      totalDispensacoes: res.totalDispensacoesMapeadas,
+      divergencias: res.divergencias
+    };
+  });
+}
+

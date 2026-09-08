@@ -777,3 +777,268 @@ function EXECUTAR_NORMALIZACAO_SETORES_BANCO_() {
 function EXECUTAR_NORMALIZACAO_BANCO_COMPLETA_() {
   return EXECUTAR_NORMALIZACAO_SETORES_BANCO_();
 }
+
+/**
+ * Realiza a varredura retroativa de todos os relatórios de saídas do Almoxarifado (Drive)
+ * gerados a partir de 01/09/2026 para confrontar e corrigir exatamente o setor onde cada
+ * medicamento-gatilho foi dispensado, atualizando os casos em Firestore e Sheets.
+ *
+ * @param {boolean} confirmar — true para aplicar de fato no banco; false para Dry-Run (apenas log).
+ * @param {string=} dataCorteStr — formato "dd/MM/yyyy" (padrão: "01/09/2026").
+ * @returns {{ sucesso: boolean, modo: string, totalArquivosSaidas: number, totalDispensacoesMapeadas: number, totalDivergencias: number, casosAtualizados: number, sheetsAtualizados: number, divergencias: any[] }}
+ */
+function varreduraGatilhosRetroativaRelatorioSaidas_(confirmar, dataCorteStr) {
+  const dataCorte = dataCorteStr ? _parseDataFlexivel_(dataCorteStr) : new Date(2026, 8, 1); // 01/09/2026
+  const folderId = PropertiesService.getScriptProperties().getProperty('FOLDER_SAIDAS') || '1XFRtPgHneFtmJYWBqeF6g4o7jNJ1w0Y7';
+
+  Logger.log('=== INICIANDO VARREDURA RETROATIVA DE GATILHOS A PARTIR DO RELATÓRIO DE SAÍDAS (DRIVE) ===');
+  Logger.log('Data de corte: ' + Utilities.formatDate(dataCorte, Session.getScriptTimeZone(), 'dd/MM/yyyy'));
+  Logger.log('Pasta do Drive (folderId): ' + folderId);
+  Logger.log('Modo de execução: ' + (confirmar === true ? 'APLICAÇÃO REAL (GRAVAÇÃO)' : 'DRY-RUN (SIMULAÇÃO)'));
+
+  // 1. Assegura o cadastro completo de UTIs I a IV no catálogo de setores
+  garantirSetoresUtiCadastrados(null);
+  const mapaSinonimos = _mapaSinonimosSetores_();
+
+  // 2. Carrega a lista de medicamentos-gatilho monitorados
+  const docsGatilhos = fsListarTodos_(SCHEMA.FS.GATILHOS);
+  const gatilhosAtivos = docsGatilhos
+    .filter(function (d) { return d.medicamento && d.ativo !== false; })
+    .map(function (d) { return String(d.medicamento).trim(); });
+
+  if (!gatilhosAtivos.length) {
+    _GATILHOS_FALLBACK_HARDCODED.forEach(function (g) { gatilhosAtivos.push(g); });
+  }
+
+  const gatilhosNorm = gatilhosAtivos.map(function (g) {
+    return {
+      original: g,
+      padrao: new RegExp('\\b' + _removerAcentos_(g).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?!\\w)', 'i')
+    };
+  });
+
+  // 3. Localiza os arquivos SAIDAS_*.csv na pasta do Google Drive
+  let folder;
+  try {
+    folder = DriveApp.getFolderById(folderId);
+  } catch (errF) {
+    throw new Error('Não foi possível acessar a pasta do Drive com id ' + folderId + ': ' + errF.message);
+  }
+
+  const files = folder.getFiles();
+  const arquivosSaidas = [];
+
+  while (files.hasNext()) {
+    const file = files.next();
+    const nome = file.getName();
+    if (/^SAIDAS_\d{8}/i.test(nome)) {
+      const matchData = nome.match(/SAIDAS_(\d{4})(\d{2})(\d{2})/i);
+      if (matchData) {
+        const ano = parseInt(matchData[1], 10);
+        const mes = parseInt(matchData[2], 10) - 1;
+        const dia = parseInt(matchData[3], 10);
+        const dataArq = new Date(ano, mes, dia);
+        if (dataArq >= dataCorte) {
+          arquivosSaidas.push({ file: file, nome: nome, data: dataArq });
+        }
+      }
+    }
+  }
+
+  // Ordena por data (mais antigo para mais recente)
+  arquivosSaidas.sort(function (a, b) { return a.data.getTime() - b.data.getTime(); });
+  Logger.log(`Total de relatórios de saídas localizados a partir de 01/09/2026: ${arquivosSaidas.length}`);
+
+  // 4. Mapeia as dispensações registradas na coluna SETOR dos arquivos de saídas
+  const mapaDispensacoes = {};
+
+  arquivosSaidas.forEach(function (item) {
+    try {
+      const conteudo = item.file.getBlob().getDataAsString('UTF-8');
+      const linhas = Utilities.parseCsv(conteudo);
+      if (!linhas || linhas.length < 2) return;
+
+      let idxProntuario = 1;
+      let idxProduto = 5;
+      let idxData = 6;
+      let idxSetor = 9;
+      let linhaInicio = 0;
+
+      for (let i = 0; i < Math.min(20, linhas.length); i++) {
+        const rowUpper = linhas[i].map(function (c) { return String(c || '').toUpperCase().trim(); });
+        const pIdx = rowUpper.indexOf('PRONTUARIO');
+        const sIdx = rowUpper.indexOf('SETOR');
+        if (pIdx !== -1 && sIdx !== -1) {
+          idxProntuario = pIdx;
+          idxSetor = sIdx;
+          const prodIdx = rowUpper.indexOf('PRODUTO');
+          if (prodIdx !== -1) idxProduto = prodIdx;
+          const dIdx = rowUpper.findIndex(function (c) { return c.indexOf('DATA') !== -1; });
+          if (dIdx !== -1) idxData = dIdx;
+          linhaInicio = i + 1;
+          break;
+        }
+      }
+
+      for (let j = linhaInicio; j < linhas.length; j++) {
+        const cols = linhas[j];
+        if (!cols || cols.length <= Math.max(idxProntuario, idxProduto, idxSetor)) continue;
+
+        const prontuario = String(cols[idxProntuario] || '').trim();
+        const produto = String(cols[idxProduto] || '').trim();
+        const setorCru = String(cols[idxSetor] || '').trim();
+        const dataSaida = idxData !== -1 ? String(cols[idxData] || '').trim() : '';
+
+        if (!prontuario || !produto || !setorCru) continue;
+
+        const produtoNorm = _removerAcentos_(produto);
+        let gatilhoEncontrado = null;
+        for (let k = 0; k < gatilhosNorm.length; k++) {
+          if (gatilhosNorm[k].padrao.test(produtoNorm)) {
+            gatilhoEncontrado = gatilhosNorm[k].original;
+            break;
+          }
+        }
+
+        if (gatilhoEncontrado) {
+          const setorCanonico = _resolverSetorCanonico_(setorCru, mapaSinonimos);
+          const chaveDispensacao = prontuario + '|' + _normalizarSetorComparacao_(gatilhoEncontrado);
+
+          mapaDispensacoes[chaveDispensacao] = {
+            prontuario: prontuario,
+            gatilho: gatilhoEncontrado,
+            produto: produto,
+            setorCru: setorCru,
+            setorCanonico: setorCanonico,
+            dataSaida: dataSaida,
+            arquivo: item.nome
+          };
+
+          if (!mapaDispensacoes[prontuario]) {
+            mapaDispensacoes[prontuario] = mapaDispensacoes[chaveDispensacao];
+          }
+        }
+      }
+    } catch (errArq) {
+      console.warn('Erro ao processar relatório ' + item.nome + ': ' + errArq.message);
+    }
+  });
+
+  const totalDispensacoes = Object.keys(mapaDispensacoes).length;
+  Logger.log(`Total de dispensações de gatilhos mapeadas do relatório: ${totalDispensacoes}`);
+
+  // 5. Confrontar com os casos cadastrados no Firestore (SCHEMA.FS.CASOS)
+  const todosCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+  const divergencias = [];
+  const paraAtualizarFirestore = [];
+  const mapaIdParaSetorSheets = {};
+
+  todosCasos.forEach(function (caso) {
+    if (!caso || !caso.id) return;
+    const dataCaso = _parseDataFlexivel_(caso.data || caso.data_evento);
+    if (dataCaso && dataCaso < dataCorte) return;
+
+    const prontuario = String(caso.prontuario || '').trim();
+    if (!prontuario) return;
+
+    const medCaso = String(caso.medicamento || caso.gatilho || '').trim();
+    const chaveComposta = prontuario + '|' + _normalizarSetorComparacao_(medCaso);
+    const disp = mapaDispensacoes[chaveComposta] || mapaDispensacoes[prontuario];
+
+    if (disp) {
+      const setorAtual = String(caso.setor || '').trim();
+      const setorCorreto = disp.setorCanonico;
+
+      if (setorAtual !== setorCorreto) {
+        divergencias.push({
+          id: caso.id,
+          prontuario: prontuario,
+          paciente: caso.iniciais || 'N/I',
+          medicamento: medCaso,
+          setorAtual: setorAtual,
+          setorRelatorioCru: disp.setorCru,
+          setorCorreto: setorCorreto,
+          arquivoOrigem: disp.arquivo,
+          dataSaida: disp.dataSaida
+        });
+
+        if (confirmar === true) {
+          paraAtualizarFirestore.push({
+            id: caso.id,
+            dados: {
+              setor: setorCorreto,
+              setorRelatorioOriginal: disp.setorCru,
+              auditoria: {
+                atualizadoPor: 'Varredura Retroativa Saídas (' + (Session.getActiveUser().getEmail() || 'Sistema') + ')',
+                atualizadoEm: new Date()
+              }
+            }
+          });
+          mapaIdParaSetorSheets[caso.id] = setorCorreto;
+        }
+      }
+    }
+  });
+
+  Logger.log('-------------------------------------------------------------');
+  Logger.log(`Total de casos com setor divergente identificados: ${divergencias.length}`);
+  divergencias.forEach(function (d, i) {
+    Logger.log(`[DIVERGÊNCIA ${i + 1}] Caso: ${d.id} | Prontuário: ${d.prontuario} (${d.paciente}) | Medicamento: ${d.medicamento}`);
+    Logger.log(`    • No Sistema: "${d.setorAtual}"`);
+    Logger.log(`    • No Relatório de Saídas (Coluna SETOR): "${d.setorRelatorioCru}" (${d.arquivoOrigem})`);
+    Logger.log(`    • Setor Canônico Corrigido: "${d.setorCorreto}"`);
+  });
+
+  let sheetsAtualizados = 0;
+  if (confirmar === true && paraAtualizarFirestore.length > 0) {
+    Logger.log('Aplicando correções de setor no Firestore...');
+    fsBatchUpdate_(SCHEMA.FS.CASOS, paraAtualizarFirestore, ['setor', 'setorRelatorioOriginal', 'auditoria']);
+
+    Logger.log('Aplicando correções de setor na planilha espelho (DB_Casos_RAM)...');
+    try {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const aba = ss.getSheetByName(SCHEMA.ABAS.CASOS);
+      if (aba) {
+        sheetsAtualizados = _atualizarSetorEmPlanilhaPorId_(aba, mapaIdParaSetorSheets);
+      }
+    } catch (eSheets) {
+      console.warn('Falha ao atualizar planilha: ' + eSheets.message);
+    }
+
+    invalidarConfig();
+    invalidarCasosCache_();
+
+    fsRegistrarLog_('VARREDURA_RETROATIVA_SETORES', 'setores',
+      `${paraAtualizarFirestore.length} caso(s) tiveram setor corrigido a partir do relatório de saídas.`);
+    Logger.log(`Concluído com sucesso: ${paraAtualizarFirestore.length} casos corrigidos no Firestore e ${sheetsAtualizados} linhas na planilha.`);
+  }
+
+  return {
+    sucesso: true,
+    modo: confirmar === true ? 'EXECUÇÃO REAL' : 'DRY-RUN',
+    totalArquivosSaidas: arquivosSaidas.length,
+    totalDispensacoesMapeadas: totalDispensacoes,
+    totalDivergencias: divergencias.length,
+    casosAtualizados: paraAtualizarFirestore.length,
+    sheetsAtualizados: sheetsAtualizados,
+    divergencias: divergencias
+  };
+}
+
+/**
+ * PASSO 1: Executa a simulação (Dry-Run) da varredura retroativa a partir de 01/09/2026.
+ * Apenas analisa os relatórios do Drive e lista detalhadamente no log as divergências,
+ * sem alterar nada no banco de dados.
+ */
+function EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_DRY_RUN_() {
+  return varreduraGatilhosRetroativaRelatorioSaidas_(false, '01/09/2026');
+}
+
+/**
+ * PASSO 2: Executa de fato a varredura retroativa a partir de 01/09/2026.
+ * Corrige os setores no Firestore e na planilha DB_Casos_RAM com base exata
+ * na coluna SETOR do relatório de saídas do Almoxarifado.
+ */
+function EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_01_09_() {
+  return varreduraGatilhosRetroativaRelatorioSaidas_(true, '01/09/2026');
+}

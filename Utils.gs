@@ -583,6 +583,50 @@ function _atualizarSetoresEmPlanilha_(planilha, deParaChaves) {
 }
 
 /**
+ * Atualiza o setor de casos na planilha espelho (DB_Casos_RAM) baseado no ID do caso.
+ * @param {Sheet} planilha
+ * @param {{ [idCaso: string]: string }} mapaIdParaSetor — mapa idCaso -> novoSetor
+ * @returns {number} quantidade de linhas atualizadas
+ */
+function _atualizarSetorEmPlanilhaPorId_(planilha, mapaIdParaSetor) {
+  if (!planilha || !mapaIdParaSetor || Object.keys(mapaIdParaSetor).length === 0) return 0;
+  const ultimaLinha = planilha.getLastRow();
+  if (ultimaLinha < 2) return 0;
+
+  const rangeIds = planilha.getRange(2, SCHEMA.COL.ID, ultimaLinha - 1, 1).getValues();
+  const rangeSetores = planilha.getRange(2, SCHEMA.COL.SETOR, ultimaLinha - 1, 1);
+  const valoresSetor = rangeSetores.getValues();
+  let atualizados = 0;
+
+  for (let i = 0; i < rangeIds.length; i++) {
+    const id = String(rangeIds[i][0] || '').trim();
+    if (id && mapaIdParaSetor[id] && valoresSetor[i][0] !== mapaIdParaSetor[id]) {
+      valoresSetor[i][0] = mapaIdParaSetor[id];
+      atualizados++;
+    }
+  }
+
+  if (atualizados > 0) {
+    comTrava_(function () {
+      rangeSetores.setValues(valoresSetor);
+    });
+  }
+  return atualizados;
+}
+
+/**
+ * Remove acentuação e converte para maiúsculo.
+ * @param {string} str
+ * @returns {string}
+ */
+function _removerAcentos_(str) {
+  return String(str || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+}
+
+/**
  * Normaliza as iniciais do paciente para formato padronizado com pontos (ex.: "J.S." ou "J.C.A.").
  * @param {string} iniciais
  * @returns {string}

@@ -1084,6 +1084,12 @@ function _renderSecaoSetores(area, geracao) {
                     title="Normaliza exclusivamente os setores dos casos com base nos setores cadastrados, considerando UTI I, II, III e IV">
               <i class="fas fa-check-double"></i> Normalizar Setores
             </button>
+            <button onclick="_cfgSincronizarSetoresRelatorioSaidas(this)"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #4f46e5 !important; color: #ffffff !important;"
+                    title="Varre os relatórios de saídas do Drive a partir de 01/09 para corrigir os setores dos casos diretamente a partir da coluna SETOR original da dispensação">
+              <i class="fas fa-file-invoice"></i> Varrer Relatório Saídas (Drive)
+            </button>
             <button onclick="_cfgMapearSetoresGatilhos(this)"
                     class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #2563eb !important; color: #ffffff !important;"
@@ -1730,6 +1736,26 @@ function _cfgNormalizarSetoresBanco(btn) {
 }
 
 const _cfgNormalizarBancoCompleto = _cfgNormalizarSetoresBanco;
+
+function _cfgSincronizarSetoresRelatorioSaidas(btn) {
+  if (!confirm('Deseja iniciar a Varredura Retroativa do Relatório de Saídas (Drive)?\n\nEsta operação irá:\n1. Ler os relatórios SAIDAS_*.csv no Google Drive a partir de 01/09/2026.\n2. Identificar as dispensações de gatilhos e confrontar com os casos cadastrados.\n3. Atualizar o setor de cada caso (Firestore e Planilha) para refletir exatamente a coluna SETOR do relatório de saídas do almoxarifado.\n\nDeseja continuar?')) {
+    return;
+  }
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      mostrarToast(res.mensagem || 'Varredura concluída com sucesso!', 'sucesso');
+      invalidarConfigCache();
+      if (typeof carregarCasos === 'function') carregarCasos();
+      _abrirSecaoTopo('configuracoes', 'setores');
+    })
+    .withFailureHandler(err => {
+      _pararCarregando(btn);
+      mostrarToast('Erro na varredura: ' + err.message, 'erro');
+    })
+    .sincronizarSetoresComRelatorioSaidas(tokenSessao, '01/09/2026');
+}
 
 // ─────────────────────────────────────────────────────────
 // CONFIGURAÇÕES · LISTAS / DROPDOWNS
