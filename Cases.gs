@@ -329,9 +329,8 @@ function salvarDemandaEspontanea(formDados) {
       throw new Error('Preencha os campos obrigatórios: prontuário, iniciais, setor e medicamento.');
     }
 
-    // Normalização canônica padronizada de ponta a ponta
+    // Normalização estrita de setores para bater exatamente com setores cadastrados
     const setorCanonico = _resolverSetorCanonico_(setor);
-    const gatilhoInfo   = _resolverGatilhoCanonico_(medicamento);
     const iniciaisNorm  = _normalizarIniciaisPaciente_(iniciais);
     const sexoNorm      = _normalizarSexo_(formDados.sexo);
 
@@ -375,10 +374,7 @@ function salvarDemandaEspontanea(formDados) {
       nascimento: formDados.nascimento || '',
       sexo: sexoNorm,
       setor: setorCanonico,
-      medicamento: gatilhoInfo.medicamento,
-      medicamentoBruto: gatilhoInfo.original,
-      doseMedicamento: gatilhoInfo.dose,
-      doseUnidade: gatilhoInfo.unidade,
+      medicamento: String(medicamento || '').toUpperCase().trim(),
       status: SCHEMA.STATUS.INVESTIGACAO,
       sla: 'AGUARDANDO SLA',
       farmaceutico: farmaceuticoResponsavel,
@@ -461,15 +457,12 @@ function registrarTriagem(dados, token) {
             triadoPor: triadoPorFinal
           };
         } else {
-          const medResolvido = _resolverGatilhoCanonico_(dados.medSuspeito);
           atualizacao = {
-            medicamento: medResolvido.medicamento || String(dados.medSuspeito || '').toUpperCase().trim(),
+            medicamento: String(dados.medSuspeito || '').toUpperCase().trim(),
             status: SCHEMA.STATUS.INVESTIGACAO,
             dataTriagem: dataTriagemFinal,
             triadoPor: triadoPorFinal
           };
-          if (medResolvido.dose) atualizacao.doseMedicamento = medResolvido.dose;
-          if (medResolvido.unidade) atualizacao.doseUnidade = medResolvido.unidade;
         }
 
         fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, dados.idCaso, atualizacao);

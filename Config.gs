@@ -331,13 +331,16 @@ function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
   let limpo = String(setorBruto || '').trim();
   if (!limpo) return '';
 
-  // Se vier com dot-notation de sistema hospitalar (ex.: "UTI ADULTO II.UTI ADULTO II.09"), isola o setor principal
+  // 0. Limpeza de prefixos de dot-notation hospitalar e sufixos de leito/box/quarto
   if (limpo.indexOf('.') !== -1) {
     const partePrefixo = limpo.split('.')[0].trim();
     if (partePrefixo.length >= 3) {
       limpo = partePrefixo;
     }
   }
+
+  // Remove sufixos de leito, box, quarto ou apartamento (ex: "- LEITO 04", "/ BOX 12", "LTO 01")
+  limpo = limpo.replace(/\s*[-/:]?\s*\b(?:LEITO|LTO|BOX|QUARTO|APTO|L)\b\s*[-.:/]?\s*\d+\b/gi, '').trim().replace(/[\s\-_/:]+$/, '');
 
   const mapa = mapaPreCarregado || _mapaSinonimosSetores_();
   const chave = _normalizarSetorComparacao_(limpo);
@@ -375,9 +378,15 @@ function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
     mapa[chave] = mapa[chaveExpandidaRomana];
     return mapa[chaveExpandidaRomana];
   }
+  const chaveExpandidaArabica = _normalizarSetorComparacao_(_converterRomanoParaArabicoSetor_(chaveExpandida));
+  if (mapa[chaveExpandidaArabica]) {
+    mapa[chave] = mapa[chaveExpandidaArabica];
+    return mapa[chaveExpandidaArabica];
+  }
 
   // 4. Busca inteligente por similaridade contra setores oficiais cadastrados
-  const candidatos = Object.values(mapa);
+  // Garante que o setor retornado seja estritamente um setor cadastrado oficial
+  const candidatos = Array.from(new Set(Object.values(mapa)));
   if (candidatos.length > 0) {
     const melhor = _encontrarMelhorCorrespondenciaSetor_(limpo, candidatos);
     if (melhor && melhor.compativel && melhor.score >= 0.80) {
@@ -389,156 +398,6 @@ function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
 
   // 5. Fallback limpo: maiúsculo com zeros padronizados e espaços colapsados
   return _padronizarZerosSetor_(limpo).toUpperCase().replace(/[-_./]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-/**
- * Lista de antídotos e medicamentos-gatilho padrão do protocolo Trigger Tool (IHI / Hospitalar)
- * usados como referência caso a coleção do Firestore ainda não tenha sido populada.
- */
-const _GATILHOS_PADRAO_HOSPITALARES_ = [
-  'FITOMENADIONA', 'NALOXONA', 'FLUMAZENIL', 'PROTAMINA', 'GLUCAGON',
-  'ATROPINA', 'BICARBONATO DE SODIO', 'GLUCONATO DE CALCIO', 'CLORETO DE CALCIO',
-  'SUGAMADEX', 'IDARUCIZUMABE', 'ANDEXANET ALFA', 'CARVAO ATIVADO',
-  'DIPIRONA', 'DIMENIDRINATO', 'METOCLOPRAMIDA', 'ONDANSETRONA', 'PROMETAZINA',
-  'BROMOPRIDA', 'VANCOMICINA', 'GENTAMICINA', 'AMICACINA', 'DIGOXINA',
-  'VARFARINA', 'HEPARINA', 'ENOXAPARINA', 'INSULINA', 'AMIODARONA',
-  'FENITOINA', 'LEVETIRACETAM', 'MIDAZOLAM', 'FENTANILA', 'MORFINA',
-  'TRAMADOL', 'CODEINA', 'DEXTROSE', 'AZUL DE METILENO'
-];
-
-/**
- * Monta o catálogo de medicamentos-gatilho para normalização automática na ingestão.
- * @returns {{ chaves: { [chave: string]: string }, listaOficial: string[] }}
- */
-function _mapaGatilhosCadastrados_() {
-  const chaves = {};
-  const listaOficial = [];
-
-  const registrar = function (nomeOficial, sinonimos) {
-    const limpo = String(nomeOficial || '').trim().toUpperCase();
-    if (!limpo) return;
-    const chave = _normalizarChaveGatilho_(limpo);
-    if (!chaves[chave]) {
-      listaOficial.push(limpo);
-    }
-    chaves[chave] = limpo;
-
-    if (Array.isArray(sinonimos)) {
-      sinonimos.forEach(function (sin) {
-        const s = String(sin || '').trim().toUpperCase();
-        if (s) chaves[_normalizarChaveGatilho_(s)] = limpo;
-      });
-    }
-  };
-
-  try {
-    const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
-    docs.forEach(function (doc) {
-      const med = doc.medicamento || (doc._id ? String(doc._id).replace(/_/g, ' ') : '');
-      if (med) registrar(med, doc.sinonimos);
-    });
-  } catch (e) {
-    console.error('_mapaGatilhosCadastrados_: falha ao ler Firestore — ' + e.message);
-  }
-
-  // Se o Firestore tiver vazio ou offline, carrega padrões de segurança
-  if (listaOficial.length === 0) {
-    _GATILHOS_PADRAO_HOSPITALARES_.forEach(function (g) { registrar(g); });
-  }
-
-  return { chaves: chaves, listaOficial: listaOficial };
-}
-
-/**
- * Resolve o nome canônico do medicamento-gatilho a partir do texto bruto da prescrição/dispensação.
- * Extrai a dose/unidade e normaliza para o nome oficial do gatilho cadastrado.
- * @param {string} medBruto
- * @param {{ chaves: { [chave: string]: string }, listaOficial: string[] }=} catalogoPreCarregado
- * @returns {{ medicamento: string, dose: string, unidade: string, original: string }}
- */
-function _resolverGatilhoCanonico_(medBruto, catalogoPreCarregado) {
-  const original = String(medBruto || '').trim();
-  if (!original) return { medicamento: '', dose: '', unidade: '', original: '' };
-
-  const doseInfo = _extrairDoseEUnidadeMedicamento_(original);
-  const catalogo = catalogoPreCarregado || _mapaGatilhosCadastrados_();
-
-  // 1. Correspondência exata da chave normalizada
-  const chaveDireta = _normalizarChaveGatilho_(original);
-  if (catalogo.chaves[chaveDireta]) {
-    return {
-      medicamento: catalogo.chaves[chaveDireta],
-      dose: doseInfo.dose,
-      unidade: doseInfo.unidade,
-      original: original
-    };
-  }
-
-  // 2. Limpeza de formas farmacêuticas, apresentações e sais
-  const nomeLimpo = _limparFormaDosagemMedicamento_(original);
-  const chaveLimpa = _normalizarChaveGatilho_(nomeLimpo);
-  if (catalogo.chaves[chaveLimpa]) {
-    return {
-      medicamento: catalogo.chaves[chaveLimpa],
-      dose: doseInfo.dose,
-      unidade: doseInfo.unidade,
-      original: original
-    };
-  }
-
-  // 3. Busca por contenção de nome oficial de gatilho dentro da string bruta
-  // Ex.: "VITAMINA K1 (FITOMENADIONA) 10MG/ML" -> acha "FITOMENADIONA"
-  // Ex.: "CLORIDRATO DE NALOXONA 0.4MG" -> acha "NALOXONA"
-  const textoSemAcento = String(original).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-  for (let i = 0; i < catalogo.listaOficial.length; i++) {
-    const oficial = catalogo.listaOficial[i];
-    const oficialSemAcento = oficial.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-    const regexPalavra = new RegExp('\\b' + oficialSemAcento + '\\b', 'i');
-    if (regexPalavra.test(textoSemAcento)) {
-      return {
-        medicamento: oficial,
-        dose: doseInfo.dose,
-        unidade: doseInfo.unidade,
-        original: original
-      };
-    }
-  }
-
-  // 4. Similaridade com os medicamentos oficiais cadastrados
-  if (catalogo.listaOficial.length > 0 && nomeLimpo) {
-    let melhorScore = 0;
-    let melhorMatch = null;
-    for (let i = 0; i < catalogo.listaOficial.length; i++) {
-      const cand = catalogo.listaOficial[i];
-      const candLimpo = _limparFormaDosagemMedicamento_(cand);
-      const maxL = Math.max(nomeLimpo.length, candLimpo.length);
-      if (maxL === 0) continue;
-      const dist = _levenshteinDistancia_(nomeLimpo, candLimpo);
-      const sim = 1 - (dist / maxL);
-      if (sim > melhorScore) {
-        melhorScore = sim;
-        melhorMatch = cand;
-      }
-    }
-    if (melhorMatch && melhorScore >= 0.80) {
-      return {
-        medicamento: melhorMatch,
-        dose: doseInfo.dose,
-        unidade: doseInfo.unidade,
-        original: original
-      };
-    }
-  }
-
-  // 5. Fallback limpo: se não corresponder a nenhum gatilho cadastrado,
-  // retorna o nome com formas e dosagens limpas em maiúsculas (ou original limpo)
-  const medFinal = nomeLimpo || original.toUpperCase().replace(/\s+/g, ' ').trim();
-  return {
-    medicamento: medFinal,
-    dose: doseInfo.dose,
-    unidade: doseInfo.unidade,
-    original: original
-  };
 }
 
 /**

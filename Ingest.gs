@@ -101,7 +101,6 @@ function handleInsertDB(e) {
     // o ETL manda dezenas de casos por ciclo e isso é 1 leitura do Firestore.
     const setoresInativos = _setoresInativosMapa_();
     const mapaSinonimos   = _mapaSinonimosSetores_();
-    const mapaGatilhos    = _mapaGatilhosCadastrados_();
     const descartadosPorSetor = {};
     const bloqueadosPorExclusao = [];
 
@@ -121,10 +120,8 @@ function handleInsertDB(e) {
         return;
       }
 
-      // 2. GATILHO CANÔNICO: normaliza a apresentação/dosagem bruta do robô para
-      // o nome oficial cadastrado (ex: "FITOMENADIONA 10MG/ML AMPOLA" -> "FITOMENADIONA"),
-      // extraindo a dose e unidade para espelhamento correto em E2B e Sheets.
-      const gatilhoInfo = _resolverGatilhoCanonico_(caso.medicamento_suspeito, mapaGatilhos);
+      // 2. MEDICAMENTO: preserva a nomenclatura original exata sem limpeza
+      const medPrescrito = String(caso.medicamento_suspeito || caso.medicamento || caso.gatilho || '').trim();
 
       // 3. DEMAIS DADOS NORMALIZADOS: iniciais padrão com pontos e sexo M/F
       const iniciaisNorm = _normalizarIniciaisPaciente_(caso.iniciais_paciente);
@@ -183,10 +180,10 @@ function handleInsertDB(e) {
         nascimento: caso.data_nascimento || '',
         sexo: sexoNorm,
         setor: setorCanonico,
-        medicamento: gatilhoInfo.medicamento,
-        medicamentoBruto: gatilhoInfo.original,
-        doseMedicamento: gatilhoInfo.dose,
-        doseUnidade: gatilhoInfo.unidade,
+        medicamento: medPrescrito,
+        medicamentoBruto: medPrescrito,
+        doseMedicamento: caso.dose_medicamento || '',
+        doseUnidade: caso.dose_unidade || '',
         status: SCHEMA.STATUS.TRIAGEM,
         sla: caso.prazo_sla || '48',
         motivoDescarte: '', historiaClinica: '', relato: '', exames: '',

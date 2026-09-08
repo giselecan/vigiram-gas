@@ -204,6 +204,7 @@ function _normalizarSetorComparacao_(setor) {
   return String(setor || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toUpperCase()
+    .replace(/[ºª°]/g, '')
     .replace(/[-_./]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -219,27 +220,37 @@ function _padronizarZerosSetor_(s) {
 }
 
 /**
- * Converte numerais arábicos (1 a 10) para romanos em tokens de setores (ex: "UTI ADULTO 1" -> "UTI ADULTO I").
+ * Converte numerais arábicos (1 a 20) para romanos em tokens de setores (ex: "UTI ADULTO 1" -> "UTI ADULTO I").
  * @param {string} s
  * @returns {string}
  */
 function _converterArabicoParaRomanoSetor_(s) {
   if (!s) return '';
-  const mapa = { '1': 'I', '2': 'II', '3': 'III', '4': 'IV', '5': 'V', '6': 'VI', '7': 'VII', '8': 'VIII', '9': 'IX', '10': 'X' };
+  const mapa = {
+    '1': 'I', '2': 'II', '3': 'III', '4': 'IV', '5': 'V',
+    '6': 'VI', '7': 'VII', '8': 'VIII', '9': 'IX', '10': 'X',
+    '11': 'XI', '12': 'XII', '13': 'XIII', '14': 'XIV', '15': 'XV',
+    '16': 'XVI', '17': 'XVII', '18': 'XVIII', '19': 'XIX', '20': 'XX'
+  };
   return String(s).replace(/\b(\d{1,2})\b/g, function (match, n) {
     return mapa[n] || match;
   });
 }
 
 /**
- * Converte numerais romanos (I a X) para arábicos em tokens de setores (ex: "UTI ADULTO I" -> "UTI ADULTO 1").
+ * Converte numerais romanos (I a XX) para arábicos em tokens de setores (ex: "UTI ADULTO I" -> "UTI ADULTO 1").
  * @param {string} s
  * @returns {string}
  */
 function _converterRomanoParaArabicoSetor_(s) {
   if (!s) return '';
-  const mapa = { 'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5', 'VI': '6', 'VII': '7', 'VIII': '8', 'IX': '9', 'X': '10' };
-  return String(s).replace(/\b(X|IX|VIII|VII|VI|V|IV|III|II|I)\b/g, function (match, r) {
+  const mapa = {
+    'XX': '20', 'XIX': '19', 'XVIII': '18', 'XVII': '17', 'XVI': '16', 'XV': '15',
+    'XIV': '14', 'XIII': '13', 'XII': '12', 'XI': '11', 'X': '10',
+    'IX': '9', 'VIII': '8', 'VII': '7', 'VI': '6', 'V': '5',
+    'IV': '4', 'III': '3', 'II': '2', 'I': '1'
+  };
+  return String(s).replace(/\b(XX|XIX|XVIII|XVII|XVI|XV|XIV|XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I)\b/g, function (match, r) {
     return mapa[r] || match;
   });
 }
@@ -310,8 +321,35 @@ function _levenshteinDistancia_(a, b) {
 }
 
 /**
+ * Extrai o identificador de unidade assistencial de um setor (números, algarismos romanos ou letras de ala/bloco).
+ * Desconsidera números de leito, box, quarto ou apartamento para não confundi-los com a numeração do setor.
+ * @param {string} str
+ * @returns {{ numeros: string[], letra: string | null }}
+ */
+function _extrairIdentificadorUnidadeSetor_(str) {
+  if (!str) return { numeros: [], letra: null };
+  // 1. Remove menções a leito, box, quarto ou apartamento (ex: "LEITO 12", "BOX 03", "L.05")
+  let s = String(str).replace(/\s*[-/:]?\s*\b(?:LEITO|LTO|BOX|QUARTO|APTO|L)\b\s*[-.:/]?\s*\d+\b/gi, ' ');
+  s = _padronizarZerosSetor_(_normalizarSetorComparacao_(s));
+
+  // 2. Converte algarismos romanos para arábicos para unificar comparação
+  const sArabico = _converterRomanoParaArabicoSetor_(s);
+
+  // 3. Extrai números do setor (ex: ["1"], ["2"], ["4"])
+  const numeros = sArabico.match(/\b\d+\b/g) || [];
+
+  // 4. Extrai letras únicas de ala/bloco/posto (ex: "POSTO A" -> "A", "BLOCO B" -> "B", "ALA C" -> "C")
+  const matchLetra = sArabico.match(/\b(?:ALA|BLOCO|POSTO|SETOR|ENF|ENFERMARIA|SALA|UTI|CTI)\s+([A-Z])\b/i);
+  const candLetra = matchLetra ? matchLetra[1].toUpperCase() : null;
+  const letra = (candLetra && !['I', 'V', 'X'].includes(candLetra)) ? candLetra : null;
+
+  return { numeros: numeros, letra: letra };
+}
+
+/**
  * Calcula a similaridade entre dois nomes de setores considerando acentuação,
  * pontuação, zeros à esquerda, abreviações hospitalares e sobreposição de termos.
+ * Garante proteção estrita contra confusão entre setores com numerações distintas (ex: UTI I vs UTI II).
  * @param {string} s1
  * @param {string} s2
  * @returns {{ score: number, porcentagem: number, motivo: string, compativel: boolean }}
@@ -326,12 +364,64 @@ function _calcularSimilaridadeSetores_(s1, s2) {
   const z2 = _padronizarZerosSetor_(n2);
   if (z1 === z2) return { score: 0.98, porcentagem: 98, motivo: 'Numeração equivalente (com/sem zeros)', compativel: true };
 
+  // 1. TRAVA ESTRITA DE NUMERAÇÃO E ALA:
+  // Se os setores possuem números distintos (ex: "UTI 1" vs "UTI 2", "UTI I" vs "UTI II", "UTI III" vs "UTI IV")
+  // ou letras de ala distintas ("POSTO A" vs "POSTO B"), ou se um possui número e o outro não ("UTI" vs "UTI 1"),
+  // tratam-se de unidades físicas DIFERENTES e JAMAIS devem ser aproximados por similaridade.
+  const id1 = _extrairIdentificadorUnidadeSetor_(z1);
+  const id2 = _extrairIdentificadorUnidadeSetor_(z2);
+
+  const temNum1 = id1.numeros.length > 0;
+  const temNum2 = id2.numeros.length > 0;
+
+  if (temNum1 || temNum2) {
+    const sNum1 = id1.numeros.join(',');
+    const sNum2 = id2.numeros.join(',');
+    if (sNum1 !== sNum2) {
+      return {
+        score: 0,
+        porcentagem: 0,
+        motivo: temNum1 && temNum2
+          ? `Numerações distintas de setor (${sNum1} vs ${sNum2})`
+          : 'Um setor possui numeração e o outro não',
+        compativel: false
+      };
+    }
+  }
+
+  if (id1.letra || id2.letra) {
+    if (id1.letra !== id2.letra) {
+      return {
+        score: 0,
+        porcentagem: 0,
+        motivo: `Alas/blocos com letras distintas (${id1.letra || 'Nenhuma'} vs ${id2.letra || 'Nenhuma'})`,
+        compativel: false
+      };
+    }
+  }
+
+  // 2. Equivalência por numeração romana vs arábica (ex: "UTI ADULTO 1" <-> "UTI ADULTO I")
+  const z1Arabico = _converterRomanoParaArabicoSetor_(z1);
+  const z2Arabico = _converterRomanoParaArabicoSetor_(z2);
+  if (z1Arabico === z2Arabico) {
+    return { score: 0.98, porcentagem: 98, motivo: 'Numeração romana/arábica equivalente', compativel: true };
+  }
+
+  // 3. Equivalência por abreviação hospitalar
   const e1 = _expandirAbreviacoesSetor_(z1);
   const e2 = _expandirAbreviacoesSetor_(z2);
-  if (e1 === e2) return { score: 0.95, porcentagem: 95, motivo: 'Abreviação hospitalar compatível', compativel: true };
+  if (e1 === e2) {
+    return { score: 0.95, porcentagem: 95, motivo: 'Abreviação hospitalar compatível', compativel: true };
+  }
 
-  const t1 = z1.split(' ').filter(Boolean);
-  const t2 = z2.split(' ').filter(Boolean);
+  const e1Arabico = _converterRomanoParaArabicoSetor_(e1);
+  const e2Arabico = _converterRomanoParaArabicoSetor_(e2);
+  if (e1Arabico === e2Arabico) {
+    return { score: 0.95, porcentagem: 95, motivo: 'Abreviação e numeração romana/arábica equivalentes', compativel: true };
+  }
+
+  const t1 = z1Arabico.split(' ').filter(Boolean);
+  const t2 = z2Arabico.split(' ').filter(Boolean);
   const set1 = {}; t1.forEach(function (x) { set1[x] = true; });
   const set2 = {}; t2.forEach(function (x) { set2[x] = true; });
   let inter = 0;
@@ -342,27 +432,41 @@ function _calcularSimilaridadeSetores_(s1, s2) {
   const maiorSet = t1.length <= t2.length ? set2 : set1;
   const contemTodos = menor.length > 0 && menor.every(function (x) { return !!maiorSet[x]; });
 
-  const maxLen = Math.max(z1.length, z2.length);
-  const dist = _levenshteinDistancia_(z1, z2);
+  // Expansão de abreviações nos tokens
+  const te1 = e1Arabico.split(' ').filter(Boolean);
+  const te2 = e2Arabico.split(' ').filter(Boolean);
+  const sete1 = {}; te1.forEach(function (x) { sete1[x] = true; });
+  const sete2 = {}; te2.forEach(function (x) { sete2[x] = true; });
+  let interExp = 0;
+  te1.forEach(function (x) { if (sete2[x]) interExp++; });
+  const diceExp = (2 * interExp) / (te1.length + te2.length);
+  const menorExp = te1.length <= te2.length ? te1 : te2;
+  const maiorSetExp = te1.length <= te2.length ? sete2 : sete1;
+  const contemTodosExp = menorExp.length > 0 && menorExp.every(function (x) { return !!maiorSetExp[x]; });
+
+  const maxLen = Math.max(z1Arabico.length, z2Arabico.length);
+  const dist = _levenshteinDistancia_(z1Arabico, z2Arabico);
   const levSim = maxLen > 0 ? (1 - dist / maxLen) : 0;
 
-  const maxLenExp = Math.max(e1.length, e2.length);
-  const distExp = _levenshteinDistancia_(e1, e2);
+  const maxLenExp = Math.max(e1Arabico.length, e2Arabico.length);
+  const distExp = _levenshteinDistancia_(e1Arabico, e2Arabico);
   const levSimExp = maxLenExp > 0 ? (1 - distExp / maxLenExp) : 0;
 
-  let score = Math.max(levSim, levSimExp, dice);
+  let score = Math.max(levSim, levSimExp, dice, diceExp);
   let motivo = 'Similaridade léxica';
 
-  if (contemTodos) {
-    const scoreSubset = 0.82 + (0.13 * (inter / Math.max(t1.length, t2.length)));
+  if (contemTodos || contemTodosExp) {
+    const maxLenT = Math.max(contemTodos ? t1.length : te1.length, contemTodos ? t2.length : te2.length);
+    const interFinal = contemTodos ? inter : interExp;
+    const scoreSubset = 0.82 + (0.13 * (interFinal / maxLenT));
     if (scoreSubset > score) {
       score = scoreSubset;
       motivo = 'Contém todos os termos chave';
     }
   }
 
-  if (levSim >= 0.85) motivo = 'Grafia muito próxima (variação/digitação)';
-  else if (dice >= 0.70) motivo = 'Termos quase idênticos';
+  if (levSim >= 0.85 || levSimExp >= 0.85) motivo = 'Grafia muito próxima (variação/digitação)';
+  else if (dice >= 0.70 || diceExp >= 0.70) motivo = 'Termos quase idênticos';
 
   score = Math.round(score * 100) / 100;
   const pct = Math.round(score * 100);
@@ -371,6 +475,7 @@ function _calcularSimilaridadeSetores_(s1, s2) {
 
 /**
  * Encontra a melhor correspondência para um setor dentro de uma lista de candidatos.
+ * Garante que somente candidatos compatíveis (sem conflito de numeração) sejam selecionados.
  * @param {string} setorAlvo
  * @param {string[]} listaCandidatos
  * @returns {{ setor: string, score: number, porcentagem: number, motivo: string, compativel: boolean } | null}
@@ -382,6 +487,7 @@ function _encontrarMelhorCorrespondenciaSetor_(setorAlvo, listaCandidatos) {
     const cand = String(listaCandidatos[i] || '').trim();
     if (!cand) continue;
     const sim = _calcularSimilaridadeSetores_(setorAlvo, cand);
+    if (!sim || !sim.compativel) continue;
     if (!melhor || sim.score > melhor.score) {
       melhor = {
         setor: cand,
@@ -430,68 +536,6 @@ function _atualizarSetoresEmPlanilha_(planilha, deParaChaves) {
 }
 
 /**
- * Extrai dose numérica e unidade de medida a partir de uma descrição de medicamento.
- * Ex.: "FITOMENADIONA 10MG/ML AMPOLA" -> { dose: "10", unidade: "MG/ML" }
- * Ex.: "DIPIRONA 500 MG" -> { dose: "500", unidade: "MG" }
- * @param {string} texto
- * @returns {{ dose: string, unidade: string }}
- */
-function _extrairDoseEUnidadeMedicamento_(texto) {
-  if (!texto) return { dose: '', unidade: '' };
-  const str = String(texto).toUpperCase().trim();
-  const regex = /(?:\b(\d+(?:[.,]\d+)?)\s*(MG\/ML|MCG\/ML|UG\/ML|UI\/ML|G\/ML|MEQ\/ML|MMOL\/ML|MG|MCG|UG|UI|G|KG|ML)(?!\w)|\b(\d+(?:[.,]\d+)?)\s*(%))/i;
-  const match = str.match(regex);
-  if (match) {
-    const dose = (match[1] || match[3] || '').replace(',', '.');
-    const unidade = (match[2] || match[4] || '').toUpperCase();
-    return { dose, unidade };
-  }
-  return { dose: '', unidade: '' };
-}
-
-/**
- * Limpa apresentações, formas farmacêuticas, embalagens, dosagens e sais de um medicamento
- * para isolar a substância ativa principal / princípio ativo.
- * @param {string} texto
- * @returns {string}
- */
-function _limparFormaDosagemMedicamento_(texto) {
-  if (!texto) return '';
-  let s = String(texto).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-
-  // 1. Remove doses e concentrações
-  s = s.replace(/\b\d+(?:[.,]\d+)?\s*(?:MG\/ML|MCG\/ML|UG\/ML|UI\/ML|G\/ML|MEQ\/ML|MMOL\/ML|MG|MCG|UG|UI|G|KG|ML)(?!\w)/gi, ' ');
-  s = s.replace(/\b\d+(?:[.,]\d+)?\s*%/g, ' ');
-  s = s.replace(/\b\d+(?:[.,]\d+)?\b/g, ' ');
-
-  // 2. Remove formas farmacêuticas e embalagens
-  s = s.replace(/\b(?:SOLUCAO|SOL|INJETAVEL|INJ|AMPOLA|AMP|FRASCO|FR|COMPRIMIDO|COMP|CAPSULA|CAP|GOTAS|GTS|XAROPE|SUSPENSAO|SUSP|POMADA|CREME|PO|LIOFILIZADO|LIOF|BOLUS|INFUSAO|ENV|ENVELOPE|SERINGA|SER|ADESIVO|TUBO|BISNAGA|COLIRIO|SPRAY|AEROSOL|DRAGEA|DRG)\b/gi, ' ');
-
-  // 3. Remove sais e qualificadores químicos comuns
-  s = s.replace(/\b(?:CLORIDRATO|SULFATO|FOSFATO|ACETATO|CITRATO|CARBONATO|BROMETO|GLUCONATO|MALEATO|SUCCINATO|LACTATO|SODICA|SODICO|POTASSICA|POTASSICO|DIPOTASSICO|DISSODICO|CALCICA|CALCICO|MONOIDRATADA|MONOHIDRATADA|DIIDRATADA|HEMIDRATADA|BASE)\b/gi, ' ');
-
-  // 4. Remove conectivos e pontuação
-  s = s.replace(/\b(?:DE|DO|DA|COM|E|EM|POR|PARA)\b/gi, ' ');
-  s = s.replace(/[-_./\\(),;:+*#&%]+/g, ' ');
-  s = s.replace(/\s+/g, ' ').trim();
-
-  return s;
-}
-
-/**
- * Normaliza a chave para comparação estrita de medicamentos (sem acento, sem pontuação, sem espaços).
- * @param {string} str
- * @returns {string}
- */
-function _normalizarChaveGatilho_(str) {
-  return String(str || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .trim();
-}
-
-/**
  * Normaliza as iniciais do paciente para formato padronizado com pontos (ex.: "J.S." ou "J.C.A.").
  * @param {string} iniciais
  * @returns {string}
@@ -528,39 +572,6 @@ function _normalizarSexo_(sexo) {
   if (s === 'M' || s === 'MASCULINO' || s === '1') return 'M';
   if (s === 'F' || s === 'FEMININO'  || s === '2') return 'F';
   return '';
-}
-
-/**
- * Atualiza em lote o nome do medicamento na coluna MEDICAMENTO (coluna 12) da planilha DB_Casos_RAM.
- * @param {Sheet} planilha
- * @param {{ [chaveNormalizada: string]: string }} deParaChaves
- * @returns {number} quantidade de células atualizadas
- */
-function _atualizarMedicamentosEmPlanilha_(planilha, deParaChaves) {
-  if (!planilha || !deParaChaves || Object.keys(deParaChaves).length === 0) return 0;
-  const ultimaLinha = planilha.getLastRow();
-  if (ultimaLinha < 2) return 0;
-
-  const range = planilha.getRange(2, SCHEMA.COL.MEDICAMENTO, ultimaLinha - 1, 1);
-  const valores = range.getValues();
-  let atualizados = 0;
-
-  for (let i = 0; i < valores.length; i++) {
-    const atual = String(valores[i][0] || '').trim();
-    if (!atual) continue;
-    const chave = _normalizarChaveGatilho_(atual);
-    if (deParaChaves[chave] && deParaChaves[chave] !== atual) {
-      valores[i][0] = deParaChaves[chave];
-      atualizados++;
-    }
-  }
-
-  if (atualizados > 0) {
-    comTrava_(function () {
-      range.setValues(valores);
-    });
-  }
-  return atualizados;
 }
 
 /**

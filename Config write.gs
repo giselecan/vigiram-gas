@@ -1395,102 +1395,78 @@ function excluirGatilho(id, token) {
 }
 
 /**
- * Normaliza todos os casos existentes no sistema de ponta a ponta (Firestore e Planilha Sheets).
- * Padroniza os nomes de medicamentos-gatilho e setores de acordo com os cadastros oficiais,
- * garantindo consistência retroativa total.
+ * Normaliza retroativamente EXCLUSIVAMENTE os setores de todos os casos e notificações
+ * existentes no sistema (Firestore e Planilha Sheets).
+ * Utiliza como base os setores oficiais cadastrados em SCHEMA.FS.SETORES (incluindo UTI I, II, III e IV).
+ * NÃO altera nem interfere em medicamentos, dosagens ou relatos.
  * @param {string} token
- * @returns {{ sucesso: boolean, mensagem: string, alterados: number, totalCasos: number }}
+ * @returns {{ sucesso: boolean, mensagem: string, alterados: number, casosSheetsAtualizados: number, totalCasos: number }}
  */
-function normalizarCasosAntigosDePontaAPonta(token) {
+function normalizarSetoresCasosDePontaAPonta(token) {
   return _comAdmin_(token, function () {
+    // 1. Assegura que os setores essenciais de UTI (I, II, III e IV) estão devidamente mapeados
+    garantirSetoresUtiCadastrados(token);
+
     const mapaSinonimos = _mapaSinonimosSetores_();
-    const mapaGatilhos  = _mapaGatilhosCadastrados_();
     const todosCasos    = fsListarTodos_(SCHEMA.FS.CASOS);
 
     if (!todosCasos || !todosCasos.length) {
-      return { sucesso: true, mensagem: 'Nenhum caso encontrado para normalizar.', alterados: 0, totalCasos: 0 };
+      return { sucesso: true, mensagem: 'Nenhum caso encontrado para normalizar.', alterados: 0, casosSheetsAtualizados: 0, totalCasos: 0 };
     }
 
     const agora = new Date();
     const paraAtualizarFirestore = [];
     const deParaSetoresPlanilha = {};
-    const deParaMedicamentosPlanilha = {};
 
     todosCasos.forEach(function (c) {
       if (!c || !c.id) return;
 
       const setorAtual = String(c.setor || '').trim();
-      const medAtual   = String(c.medicamento || '').trim();
-      const iniciaisAtual = String(c.iniciais || '').trim();
-      const sexoAtual  = String(c.sexo || '').trim();
-
       const setorCanonico = _resolverSetorCanonico_(setorAtual, mapaSinonimos);
-      const gatilhoInfo   = _resolverGatilhoCanonico_(medAtual, mapaGatilhos);
-      const iniciaisNorm  = _normalizarIniciaisPaciente_(iniciaisAtual);
-      const sexoNorm      = _normalizarSexo_(sexoAtual);
 
       const mudouSetor = setorAtual && setorCanonico && setorAtual !== setorCanonico;
-      const mudouMed   = medAtual && gatilhoInfo.medicamento && medAtual !== gatilhoInfo.medicamento;
-      const mudouIniciais = iniciaisAtual && iniciaisNorm && iniciaisAtual !== iniciaisNorm;
-      const mudouSexo  = sexoAtual && sexoNorm && sexoAtual !== sexoNorm;
 
-      if (mudouSetor || mudouMed || mudouIniciais || mudouSexo || (!c.medicamentoBruto && gatilhoInfo.original)) {
-        const dadosNovos = {
-          auditoria: {
-            atualizadoPor: 'Normalização Sistema (' + __emailSessaoAtual + ')',
-            atualizadoEm: agora
+      if (mudouSetor) {
+        paraAtualizarFirestore.push({
+          id: c.id,
+          dados: {
+            setor: setorCanonico,
+            auditoria: {
+              atualizadoPor: 'Normalização Setores (' + __emailSessaoAtual + ')',
+              atualizadoEm: agora
+            }
           }
-        };
-
-        if (mudouSetor) {
-          dadosNovos.setor = setorCanonico;
-          deParaSetoresPlanilha[_normalizarSetorComparacao_(setorAtual)] = setorCanonico;
-        }
-        if (mudouMed) {
-          dadosNovos.medicamento = gatilhoInfo.medicamento;
-          if (!c.medicamentoBruto) dadosNovos.medicamentoBruto = medAtual;
-          if (gatilhoInfo.dose && !c.doseMedicamento) dadosNovos.doseMedicamento = gatilhoInfo.dose;
-          if (gatilhoInfo.unidade && !c.doseUnidade) dadosNovos.doseUnidade = gatilhoInfo.unidade;
-          deParaMedicamentosPlanilha[_normalizarChaveGatilho_(medAtual)] = gatilhoInfo.medicamento;
-        }
-        if (mudouIniciais) dadosNovos.iniciais = iniciaisNorm;
-        if (mudouSexo) dadosNovos.sexo = sexoNorm;
-
-        paraAtualizarFirestore.push({ id: c.id, dados: dadosNovos });
+        });
+        deParaSetoresPlanilha[_normalizarSetorComparacao_(setorAtual)] = setorCanonico;
       }
     });
 
     let casosSheetsAtualizados = 0;
     if (paraAtualizarFirestore.length > 0) {
-      // 1. Atualiza Firestore em lote
-      fsBatchUpdate_(SCHEMA.FS.CASOS, paraAtualizarFirestore);
+      // 1. Atualiza Firestore em lote (somente campo 'setor' e 'auditoria')
+      fsBatchUpdate_(SCHEMA.FS.CASOS, paraAtualizarFirestore, ['setor', 'auditoria']);
 
-      // 2. Atualiza Planilha Google Sheets
+      // 2. Atualiza Planilha Google Sheets (somente coluna 11 - SETOR)
       try {
         const ss = SpreadsheetApp.getActiveSpreadsheet();
         const aba = ss.getSheetByName(SCHEMA.ABAS.CASOS);
-        if (aba) {
-          if (Object.keys(deParaSetoresPlanilha).length > 0) {
-            casosSheetsAtualizados += _atualizarSetoresEmPlanilha_(aba, deParaSetoresPlanilha);
-          }
-          if (Object.keys(deParaMedicamentosPlanilha).length > 0) {
-            casosSheetsAtualizados += _atualizarMedicamentosEmPlanilha_(aba, deParaMedicamentosPlanilha);
-          }
+        if (aba && Object.keys(deParaSetoresPlanilha).length > 0) {
+          casosSheetsAtualizados = _atualizarSetoresEmPlanilha_(aba, deParaSetoresPlanilha);
         }
       } catch (e) {
-        console.warn('normalizarCasosAntigosDePontaAPonta: falha ao atualizar Sheets — ' + e.message);
+        console.warn('normalizarSetoresCasosDePontaAPonta: falha ao atualizar Sheets — ' + e.message);
       }
 
       invalidarConfig();
       invalidarCasosCache_();
 
-      fsRegistrarLog_('NORMALIZACAO_CASOS_GERAL', 'N/A',
-        paraAtualizarFirestore.length + ' caso(s) normalizados em Firestore e Sheets | Por: ' + __emailSessaoAtual);
+      fsRegistrarLog_('NORMALIZACAO_SETORES_GERAL', 'setores',
+        paraAtualizarFirestore.length + ' caso(s) tiveram setor normalizado em Firestore e Sheets | Por: ' + __emailSessaoAtual);
     }
 
     return {
       sucesso: true,
-      mensagem: paraAtualizarFirestore.length + ' caso(s) foram normalizados com sucesso em todo o sistema (Firestore e Planilha).',
+      mensagem: paraAtualizarFirestore.length + ' caso(s) tiveram seus setores normalizados com sucesso com base nos setores cadastrados (UTI I a IV consideradas).',
       alterados: paraAtualizarFirestore.length,
       casosSheetsAtualizados: casosSheetsAtualizados,
       totalCasos: todosCasos.length
@@ -1498,155 +1474,163 @@ function normalizarCasosAntigosDePontaAPonta(token) {
   });
 }
 
-/**
- * Normaliza todos os medicamentos cadastrados na coleção SCHEMA.FS.GATILHOS.
- * Remove formas farmacêuticas, dosagens, embalagens e sais do nome principal,
- * preservando a entrada limpa como princípio ativo canônico.
- * Também atualiza a aba DB_Antidotos no Sheets.
- * @param {string} token
- * @returns {{ sucesso: boolean, alterados: number, total: number, detalhes: Array }}
- */
-function normalizarColecaoGatilhos(token) {
-  return _comAdmin_(token, function () {
-    const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
-    if (!docs || !docs.length) {
-      return { sucesso: true, alterados: 0, total: 0, detalhes: [] };
-    }
-
-    const mapaGatilhos = _mapaGatilhosCadastrados_();
-    let alterados = 0;
-    const detalhes = [];
-    const deParaAntidotos = {};
-
-    docs.forEach(function (doc) {
-      const nomeAtual = String(doc.medicamento || doc._id || '').trim();
-      if (!nomeAtual) return;
-
-      const gatilhoInfo = _resolverGatilhoCanonico_(nomeAtual, mapaGatilhos);
-      const nomeCanonico = gatilhoInfo.medicamento;
-
-      if (nomeCanonico && nomeCanonico !== nomeAtual) {
-        alterados++;
-        detalhes.push({ de: nomeAtual, para: nomeCanonico });
-        deParaAntidotos[nomeAtual] = nomeCanonico;
-
-        fsUpdateDoc_(SCHEMA.FS.GATILHOS, doc._id, {
-          medicamento: nomeCanonico,
-          atualizadoEm: new Date()
-        });
-      }
-    });
-
-    if (alterados > 0) {
-      try {
-        const ss = SpreadsheetApp.getActiveSpreadsheet();
-        const aba = ss.getSheetByName(SCHEMA.ABAS.ANTIDOTOS);
-        if (aba) {
-          const uLinha = aba.getLastRow();
-          if (uLinha >= 2) {
-            const range = aba.getRange(2, 1, uLinha - 1, 1);
-            const vals = range.getValues();
-            let mudou = false;
-            for (let i = 0; i < vals.length; i++) {
-              const val = String(vals[i][0] || '').trim();
-              if (deParaAntidotos[val]) {
-                vals[i][0] = deParaAntidotos[val];
-                mudou = true;
-              }
-            }
-            if (mudou) {
-              comTrava_(function () { range.setValues(vals); });
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('normalizarColecaoGatilhos: erro ao atualizar Sheets — ' + e.message);
-      }
-      invalidarConfig();
-    }
-
-    return {
-      sucesso: true,
-      alterados: alterados,
-      total: docs.length,
-      detalhes: detalhes
-    };
-  });
+/** Alias para compatibilidade retroativa */
+function normalizarCasosAntigosDePontaAPonta(token) {
+  return normalizarSetoresCasosDePontaAPonta(token);
 }
 
 /**
- * Garante que os 3 setores de UTI Adulto (I, II e III) e seus sinônimos
- * estejam devidamente cadastrados na coleção SCHEMA.FS.SETORES.
+ * Garante que os 4 setores de UTI (UTI I, II, III e IV / UTI ADULTO I, II, III e IV)
+ * e todos os seus sinônimos (arábicos, romanos, com/sem zeros, abreviados)
+ * estejam devidamente mapeados na coleção SCHEMA.FS.SETORES.
+ * Se o hospital já possuir cadastro (ex: "UTI I" ou "UTI ADULTO I"), respeita a nomenclatura cadastrada
+ * e incorpora as variantes como sinônimos.
  * @param {string} token
- * @returns {{ criados: number, jaExistiam: number }}
+ * @returns {{ criados: number, atualizados: number, totalUtis: number }}
  */
-function garantirSetoresUtiAdultoCadastrados(token) {
+function garantirSetoresUtiCadastrados(token) {
   return _comAdmin_(token, function () {
     const docs = fsListarTodos_(SCHEMA.FS.SETORES);
-    const setoresExistentes = new Set(docs.map(function (d) {
-      return _normalizarSetorComparacao_(d.setor);
-    }));
+    const docsPorChave = {};
+    docs.forEach(function (d) {
+      if (d.setor) {
+        docsPorChave[_normalizarSetorComparacao_(d.setor)] = d;
+      }
+    });
 
-    const utisParaGarantir = [
+    const utisDefinicoes = [
       {
-        setor: 'UTI ADULTO I',
-        sinonimos: ['UTI ADULTO 1', 'UTI AD 1', 'UTI AD I', 'UTI ADULTO 01']
+        romano: 'I',
+        arabico: '1',
+        nomePadrao: 'UTI ADULTO I',
+        variantes: [
+          'UTI ADULTO I', 'UTI ADULTO 1', 'UTI ADULTO 01',
+          'UTI I', 'UTI 1', 'UTI 01',
+          'UTI AD I', 'UTI AD 1', 'UTI AD 01',
+          'UTI-I', 'UTI-1', 'UTI-01'
+        ]
       },
       {
-        setor: 'UTI ADULTO II',
-        sinonimos: ['UTI ADULTO 2', 'UTI AD 2', 'UTI AD II', 'UTI ADULTO 02']
+        romano: 'II',
+        arabico: '2',
+        nomePadrao: 'UTI ADULTO II',
+        variantes: [
+          'UTI ADULTO II', 'UTI ADULTO 2', 'UTI ADULTO 02',
+          'UTI II', 'UTI 2', 'UTI 02',
+          'UTI AD II', 'UTI AD 2', 'UTI AD 02',
+          'UTI-II', 'UTI-2', 'UTI-02'
+        ]
       },
       {
-        setor: 'UTI ADULTO III',
-        sinonimos: ['UTI ADULTO 3', 'UTI AD 3', 'UTI AD III', 'UTI ADULTO 03']
+        romano: 'III',
+        arabico: '3',
+        nomePadrao: 'UTI ADULTO III',
+        variantes: [
+          'UTI ADULTO III', 'UTI ADULTO 3', 'UTI ADULTO 03',
+          'UTI III', 'UTI 3', 'UTI 03',
+          'UTI AD III', 'UTI AD 3', 'UTI AD 03',
+          'UTI-III', 'UTI-3', 'UTI-03'
+        ]
+      },
+      {
+        romano: 'IV',
+        arabico: '4',
+        nomePadrao: 'UTI ADULTO IV',
+        variantes: [
+          'UTI ADULTO IV', 'UTI ADULTO 4', 'UTI ADULTO 04',
+          'UTI IV', 'UTI 4', 'UTI 04',
+          'UTI AD IV', 'UTI AD 4', 'UTI AD 04',
+          'UTI-IV', 'UTI-4', 'UTI-04'
+        ]
       }
     ];
 
     let criados = 0;
-    let jaExistiam = 0;
+    let atualizados = 0;
 
-    utisParaGarantir.forEach(function (u) {
-      const chaveOficial = _normalizarSetorComparacao_(u.setor);
-      if (setoresExistentes.has(chaveOficial)) {
-        jaExistiam++;
+    utisDefinicoes.forEach(function (def) {
+      let docExistente = null;
+      for (let i = 0; i < def.variantes.length; i++) {
+        const chaveV = _normalizarSetorComparacao_(def.variantes[i]);
+        if (docsPorChave[chaveV]) {
+          docExistente = docsPorChave[chaveV];
+          break;
+        }
+      }
+
+      if (docExistente) {
+        const nomeOficial = docExistente.setor;
+        const sinAtuais = Array.isArray(docExistente.sinonimos) ? docExistente.sinonimos.slice() : [];
+        let mudou = false;
+
+        def.variantes.forEach(function (v) {
+          if (v !== nomeOficial && sinAtuais.indexOf(v) === -1) {
+            sinAtuais.push(v);
+            mudou = true;
+          }
+        });
+
+        if (mudou) {
+          fsUpdateDoc_(SCHEMA.FS.SETORES, docExistente._id, {
+            sinonimos: sinAtuais,
+            ativo: true
+          });
+          atualizados++;
+        }
       } else {
-        const idDoc = _idDocSetor_(u.setor, 'sistema@hospital.local');
+        const idDoc = _idDocSetor_(def.nomePadrao, 'sistema@hospital.local');
+        const sinonimos = def.variantes.filter(function (v) { return v !== def.nomePadrao; });
+
         fsSetDoc_(SCHEMA.FS.SETORES, idDoc, {
-          setor: u.setor,
+          setor: def.nomePadrao,
           ativo: true,
           farmaceuticoResponsavel: 'Farmacêutico Responsável',
           emailResponsavel: '',
-          sinonimos: u.sinonimos,
+          sinonimos: sinonimos,
           criadoEm: new Date()
         });
         criados++;
       }
     });
 
-    if (criados > 0) invalidarConfig();
-    return { criados: criados, jaExistiam: jaExistiam };
+    if (criados > 0 || atualizados > 0) {
+      invalidarConfig();
+    }
+
+    return {
+      criados: criados,
+      atualizados: atualizados,
+      totalUtis: utisDefinicoes.length
+    };
   });
 }
 
+/** Alias para compatibilidade */
+function garantirSetoresUtiAdultoCadastrados(token) {
+  return garantirSetoresUtiCadastrados(token);
+}
+
 /**
- * Executa a normalização integral de ponta a ponta:
- * 1. Garante os 3 setores de UTI ADULTO (I, II, III) no catálogo de setores.
- * 2. Normaliza a coleção SCHEMA.FS.GATILHOS (e aba DB_Antidotos).
- * 3. Normaliza todos os casos e notificações em SCHEMA.FS.CASOS (e aba DB_Casos_RAM).
+ * Executa a normalização exclusiva de setores:
+ * 1. Garante os setores de UTI (I, II, III e IV) e seus sinônimos no catálogo de setores.
+ * 2. Normaliza o campo setor de todos os casos e notificações em SCHEMA.FS.CASOS e DB_Casos_RAM.
  * @param {string} token
  */
-function normalizarBancoCompleto(token) {
+function normalizarSetoresBanco(token) {
   return _comAdmin_(token, function () {
-    const resUtis = garantirSetoresUtiAdultoCadastrados(token);
-    const resGatilhos = normalizarColecaoGatilhos(token);
-    const resCasos = normalizarCasosAntigosDePontaAPonta(token);
+    const resUtis = garantirSetoresUtiCadastrados(token);
+    const resCasos = normalizarSetoresCasosDePontaAPonta(token);
 
     return {
       sucesso: true,
-      mensagem: 'Normalização integral concluída com sucesso! ' + resCasos.alterados + ' caso(s) normalizado(s), ' + resGatilhos.alterados + ' gatilho(s) canônico(s) ajustado(s), e setores de UTI Adulto configurados.',
+      mensagem: 'Normalização exclusiva de setores concluída com sucesso! ' + resCasos.alterados + ' caso(s) normalizado(s) no Firestore e Planilha. UTIs I, II, III e IV asseguradas.',
       casos: resCasos,
-      gatilhos: resGatilhos,
       utis: resUtis
     };
   });
+}
+
+/** Alias para chamadas existentes do frontend */
+function normalizarBancoCompleto(token) {
+  return normalizarSetoresBanco(token);
 }

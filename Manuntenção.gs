@@ -718,12 +718,14 @@ function EXECUTAR_HARMONIZACAO_SETORES_DRY_RUN_() {
 }
 
 /**
- * Executa simulação (Dry Run) da normalização de todos os casos antigos do sistema.
+ * Executa simulação (Dry Run) da normalização EXCLUSIVA de setores de todos os casos antigos do sistema.
+ * Base: setores cadastrados em SCHEMA.FS.SETORES (assegurando UTI I, II, III e IV).
+ * Não altera medicamentos nem dosagens.
  */
-function normalizarGatilhosECasosExistentes_dryRun_() {
-  Logger.log('=== DRY-RUN: Normalização de Casos e Gatilhos de Ponta a Ponta ===');
+function normalizarSetoresCasosExistentes_dryRun_() {
+  Logger.log('=== DRY-RUN: Normalização Exclusiva de Setores no Banco ===');
+  garantirSetoresUtiCadastrados(null);
   const mapaSinonimos = _mapaSinonimosSetores_();
-  const mapaGatilhos  = _mapaGatilhosCadastrados_();
   const todosCasos    = fsListarTodos_(SCHEMA.FS.CASOS);
 
   Logger.log('Total de casos analisados: ' + todosCasos.length);
@@ -731,61 +733,47 @@ function normalizarGatilhosECasosExistentes_dryRun_() {
 
   todosCasos.forEach(function (c) {
     const setorAtual = String(c.setor || '').trim();
-    const medAtual   = String(c.medicamento || '').trim();
     const setorCanonico = _resolverSetorCanonico_(setorAtual, mapaSinonimos);
-    const gatilhoInfo   = _resolverGatilhoCanonico_(medAtual, mapaGatilhos);
 
     const mudouSetor = setorAtual && setorCanonico && setorAtual !== setorCanonico;
-    const mudouMed   = medAtual && gatilhoInfo.medicamento && medAtual !== gatilhoInfo.medicamento;
 
-    if (mudouSetor || mudouMed) {
+    if (mudouSetor) {
       paraAlterar++;
-      Logger.log(`[CASO ${c.id}]`);
-      if (mudouSetor) Logger.log(`   • Setor: "${setorAtual}" -> "${setorCanonico}"`);
-      if (mudouMed) Logger.log(`   • Medicamento: "${medAtual}" -> "${gatilhoInfo.medicamento}" (Dose: ${gatilhoInfo.dose} ${gatilhoInfo.unidade})`);
+      Logger.log(`[CASO ${c.id}] • Setor: "${setorAtual}" -> "${setorCanonico}"`);
     }
   });
 
   Logger.log('---------------------------------------------------------');
-  Logger.log(`Total de casos que seriam normalizados: ${paraAlterar} de ${todosCasos.length}`);
+  Logger.log(`Total de casos que teriam setor normalizado: ${paraAlterar} de ${todosCasos.length}`);
   return { total: todosCasos.length, alterados: paraAlterar };
 }
 
-function EXECUTAR_NORMALIZACAO_GATILHOS_CASOS_() {
-  const prop = PropertiesService.getScriptProperties().getProperty('PERMITIR_NORMALIZACAO_MASSA');
-  if (prop !== 'SIM') {
-    Logger.log('Para executar de fato, adicione a Propriedade do Script PERMITIR_NORMALIZACAO_MASSA=SIM');
-    return normalizarGatilhosECasosExistentes_dryRun_();
-  }
-  return normalizarCasosAntigosDePontaAPonta(null);
-}
-
 /**
- * Executa IMEDIATAMENTE a normalização completa de todos os gatilhos, setores UTI Adulto e casos do banco.
- * Pode ser selecionada e executada diretamente pelo editor do Google Apps Script sem exigir propriedades manuais.
+ * Executa a normalização exclusiva de setores em todo o banco (Firestore e Planilha).
+ * Pode ser selecionada e executada diretamente pelo editor do Google Apps Script.
+ * Assegura o mapeamento de UTI I, II, III e IV e não altera medicamentos.
  */
-function EXECUTAR_NORMALIZACAO_BANCO_COMPLETA_() {
-  Logger.log('=== INICIANDO NORMALIZACAO COMPLETA DO BANCO (GATILHOS, SETORES E CASOS) ===');
+function EXECUTAR_NORMALIZACAO_SETORES_BANCO_() {
+  Logger.log('=== INICIANDO NORMALIZACAO EXCLUSIVA DE SETORES DO BANCO ===');
   
-  // 1. Garante os 3 setores de UTI Adulto
-  Logger.log('1. Verificando e cadastrando setores de UTI ADULTO I, II e III...');
-  const resUtis = garantirSetoresUtiAdultoCadastrados(null);
-  Logger.log(`   • Setores UTI Adulto: ${resUtis.criados} criados, ${resUtis.jaExistiam} já existiam.`);
+  // 1. Garante os 4 setores de UTI (I, II, III e IV)
+  Logger.log('1. Verificando e garantindo setores de UTI I, II, III e IV...');
+  const resUtis = garantirSetoresUtiCadastrados(null);
+  Logger.log(`   • Setores UTI: ${resUtis.criados} criados, ${resUtis.atualizados} atualizados.`);
 
-  // 2. Normaliza gatilhos
-  Logger.log('2. Normalizando coleção de gatilhos...');
-  const resGatilhos = normalizarColecaoGatilhos(null);
-  Logger.log(`   • Gatilhos: ${resGatilhos.alterados} alterados de ${resGatilhos.total}.`);
+  // 2. Normaliza setores de casos e notificações
+  Logger.log('2. Normalizando exclusivamente setores de todos os casos e notificações...');
+  const resCasos = normalizarSetoresCasosDePontaAPonta(null);
+  Logger.log(`   • Casos/Notificações com setor ajustado: ${resCasos.alterados} de ${resCasos.totalCasos} (${resCasos.casosSheetsAtualizados} linhas no Sheets).`);
 
-  // 3. Normaliza casos e notificações
-  Logger.log('3. Normalizando todos os casos e notificações do banco...');
-  const resCasos = normalizarCasosAntigosDePontaAPonta(null);
-  Logger.log(`   • Casos/Notificações: ${resCasos.alterados} alterados de ${resCasos.totalCasos} (${resCasos.casosSheetsAtualizados} linhas no Sheets).`);
-
-  Logger.log('=== NORMALIZACAO COMPLETA CONCLUIDA COM SUCESSO ===');
+  Logger.log('=== NORMALIZACAO EXCLUSIVA DE SETORES CONCLUIDA COM SUCESSO ===');
   return {
     utis: resUtis,
-    gatilhos: resGatilhos,
     casos: resCasos
   };
+}
+
+/** Alias para compatibilidade */
+function EXECUTAR_NORMALIZACAO_BANCO_COMPLETA_() {
+  return EXECUTAR_NORMALIZACAO_SETORES_BANCO_();
 }
