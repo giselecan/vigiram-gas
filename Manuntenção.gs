@@ -771,21 +771,32 @@ function EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN_() {
   const cadastradosChaves = {};
   docsSetores.forEach(function (d) {
     const s = _padronizarNomeSetor_(d.setor);
-    if (s) cadastradosChaves[_normalizarSetorComparacao_(s)] = true;
+    if (!s) return;
+    cadastradosChaves[_normalizarSetorComparacao_(s)] = true;
+    if (Array.isArray(d.sinonimos)) {
+      d.sinonimos.forEach(function (sin) {
+        const sSin = _padronizarNomeSetor_(sin);
+        if (sSin) cadastradosChaves[_normalizarSetorComparacao_(sSin)] = true;
+      });
+    }
   });
   const novosSetores = [];
   todosCasos.forEach(function (c) {
-    [c.setor, c.unidade_setor, c.setorRelatorioOriginal].forEach(function (bruto) {
-      const s = _padronizarNomeSetor_(bruto);
-      if (s && s !== 'N/I' && s !== 'NA') {
-        const chave = _normalizarSetorComparacao_(s);
-        if (!cadastradosChaves[chave]) {
-          cadastradosChaves[chave] = true;
-          novosSetores.push(s);
-          Logger.log(`   [NOVO SETOR IDENTIFICADO] "${s}" (presente no caso ${c.id})`);
-        }
-      }
-    });
+    const s = String(c.setor || c.unidade_setor || '').trim();
+    if (!s) return;
+
+    const padrao = _padronizarNomeSetor_(s);
+    if (!padrao || padrao === 'N/I' || padrao === 'NA' || padrao === 'SEM SETOR') return;
+
+    const canonico = _resolverSetorCanonico_(padrao, mapaSinonimos) || padrao;
+    const chave = _normalizarSetorComparacao_(canonico);
+
+    if (!cadastradosChaves[chave]) {
+      cadastradosChaves[chave] = true;
+      mapaSinonimos[chave] = canonico;
+      novosSetores.push(canonico);
+      Logger.log(`   [NOVO SETOR IDENTIFICADO] "${canonico}" (presente no caso ${c.id})`);
+    }
   });
   Logger.log(`   • Novos setores que serão auto-cadastrados: ${novosSetores.length}`);
 
@@ -811,6 +822,98 @@ function EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN_() {
     usuariosAlterados: usuariosComAcento,
     casosAlterados: casosParaAlterar
   };
+}
+
+/**
+ * Diagnóstico aprofundado: avalia se existem setores duplicados em SCHEMA.FS.SETORES
+ * (mesmo setor com grafias diferentes, com/sem acento, com e-mail e sem e-mail,
+ * IDs legados ou variantes de UTI/numerais).
+ * NÃO altera nada no banco de dados.
+ */
+function AVALIAR_SETORES_DUPLICADOS_() {
+  Logger.log('=== AVALIAÇÃO DETALHADA DE SETORES DUPLICADOS (FIRESTORE) ===');
+  const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+  Logger.log('Total de documentos em SCHEMA.FS.SETORES: ' + docs.length);
+
+  const mapaSinonimos = _mapaSinonimosSetores_();
+  const porChaveCanonica = {};
+  const porIdDoc = {};
+  let totalDuplicatasDetectadas = 0;
+  let totalFantasmasSemEmail = 0;
+
+  docs.forEach(function (d) {
+    const nome = String(d.setor || '').trim();
+    const email = String(d.emailResponsavel || '').trim();
+    const farm = String(d.farmaceuticoResponsavel || '').trim();
+    const id = d._id;
+
+    porIdDoc[id] = (porIdDoc[id] || 0) + 1;
+
+    const padrao = _padronizarNomeSetor_(nome);
+    const canonico = _resolverSetorCanonico_(padrao, mapaSinonimos) || padrao;
+    const chave = _normalizarSetorComparacao_(canonico);
+
+    if (!porChaveCanonica[chave]) {
+      porChaveCanonica[chave] = {
+        nomeCanonico: canonico,
+        docs: []
+      };
+    }
+    porChaveCanonica[chave].docs.push({
+      id: id,
+      setorOriginal: nome,
+      padrao: padrao,
+      email: email,
+      farm: farm,
+      ativo: _ativoComoBooleano_(d.ativo)
+    });
+  });
+
+  const gruposDuplicados = [];
+
+  Object.keys(porChaveCanonica).forEach(function (chave) {
+    const grupo = porChaveCanonica[chave];
+    const lista = grupo.docs;
+
+    if (lista.length > 1) {
+      const temComEmail = lista.some(function (x) { return x.email.length > 0; });
+      const temSemEmail = lista.some(function (x) { return x.email.length === 0; });
+      if (temComEmail && temSemEmail) {
+        totalFantasmasSemEmail++;
+      }
+      totalDuplicatasDetectadas += (lista.length - 1);
+      gruposDuplicados.push(grupo);
+
+      Logger.log('\n[ALERTA DUPLICATA] Setor Canônico: "' + grupo.nomeCanonico + '" (' + lista.length + ' documentos):');
+      lista.forEach(function (item, idx) {
+        Logger.log('   ' + (idx + 1) + '. ID: "' + item.id + '" | Setor: "' + item.setorOriginal + '" | Resp: ' + (item.farm || 'N/I') + ' (' + (item.email || 'sem e-mail') + ') | Ativo: ' + item.ativo);
+      });
+    }
+  });
+
+  Logger.log('\n---------------------------------------------------------');
+  Logger.log('RESULTADO DA AVALIAÇÃO:');
+  Logger.log('• Total de setores físicos únicos cadastrados: ' + Object.keys(porChaveCanonica).length);
+  Logger.log('• Total de documentos duplicados/variantes detectados: ' + totalDuplicatasDetectadas);
+  Logger.log('• Setores com duplicatas "fantasma" (com e-mail vs sem e-mail): ' + totalFantasmasSemEmail);
+
+  if (gruposDuplicados.length === 0) {
+    Logger.log('\n✅ NENHUM SETOR DUPLICADO ENCONTRADO! O catálogo está 100% íntegro e padronizado.');
+  } else {
+    Logger.log('\n⚠️ Foram encontrados ' + gruposDuplicados.length + ' grupos com documentos duplicados.');
+    Logger.log('💡 DICA: Execute "EXECUTAR_NORMALIZACAO_SETORES_BANCO_()" ou clique em "Normalizar e Cadastrar Setores" no painel Admin para consolidar automaticamente todos esses grupos em documentos canônicos únicos sem acentos.');
+  }
+
+  return {
+    totalDocs: docs.length,
+    totalSetoresUnicos: Object.keys(porChaveCanonica).length,
+    totalDuplicatas: totalDuplicatasDetectadas,
+    gruposDuplicados: gruposDuplicados
+  };
+}
+
+function AVALIAR_SETORES_DUPLICADOS() {
+  return AVALIAR_SETORES_DUPLICADOS_();
 }
 
 function EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN() {

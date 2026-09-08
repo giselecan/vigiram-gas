@@ -1675,107 +1675,149 @@ function padronizarSetoresCatalogoFirestore_() {
   let migradosIds = 0;
   let removidosAntigos = 0;
 
-  // Agrupa por novo ID canônico para consolidar duplicatas de mesmo setor e responsável
-  const gruposPorNovoId = {};
+  const mapaSinonimos = _mapaSinonimosSetores_();
+
+  // 1. Agrupa todos os documentos pelo nome CANÔNICO do setor para identificar duplicatas e variantes
+  const gruposPorSetorCanonico = {};
 
   docs.forEach(function (doc) {
     const setorBruto = String(doc.setor || '').trim();
     if (!setorBruto) return;
 
     const nomePadrao = _padronizarNomeSetor_(setorBruto);
-    const email = String(doc.emailResponsavel || '').trim();
-    const novoId = _idDocSetor_(nomePadrao, email);
-    const idAtual = doc._id;
+    const canonico = _resolverSetorCanonico_(nomePadrao, mapaSinonimos) || nomePadrao;
+    const chaveCanonico = _normalizarSetorComparacao_(canonico);
 
-    if (!gruposPorNovoId[novoId]) {
-      gruposPorNovoId[novoId] = [];
+    if (!gruposPorSetorCanonico[chaveCanonico]) {
+      gruposPorSetorCanonico[chaveCanonico] = {
+        nomeCanonico: canonico,
+        docs: []
+      };
     }
-    gruposPorNovoId[novoId].push({
+    gruposPorSetorCanonico[chaveCanonico].docs.push({
       docOriginal: doc,
       nomePadrao: nomePadrao,
-      idAtual: idAtual,
-      email: email,
-      ativo: _ativoComoBooleano_(doc.ativo),
+      idAtual: doc._id,
+      email: String(doc.emailResponsavel || '').trim(),
       farmaceutico: String(doc.farmaceuticoResponsavel || '').trim(),
+      ativo: _ativoComoBooleano_(doc.ativo),
       sinonimos: Array.isArray(doc.sinonimos) ? doc.sinonimos : []
     });
   });
 
-  Object.keys(gruposPorNovoId).forEach(function (novoId) {
-    const docsGrupo = gruposPorNovoId[novoId];
-    const nomePadrao = docsGrupo[0].nomePadrao;
-    const email = docsGrupo[0].email;
+  // 2. Para cada setor canônico, consolida documentos e remove duplicatas
+  Object.keys(gruposPorSetorCanonico).forEach(function (chaveCanonico) {
+    const grupo = gruposPorSetorCanonico[chaveCanonico];
+    const nomeCanonico = grupo.nomeCanonico;
+    const itens = grupo.docs;
 
-    let algumAtivo = false;
-    const farmaceuticosSet = {};
+    // Coleta todos os sinônimos e grafias antigas
     const sinonimosSet = {};
-    const idsOriginais = [];
+    let algumAtivo = false;
 
-    docsGrupo.forEach(function (item) {
-      idsOriginais.push(item.idAtual);
+    itens.forEach(function (item) {
       if (item.ativo) algumAtivo = true;
-      if (item.farmaceutico) farmaceuticosSet[item.farmaceutico] = true;
+
+      // Se o nome do doc original for diferente do canônico, vira sinônimo
+      const antiga = String(item.docOriginal.setor || '').trim().toUpperCase();
+      if (antiga && antiga !== nomeCanonico) sinonimosSet[antiga] = true;
+      if (item.nomePadrao && item.nomePadrao !== nomeCanonico) sinonimosSet[item.nomePadrao] = true;
 
       item.sinonimos.forEach(function (s) {
         const sNorm = _padronizarNomeSetor_(s);
-        if (sNorm && sNorm !== nomePadrao) sinonimosSet[sNorm] = true;
+        if (sNorm && sNorm !== nomeCanonico) sinonimosSet[sNorm] = true;
       });
-
-      const antiga = String(item.docOriginal.setor || '').trim().toUpperCase();
-      if (antiga && antiga !== nomePadrao) {
-        sinonimosSet[antiga] = true;
-      }
     });
 
-    const listaFarmaceuticos = Object.keys(farmaceuticosSet).join(', ');
-    const listaSinonimos = Object.keys(sinonimosSet);
+    // Agrupa por e-mail dentro do setor (para suportar múltiplos farmacêuticos se houver e-mails distintos)
+    const porEmail = {};
+    itens.forEach(function (item) {
+      const em = item.email.toLowerCase();
+      if (!porEmail[em]) porEmail[em] = [];
+      porEmail[em].push(item);
+    });
 
-    const docComMesmoId = docsGrupo.find(function (d) { return d.idAtual === novoId; });
-    let precisaGravar = false;
+    const emailsDisponiveis = Object.keys(porEmail);
+    const temEmailValido = emailsDisponiveis.some(function (em) { return em.length > 0; });
 
-    if (!docComMesmoId) {
-      precisaGravar = true;
-      migradosIds++;
-    } else {
-      const setorMudou = docComMesmoId.docOriginal.setor !== nomePadrao;
-      const ativoMudou = docComMesmoId.ativo !== algumAtivo;
-      const sinonimosMudaram = JSON.stringify(docComMesmoId.sinonimos.slice().sort()) !== JSON.stringify(listaSinonimos.slice().sort());
-      if (setorMudou || ativoMudou || sinonimosMudaram || docsGrupo.length > 1) {
-        precisaGravar = true;
-      }
-    }
-
-    if (precisaGravar) {
-      alterados++;
-      alteracoes.push({
-        novoId: novoId,
-        idsOriginais: idsOriginais,
-        nomePadrao: nomePadrao,
-        antigos: docsGrupo.map(function (d) { return d.docOriginal.setor; }),
-        farmaceuticos: listaFarmaceuticos,
-        ativo: algumAtivo
-      });
-
-      fsSetDoc_(SCHEMA.FS.SETORES, novoId, {
-        setor: nomePadrao,
-        ativo: algumAtivo,
-        farmaceuticoResponsavel: listaFarmaceuticos,
-        emailResponsavel: email,
-        sinonimos: listaSinonimos,
-        atualizadoEm: new Date()
-      });
-
-      idsOriginais.forEach(function (idVelho) {
-        if (idVelho && idVelho !== novoId) {
+    // Se existe ao menos um documento com e-mail preenchido, os documentos com e-mail vazio ('') são duplicatas órfãs
+    if (temEmailValido && porEmail['']) {
+      porEmail[''].forEach(function (orfa) {
+        if (orfa.idAtual) {
           try {
-            fsDeleteDoc_(SCHEMA.FS.SETORES, idVelho);
+            fsDeleteDoc_(SCHEMA.FS.SETORES, orfa.idAtual);
             removidosAntigos++;
           } catch (eDel) {
-            console.warn('padronizarSetoresCatalogoFirestore_: erro ao remover ID legado ' + idVelho + ' — ' + eDel.message);
+            console.warn('padronizarSetoresCatalogoFirestore_: erro ao remover doc órfão sem e-mail ' + orfa.idAtual + ': ' + eDel.message);
           }
         }
       });
+      delete porEmail[''];
     }
+
+    // Para cada e-mail restante (ou vazio se só houver ele), grava o documento canônico único
+    Object.keys(porEmail).forEach(function (em) {
+      const subDocs = porEmail[em];
+      const farmaceuticosSet = {};
+      const idsOriginais = [];
+
+      subDocs.forEach(function (sd) {
+        idsOriginais.push(sd.idAtual);
+        if (sd.farmaceutico) farmaceuticosSet[sd.farmaceutico] = true;
+      });
+
+      const listaFarm = Object.keys(farmaceuticosSet).join(', ');
+      const listaSin = Object.keys(sinonimosSet);
+      const emailFinal = subDocs[0].email;
+      const novoId = _idDocSetor_(nomeCanonico, emailFinal);
+
+      const docComMesmoId = subDocs.find(function (d) { return d.idAtual === novoId; });
+      let precisaGravar = false;
+
+      if (!docComMesmoId) {
+        precisaGravar = true;
+        migradosIds++;
+      } else {
+        const setorMudou = docComMesmoId.docOriginal.setor !== nomeCanonico;
+        const ativoMudou = docComMesmoId.ativo !== algumAtivo;
+        const sinonimosMudaram = JSON.stringify(docComMesmoId.sinonimos.slice().sort()) !== JSON.stringify(listaSin.slice().sort());
+        if (setorMudou || ativoMudou || sinonimosMudaram || subDocs.length > 1) {
+          precisaGravar = true;
+        }
+      }
+
+      if (precisaGravar) {
+        alterados++;
+        alteracoes.push({
+          novoId: novoId,
+          idsOriginais: idsOriginais,
+          nomePadrao: nomeCanonico,
+          antigos: subDocs.map(function (d) { return d.docOriginal.setor; }),
+          farmaceuticos: listaFarm,
+          ativo: algumAtivo
+        });
+
+        fsSetDoc_(SCHEMA.FS.SETORES, novoId, {
+          setor: nomeCanonico,
+          ativo: algumAtivo,
+          farmaceuticoResponsavel: listaFarm,
+          emailResponsavel: emailFinal,
+          sinonimos: listaSin,
+          atualizadoEm: new Date()
+        });
+
+        idsOriginais.forEach(function (idVelho) {
+          if (idVelho && idVelho !== novoId) {
+            try {
+              fsDeleteDoc_(SCHEMA.FS.SETORES, idVelho);
+              removidosAntigos++;
+            } catch (eDel) {
+              console.warn('padronizarSetoresCatalogoFirestore_: erro ao remover ID legado ' + idVelho + ' — ' + eDel.message);
+            }
+          }
+        });
+      }
+    });
   });
 
   return {
@@ -1813,12 +1855,13 @@ function padronizarSetoresUsuariosFirestore_() {
 /**
  * Identifica todos os setores presentes nos casos cadastrados (SCHEMA.FS.CASOS)
  * que ainda não constam no catálogo oficial de setores (SCHEMA.FS.SETORES), e cadastra-os
- * automaticamente com nomenclatura 100% padronizada sem acento.
+ * automaticamente com nomenclatura 100% padronizada sem acento e sem criar duplicatas.
  * @returns {{ totalCasosAnalisados: number, novosCadastrados: number, setoresCadastrados: string[] }}
  */
 function cadastrarNovosSetoresDosCasosFirestore_() {
   const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
   const todosCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+  const mapaSinonimos = _mapaSinonimosSetores_();
 
   const cadastradosChaves = {};
   docsSetores.forEach(function (d) {
@@ -1837,38 +1880,40 @@ function cadastrarNovosSetoresDosCasosFirestore_() {
   const nomesInseridos = [];
 
   todosCasos.forEach(function (c) {
-    // Coleta possíveis campos onde o setor possa estar informado
-    const candidatosSetor = [
-      c.setor,
-      c.unidade_setor,
-      c.setorRelatorioOriginal
-    ];
+    // Avalia exclusivamente o setor de atendimento do caso (com fallback para unidade_setor)
+    // NÃO utiliza setorRelatorioOriginal para evitar registrar linhas cruas do almoxarifado/dispensário
+    const s = String(c.setor || c.unidade_setor || '').trim();
+    if (!s) return;
 
-    candidatosSetor.forEach(function (bruto) {
-      const s = String(bruto || '').trim();
-      if (!s) return;
+    const padrao = _padronizarNomeSetor_(s);
+    if (!padrao || padrao === 'N/I' || padrao === 'NA' || padrao === 'SEM SETOR') return;
 
-      const padrao = _padronizarNomeSetor_(s);
-      if (!padrao || padrao === 'N/I' || padrao === 'NA') return;
+    // 1. Tenta resolver para um setor canônico já existente ou sinônimo
+    const canonico = _resolverSetorCanonico_(padrao, mapaSinonimos) || padrao;
+    const chaveCanonico = _normalizarSetorComparacao_(canonico);
 
-      const chave = _normalizarSetorComparacao_(padrao);
-      if (!cadastradosChaves[chave]) {
-        cadastradosChaves[chave] = true; // evita duplicatas no lote
-        const id = _idDocSetor_(padrao, '');
-        novosParaInserir.push({
-          id: id,
-          dados: {
-            setor:                   padrao,
-            ativo:                   true, // Já nasce ativo para varredura e visualização
-            farmaceuticoResponsavel: String(c.farmaceutico || '').trim().toUpperCase(),
-            emailResponsavel:        '',
-            sinonimos:               (s.toUpperCase() !== padrao) ? [s.toUpperCase()] : [],
-            criadoEm:                new Date()
-          }
-        });
-        nomesInseridos.push(padrao);
+    // Se já estiver cadastrado no catálogo ou mapeado para um existente, NÃO duplica!
+    if (cadastradosChaves[chaveCanonico]) {
+      return;
+    }
+
+    // 2. Setor comprovadamente novo: cadastra no catálogo com segurança
+    cadastradosChaves[chaveCanonico] = true; // evita duplicatas no mesmo lote
+    mapaSinonimos[chaveCanonico] = canonico;
+
+    const id = _idDocSetor_(canonico, '');
+    novosParaInserir.push({
+      id: id,
+      dados: {
+        setor:                   canonico,
+        ativo:                   true, // Já nasce ativo para varredura e visualização
+        farmaceuticoResponsavel: String(c.farmaceutico || '').trim().toUpperCase(),
+        emailResponsavel:        '',
+        sinonimos:               (s.toUpperCase() !== canonico) ? [s.toUpperCase()] : [],
+        criadoEm:                new Date()
       }
     });
+    nomesInseridos.push(canonico);
   });
 
   if (novosParaInserir.length > 0) {
