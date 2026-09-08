@@ -187,6 +187,9 @@ arquivos `.gs`/`.html`/`.json` de runtime.
 | `FIRESTORE_DATABASE_ID` | Opcional, se não usar o banco `(default)`. |
 | `ETL_SECRET` | Segredo HMAC compartilhado com o robô PowerShell (ver `Security.gs`). Gerar com `gerarSegredoETL_()` e definir com `definirSegredoETL_()`, rodando manualmente no editor — nunca hardcode no código. |
 | `ETL_FOLDER_IDS` | Opcional — CSV de IDs de pasta do Drive permitidos para `uploadRaw`. |
+| `PLANILHA_ID` | Opcional — ID da planilha de auditoria/espelho (Mirror.gs, ver `getPlanilha_()` em `Utils.gs`). Só é necessária num projeto **standalone** (não vinculado a nenhuma planilha, ex.: criado via `clasp create`) — nesse caso a planilha precisa estar compartilhada como Editor com a conta que executa o script. Num projeto **container-bound** (vinculado a uma planilha), pode deixar em branco: cai no fallback `SpreadsheetApp.getActiveSpreadsheet()`. |
+| `VIGIRAM_OWNER_EMAIL` | Opcional — CSV de e-mails autorizados a rodar o sistema (ver `verificarAmbienteAutorizado_()` em `Security.gs`). Sem essa propriedade, usa a lista padrão no código. |
+| `VIGIRAM_AUTHORIZED_SCRIPT_ID` | Opcional — trava a execução a um único `scriptId` (ver `travarAmbienteAtual_()` em `Security.gs`). **Nunca copiar de outro projeto** — deve ser o scriptId do próprio projeto, definido rodando `travarAmbienteAtual_()` nele mesmo. |
 
 ### Dependências do manifesto (`appsscript.json`)
 

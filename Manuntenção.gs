@@ -97,7 +97,7 @@ function limparCasosAntigos_(confirmar) {
   const total = foraDeHoje.length;
   Logger.log(`Iniciando exclusão de ${total} casos (mantendo apenas data_evento = ${_hojeDDMMAAAA_()})`);
 
-  const planilha = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SCHEMA.ABAS.CASOS);
+  const planilha = getSheet_(SCHEMA.ABAS.CASOS);
   let apagados = 0;
   let falhas = 0;
 
@@ -193,7 +193,7 @@ const _CONFIRMACAO_RESET_PRODUCAO   = 'ZERAR-CASOS-PRODUCAO';
 /** PASSO 1 — SEMPRE rodar isto primeiro. Só loga, não apaga nada. */
 function zerarBaseCasosParaProducao_dryRun_() {
   const casos = fsListarTodos_(SCHEMA.FS.CASOS);
-  const planilha = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SCHEMA.ABAS.CASOS);
+  const planilha = getSheet_(SCHEMA.ABAS.CASOS);
   const linhasSheet = planilha ? Math.max(0, planilha.getLastRow() - 1) : 0; // -1 = exclui cabeçalho
 
   Logger.log('=== DRY-RUN — zerarBaseCasosParaProducao ===');
@@ -244,7 +244,7 @@ function zerarBaseCasosParaProducao_(confirmar) {
   // comTrava_ (Regra de Ouro #2 — evita colisão com Mirror/ETL escrevendo
   // na mesma aba enquanto o reset roda). Cabeçalho (linha 1) preservado.
   let linhasApagadasSheet = 0;
-  const planilha = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SCHEMA.ABAS.CASOS);
+  const planilha = getSheet_(SCHEMA.ABAS.CASOS);
   if (planilha) {
     comTrava_(function () {
       const ultima = planilha.getLastRow();
