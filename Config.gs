@@ -331,11 +331,19 @@ function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
   let limpo = String(setorBruto || '').trim();
   if (!limpo) return '';
 
-  // 0. Limpeza de prefixos de dot-notation hospitalar e sufixos de leito/box/quarto
+  // 0. Tratamento de hierarquia hospitalar por pontos (ex.: "UTI ADULTO III.UTI ADULTO III .03" ou "UTI.3")
   if (limpo.indexOf('.') !== -1) {
-    const partePrefixo = limpo.split('.')[0].trim();
-    if (partePrefixo.length >= 3) {
-      limpo = partePrefixo;
+    const partes = limpo.split('.');
+    const primeiro = partes[0].trim();
+    const idPrimeiro = _extrairIdentificadorUnidadeSetor_(primeiro);
+    const popPrimeiro = _extrairPopulacaoSetor_(primeiro);
+
+    // Se o prefixo antes do ponto já traz a unidade completa (ex: "UTI ADULTO III" ou "UTI PEDIATRICA"), isola-o
+    if (idPrimeiro.numeros.length > 0 || idPrimeiro.letra || popPrimeiro) {
+      limpo = primeiro;
+    } else {
+      // Se era algo como "UTI.3" ou "UTI.ADULTO.III", substitui pontos por espaços para não perder os termos
+      limpo = limpo.replace(/\.+/g, ' ');
     }
   }
 

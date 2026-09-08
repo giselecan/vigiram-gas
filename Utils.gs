@@ -204,6 +204,8 @@ function _normalizarSetorComparacao_(setor) {
   return String(setor || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toUpperCase()
+    .replace(/\bUNIDADE\s+DE\s+TERAPIA\s+INTENSIVA\b/g, 'UTI')
+    .replace(/\bCENTRO\s+DE\s+TERAPIA\s+INTENSIVA\b/g, 'CTI')
     .replace(/[ºª°]/g, '')
     .replace(/[-_./]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -257,10 +259,10 @@ function _converterRomanoParaArabicoSetor_(s) {
 
 /**
  * Dicionário de abreviações e termos hospitalares comuns no Brasil.
+ * Acrônimos primários como UTI e CTI são preservados como padrão canônico conciso
+ * para evitar inflação artificial de similaridade léxica.
  */
 const _ABREVIACOES_HOSPITALARES_ = {
-  'UTI': 'UNIDADE DE TERAPIA INTENSIVA',
-  'CTI': 'CENTRO DE TERAPIA INTENSIVA',
   'CC': 'CENTRO CIRURGICO',
   'CO': 'CENTRO OBSTETRICO',
   'CM': 'CLINICA MEDICA',
@@ -347,9 +349,27 @@ function _extrairIdentificadorUnidadeSetor_(str) {
 }
 
 /**
+ * Identifica o perfil assistencial/populacional de um setor.
+ * Setores de perfis diferentes (Adulto vs Pediátrico vs Neonatal vs Obstétrico)
+ * são ESTRITAMENTE INCOMPATÍVEIS e jamais podem ser agrupados ou aproximados por similaridade.
+ * @param {string} str
+ * @returns {'ADULTO' | 'PEDIATRICO' | 'NEONATAL' | 'OBSTETRICO' | null}
+ */
+function _extrairPopulacaoSetor_(str) {
+  if (!str) return null;
+  const s = _normalizarSetorComparacao_(str);
+  if (/\b(?:NEO|NEONATAL|NEONATOLOGIA|BERCARIO|RN)\b/.test(s)) return 'NEONATAL';
+  if (/\b(?:PED|PEDIATRIA|PEDIATRICA|PEDIATRICO|INFANTIL|CRIANCA)\b/.test(s)) return 'PEDIATRICO';
+  if (/\b(?:OBST|OBSTETRICIA|OBSTETRICA|OBSTETRICO|MATERNIDADE|PARTO|PUERPERIO)\b/.test(s)) return 'OBSTETRICO';
+  if (/\b(?:AD|ADULTO|ADULTOS|ADULTA)\b/.test(s)) return 'ADULTO';
+  return null;
+}
+
+/**
  * Calcula a similaridade entre dois nomes de setores considerando acentuação,
  * pontuação, zeros à esquerda, abreviações hospitalares e sobreposição de termos.
- * Garante proteção estrita contra confusão entre setores com numerações distintas (ex: UTI I vs UTI II).
+ * Garante proteção estrita contra confusão entre setores com numerações distintas (ex: UTI I vs UTI II)
+ * e perfis assistenciais incompatíveis (ex: UTI ADULTO vs UTI PEDIATRICA).
  * @param {string} s1
  * @param {string} s2
  * @returns {{ score: number, porcentagem: number, motivo: string, compativel: boolean }}
@@ -398,6 +418,33 @@ function _calcularSimilaridadeSetores_(s1, s2) {
         compativel: false
       };
     }
+  }
+
+  // 1.1 TRAVA ESTRITA DE PERFIL POPULACIONAL / ESPECIALIDADE ASSISTENCIAL:
+  // É ERRO GRAVE misturar pacientes adultos com pediátricos/neonatais/obstétricos.
+  // Setores com populações distintas têm incompatibilidade absoluta.
+  const pop1 = _extrairPopulacaoSetor_(z1);
+  const pop2 = _extrairPopulacaoSetor_(z2);
+  if (pop1 && pop2 && pop1 !== pop2) {
+    return {
+      score: 0,
+      porcentagem: 0,
+      motivo: `Perfis assistenciais incompatíveis (${pop1} vs ${pop2})`,
+      compativel: false
+    };
+  }
+
+  // Se um setor possui perfil especializado (Pediátrico, Neonatal ou Obstétrico)
+  // e o outro não possui (ex.: "UTI" vs "UTI PEDIATRICA"), bloqueio imediato:
+  const esp1 = (pop1 === 'PEDIATRICO' || pop1 === 'NEONATAL' || pop1 === 'OBSTETRICO');
+  const esp2 = (pop2 === 'PEDIATRICO' || pop2 === 'NEONATAL' || pop2 === 'OBSTETRICO');
+  if (esp1 !== esp2) {
+    return {
+      score: 0,
+      porcentagem: 0,
+      motivo: 'Um setor possui especialidade (Pediátrico/Neonatal/Obstétrico) e o outro não',
+      compativel: false
+    };
   }
 
   // 2. Equivalência por numeração romana vs arábica (ex: "UTI ADULTO 1" <-> "UTI ADULTO I")
