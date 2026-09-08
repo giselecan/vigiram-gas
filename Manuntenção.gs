@@ -5,6 +5,13 @@
  * limparCasosAntigos_dryRun_() — lista o que SERIA apagado, sem apagar nada.
  * limparCasosAntigos_(confirmar) — apaga de fato. Exige DUAS travas (ver abaixo).
  *
+ * limparGatilhosNaoTriadosAntigos_dryRun_(dataCorte) — lista gatilhos não triados
+ *   anteriores à data limite (ex.: 01/09/2026), sem apagar nada.
+ * limparGatilhosNaoTriadosAntigos_(confirmar, dataCorte) — apaga de fato os gatilhos
+ *   não triados anteriores à data de corte (Firestore + Sheets + lápide CASOS_EXCLUIDOS).
+ * EXECUTAR_DRY_RUN_GATILHOS_ANTERIORES_01_09_() — Dry-run de 01/09 para o editor.
+ * EXECUTAR_LIMPEZA_GATILHOS_ANTERIORES_01_09_() — Exclusão real de 01/09 para o editor.
+ *
  * Critério: mantém casos_ram cujo data_evento é HOJE (fuso do script).
  * Todo o resto (Firestore + linha espelhada em DB_Casos_RAM) é removido.
  * log_auditoria NÃO é tocado — trilha LGPD/Vigimed preservada.
@@ -272,4 +279,352 @@ function zerarBaseCasosParaProducao_(confirmar) {
 function EXECUTAR_ZERAR_BASE_PRODUCAO_() {
   zerarBaseCasosParaProducao_(_CONFIRMACAO_RESET_PRODUCAO);
 }
+
+// ═════════════════════════════════════════════════════════════════════════
+// LIMPEZA DE GATILHOS NÃO TRIADOS (Busca Ativa / ETL) ANTERIORES A UMA DATA
+//
+// O QUE É APAGADO:
+//   - Casos em casos_ram (Firestore) cujo status seja 'PENDENTE TRIAGEM'
+//     (SCHEMA.STATUS.TRIAGEM), com tipo != 'DE' (apenas gatilhos de Busca
+//     Ativa / ETL), cuja data_evento (ou criadoEm) seja estritamente ANTERIOR
+//     à data de corte (padrão: 01/09/2026).
+//   - As linhas correspondentes em DB_Casos_RAM (Sheets).
+//
+// O QUE É PRESERVADO:
+//   - Todos os casos que já passaram por triagem (EM INVESTIGAÇÃO, DESCARTADO,
+//     CONCLUÍDO), mesmo que anteriores a 01/09.
+//   - Todos os casos de Demanda Espontânea (tipo 'DE').
+//   - Gatilhos com data igual ou posterior à data de corte (ex.: a partir de 01/09).
+//   - usuarios, setores, listas, naranjo, gatilhos (antídotos), config_geral e log_auditoria.
+//
+// SEGURANÇA E LÁPIDE ANTI-RESSURREIÇÃO:
+//   - Grava lápides na coleção casos_excluidos (SCHEMA.FS.CASOS_EXCLUIDOS)
+//     para impedir que o robô ETL/Pentaho reenvie e recrie esses gatilhos
+//     antigos no próximo ciclo de dispensação.
+//   - Exige a Script Property PERMITIR_LIMPEZA_GATILHOS = 'SIM'
+//     (ou PERMITIR_LIMPEZA_MASSA = 'SIM').
+//   - Todas as funções têm sufixo "_" (não expostas a google.script.run).
+// ═════════════════════════════════════════════════════════════════════════
+const _PROP_PERMITIR_LIMPEZA_GATILHOS = 'PERMITIR_LIMPEZA_GATILHOS';
+
+/** Normaliza a data de corte (dd/MM/yyyy ou ISO ou Date). Padrão: 01/09/2026 00:00:00. */
+function _normalizarDataCorte_(dataCorte) {
+  if (dataCorte instanceof Date) {
+    if (isNaN(dataCorte.getTime())) throw new Error('Data de corte inválida.');
+    return new Date(dataCorte.getFullYear(), dataCorte.getMonth(), dataCorte.getDate(), 0, 0, 0, 0);
+  }
+  let s = String(dataCorte || '').trim();
+  if (!s) s = '01/09/2026';
+
+  // Se passou apenas "01/09"
+  if (/^\d{1,2}\/\d{1,2}$/.test(s)) {
+    const anoAtual = new Date().getFullYear();
+    s = s + '/' + anoAtual;
+  }
+
+  // dd/MM/yyyy
+  const mBR = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mBR) {
+    const d = parseInt(mBR[1], 10);
+    const m = parseInt(mBR[2], 10) - 1;
+    const y = parseInt(mBR[3], 10);
+    return new Date(y, m, d, 0, 0, 0, 0);
+  }
+
+  // yyyy-MM-dd
+  const mISO = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (mISO) {
+    const y = parseInt(mISO[1], 10);
+    const m = parseInt(mISO[2], 10) - 1;
+    const d = parseInt(mISO[3], 10);
+    return new Date(y, m, d, 0, 0, 0, 0);
+  }
+
+  const parsed = _parseDataFlexivel_(s);
+  if (parsed) {
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
+  }
+
+  throw new Error('Data de corte "' + dataCorte + '" inválida. Use o formato dd/MM/yyyy (ex.: 01/09/2026).');
+}
+
+/** Extrai a data do caso com tolerância a múltiplos formatos legados. */
+function _extrairDataCaso_(c) {
+  if (!c) return null;
+  let d = _parseDataFlexivel_(c.data);
+  if (d) return d;
+  d = _parseDataFlexivel_(c.criadoEm);
+  if (d) return d;
+  if (c.data) {
+    const dt = new Date(c.data);
+    if (!isNaN(dt.getTime())) return dt;
+  }
+  if (c.criadoEm) {
+    const dt = new Date(c.criadoEm);
+    if (!isNaN(dt.getTime())) return dt;
+  }
+  return null;
+}
+
+/** Verifica se um caso é gatilho de Busca Ativa ainda não triado. */
+function _isGatilhoNaoTriado_(c) {
+  if (!c) return false;
+  // Status: deve ser 'PENDENTE TRIAGEM' (SCHEMA.STATUS.TRIAGEM)
+  const st = String(c.status || '').trim().toUpperCase();
+  const pendenteTriagem = (st === String(SCHEMA.STATUS.TRIAGEM).toUpperCase()) || (st === 'PENDENTE TRIAGEM');
+  if (!pendenteTriagem) return false;
+
+  // Tipo: DE (Demanda Espontânea) nunca é gatilho. BA ou ausente é gatilho (Busca Ativa)
+  const tp = String(c.tipo || '').trim().toUpperCase();
+  if (tp === 'DE') return false;
+
+  return true;
+}
+
+/** Filtra gatilhos não triados cuja data seja estritamente anterior à data de corte. */
+function _gatilhosNaoTriadosAnterioresA_(dataCorteObj) {
+  const todos = fsListarTodos_(SCHEMA.FS.CASOS);
+  const corteTime = dataCorteObj.getTime();
+
+  return todos.filter(function (c) {
+    if (!_isGatilhoNaoTriado_(c)) return false;
+    const d = _extrairDataCaso_(c);
+    if (!d) {
+      Logger.log('[AVISO] Caso ' + (c._id || c.id) + ' ignorado na limpeza por não possuir data válida.');
+      return false;
+    }
+    return d.getTime() < corteTime;
+  });
+}
+
+/**
+ * Remove linhas do Sheets pelo ID_CASO de forma em lote rápida e segura contra deslocamento.
+ * @param {Sheet} planilha
+ * @param {Set<string>} idsSet
+ * @returns {number} quantidade de linhas excluídas
+ */
+function _removerLinhasPlanilhaPorIds_(planilha, idsSet) {
+  if (!planilha || !idsSet || idsSet.size === 0) return 0;
+  const ultimaLinha = planilha.getLastRow();
+  if (ultimaLinha < 2) return 0;
+
+  const dadosIds = planilha.getRange(2, SCHEMA.COL.ID, ultimaLinha - 1, 1).getValues();
+  const linhasParaExcluir = [];
+
+  for (let i = 0; i < dadosIds.length; i++) {
+    const idNaLinha = String(dadosIds[i][0] || '').trim();
+    if (idNaLinha && idsSet.has(idNaLinha)) {
+      linhasParaExcluir.push(i + 2);
+    }
+  }
+
+  if (linhasParaExcluir.length === 0) return 0;
+
+  // Agrupa em blocos contíguos do fim para o início para não invalidar índices durante deleteRows
+  comTrava_(function () {
+    let i = linhasParaExcluir.length - 1;
+    while (i >= 0) {
+      let fim = linhasParaExcluir[i];
+      let qtd = 1;
+      while (i > 0 && linhasParaExcluir[i - 1] === fim - qtd) {
+        qtd++;
+        i--;
+      }
+      const inicio = fim - qtd + 1;
+      planilha.deleteRows(inicio, qtd);
+      i--;
+    }
+  });
+
+  return linhasParaExcluir.length;
+}
+
+/**
+ * PASSO 1 (Gatilhos): DRY-RUN — lista e conta quantos gatilhos não triados
+ * anteriores à data limite seriam excluídos. Não faz nenhuma alteração.
+ * @param {string|Date=} dataCorte — padrão '01/09/2026'
+ */
+function limparGatilhosNaoTriadosAntigos_dryRun_(dataCorte) {
+  const corteObj = _normalizarDataCorte_(dataCorte);
+  const tz = Session.getScriptTimeZone();
+  const dataFormatada = Utilities.formatDate(corteObj, tz, 'dd/MM/yyyy HH:mm:ss');
+
+  Logger.log('=== DRY-RUN: Limpeza de Gatilhos Não Triados ===');
+  Logger.log('Data de corte: ' + dataFormatada + ' (serão considerados casos anteriores a este momento)');
+
+  const todos = fsListarTodos_(SCHEMA.FS.CASOS);
+  const alvo = _gatilhosNaoTriadosAnterioresA_(corteObj);
+
+  Logger.log('Total geral de casos em casos_ram: ' + todos.length);
+  Logger.log('Total de gatilhos não triados anteriores a ' + dataFormatada.split(' ')[0] + ': ' + alvo.length);
+
+  const porSetor = {};
+  const porMed = {};
+
+  alvo.forEach(function (c) {
+    const id = c._id || c.id;
+    const d = _extrairDataCaso_(c);
+    const dStr = d ? Utilities.formatDate(d, tz, 'dd/MM/yyyy HH:mm') : 'SEM DATA';
+    const st = c.setor || 'N/I';
+    const med = c.medicamento || 'N/I';
+
+    porSetor[st] = (porSetor[st] || 0) + 1;
+    porMed[med] = (porMed[med] || 0) + 1;
+
+    Logger.log('  - ID: ' + id + ' | Data: ' + dStr + ' | Paciente: ' + (c.iniciais || 'N/I') + ' | Prontuário: ' + (c.prontuario || 'N/I') + ' | Med: ' + med + ' | Setor: ' + st);
+  });
+
+  Logger.log('--- Resumo por Setor ---');
+  Object.keys(porSetor).sort().forEach(function (s) { Logger.log('  ' + s + ': ' + porSetor[s]); });
+
+  Logger.log('--- Resumo por Medicamento ---');
+  Object.keys(porMed).sort().forEach(function (m) { Logger.log('  ' + m + ': ' + porMed[m]); });
+
+  Logger.log('Fim do Dry-Run. NENHUM DADO FOI APAGADO.');
+  return alvo.length;
+}
+
+/**
+ * PASSO 2 (Gatilhos): Executa a exclusão de gatilhos não triados anteriores à data de corte.
+ *
+ * Trava de segurança:
+ *   1) Script Property PERMITIR_LIMPEZA_GATILHOS = 'SIM' ou PERMITIR_LIMPEZA_MASSA = 'SIM'
+ *   2) Parâmetro confirmar === true
+ *
+ * Ações:
+ *   1. Grava lápide em SCHEMA.FS.CASOS_EXCLUIDOS para impedir recriação pelo robô ETL.
+ *   2. Remove documentos do Firestore (SCHEMA.FS.CASOS).
+ *   3. Remove linhas correspondentes da planilha SCHEMA.ABAS.CASOS (DB_Casos_RAM).
+ *   4. Invalida o cache de casos.
+ *   5. Registra trilha de auditoria em SCHEMA.FS.LOG.
+ *
+ * @param {boolean} confirmar — deve ser true
+ * @param {string|Date=} dataCorte — padrão '01/09/2026'
+ */
+function limparGatilhosNaoTriadosAntigos_(confirmar, dataCorte) {
+  const props = PropertiesService.getScriptProperties();
+  const permitido = props.getProperty(_PROP_PERMITIR_LIMPEZA_GATILHOS) ||
+                    props.getProperty(_PROP_PERMITIR_LIMPEZA);
+
+  if (String(permitido).toUpperCase() !== 'SIM') {
+    throw new Error(
+      'Limpeza de gatilhos BLOQUEADA: defina a Script Property ' +
+      'PERMITIR_LIMPEZA_GATILHOS = SIM (ou PERMITIR_LIMPEZA_MASSA = SIM) antes de executar. ' +
+      'Isto evita exclusão acidental de casos em produção.'
+    );
+  }
+
+  if (confirmar !== true) {
+    throw new Error(
+      'Chame limparGatilhosNaoTriadosAntigos_(true) para confirmar a exclusão. ' +
+      'Rode limparGatilhosNaoTriadosAntigos_dryRun_() antes para conferir o que será apagado.'
+    );
+  }
+
+  const corteObj = _normalizarDataCorte_(dataCorte);
+  const tz = Session.getScriptTimeZone();
+  const dataCorteDia = Utilities.formatDate(corteObj, tz, 'dd/MM/yyyy');
+  const alvo = _gatilhosNaoTriadosAnterioresA_(corteObj);
+  const total = alvo.length;
+
+  Logger.log('Iniciando exclusão de ' + total + ' gatilho(s) não triado(s) anteriores a ' + dataCorteDia);
+
+  if (total === 0) {
+    Logger.log('Nenhum gatilho para excluir. Operação finalizada.');
+    return { apagadosFs: 0, falhasFs: 0, linhasApagadasSheet: 0 };
+  }
+
+  const idsAlvo = alvo.map(function (c) { return String(c._id || c.id).trim(); });
+
+  // 1. Grava lápides anti-ressurreição no Firestore (CASOS_EXCLUIDOS)
+  const lapides = alvo.map(function (c) {
+    const id = String(c._id || c.id).trim();
+    return {
+      id: id,
+      dados: {
+        id: id,
+        motivo: 'Limpeza em massa: gatilho não triado anterior a ' + dataCorteDia,
+        excluidoPor: usuarioAtual_() || 'SISTEMA_MANUTENCAO',
+        excluidoEm: new Date(),
+        tipoOriginal: String(c.tipo || 'BA'),
+        statusOriginal: String(c.status || SCHEMA.STATUS.TRIAGEM)
+      }
+    };
+  });
+
+  try {
+    fsBatchSet_(SCHEMA.FS.CASOS_EXCLUIDOS, lapides);
+    Logger.log('Lápides gravadas em ' + SCHEMA.FS.CASOS_EXCLUIDOS + ': ' + lapides.length);
+  } catch (eLapide) {
+    Logger.log('[AVISO] Falha ao gravar lápides em lote: ' + eLapide.message);
+  }
+
+  // 2. Apaga do Firestore (SCHEMA.FS.CASOS)
+  let apagadosFs = 0;
+  let falhasFs = 0;
+
+  try {
+    fsBatchDelete_(SCHEMA.FS.CASOS, idsAlvo);
+    apagadosFs = idsAlvo.length;
+    Logger.log('Documentos excluídos do Firestore em lote: ' + apagadosFs);
+  } catch (eBatch) {
+    Logger.log('fsBatchDelete_ falhou (' + eBatch.message + '). Tentando exclusão unitária...');
+    idsAlvo.forEach(function (id) {
+      try {
+        fsDeleteDoc_(SCHEMA.FS.CASOS, id);
+        apagadosFs++;
+      } catch (eUnit) {
+        falhasFs++;
+        Logger.log('Falha ao excluir doc ' + id + ' do Firestore: ' + eUnit.message);
+      }
+    });
+  }
+
+  // 3. Remove as linhas espelho da planilha Sheets (DB_Casos_RAM)
+  let linhasApagadasSheet = 0;
+  try {
+    const planilha = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SCHEMA.ABAS.CASOS);
+    if (planilha) {
+      const idsSet = new Set(idsAlvo);
+      linhasApagadasSheet = _removerLinhasPlanilhaPorIds_(planilha, idsSet);
+      Logger.log('Linhas removidas do Sheets (' + SCHEMA.ABAS.CASOS + '): ' + linhasApagadasSheet);
+    }
+  } catch (eSheet) {
+    Logger.log('[AVISO] Falha ao remover linhas do espelho Sheets: ' + eSheet.message);
+  }
+
+  // 4. Invalida o cache do Kanban
+  invalidarCasosCache_();
+
+  // 5. Trilha de auditoria LGPD/regulatório
+  fsRegistrarLog_('LIMPEZA_GATILHOS_NAO_TRIADOS', 'N/A',
+    'Limpeza de gatilhos não triados anteriores a ' + dataCorteDia + ': ' +
+    apagadosFs + ' caso(s) removido(s) do Firestore (' + falhasFs + ' falhas), ' +
+    linhasApagadasSheet + ' linha(s) removida(s) do Sheets. ' +
+    'Por: ' + usuarioAtual_());
+
+  Logger.log('=== Limpeza concluída: ' + apagadosFs + ' apagados no Firestore (' + falhasFs + ' falhas), ' +
+             linhasApagadasSheet + ' linhas apagadas no Sheets. ===');
+
+  return { apagadosFs: apagadosFs, falhasFs: falhasFs, linhasApagadasSheet: linhasApagadasSheet };
+}
+
+/**
+ * PASSO 3 (Gatilhos): Função auxiliar para disparar a limpeza de gatilhos não triados
+ * anteriores a 01/09/2026 diretamente pelo Editor do Apps Script.
+ * Selecione esta função no menu superior e clique em Executar.
+ * Requer Script Property PERMITIR_LIMPEZA_GATILHOS = SIM (ou PERMITIR_LIMPEZA_MASSA = SIM).
+ */
+function EXECUTAR_LIMPEZA_GATILHOS_ANTERIORES_01_09_() {
+  limparGatilhosNaoTriadosAntigos_(true, '01/09/2026');
+}
+
+/**
+ * Função auxiliar para rodar o Dry-Run de 01/09/2026 pelo Editor do Apps Script (sem apagar nada).
+ * Selecione esta função no menu superior e clique em Executar.
+ */
+function EXECUTAR_DRY_RUN_GATILHOS_ANTERIORES_01_09_() {
+  limparGatilhosNaoTriadosAntigos_dryRun_('01/09/2026');
+}
+
 
