@@ -167,7 +167,7 @@ const _SECOES_TOPO = {
   configuracoes: { label: 'Configurações',    render: _renderConfiguracoesShell }
 };
 
-function _abrirSecaoTopo(secao) {
+function _abrirSecaoTopo(secao, subSecao) {
   document.querySelectorAll('.cfg-nav-item').forEach(b => {
     b.classList.remove('bg-teal-600', 'text-white');
     b.classList.add('text-gray-400');
@@ -181,7 +181,7 @@ function _abrirSecaoTopo(secao) {
   const area = document.getElementById('cfgConteudo');
   area.innerHTML = _loadingHtml();
   const geracao = ++_cfgGeracaoTopo;
-  if (_SECOES_TOPO[secao]) _SECOES_TOPO[secao].render(area, geracao);
+  if (_SECOES_TOPO[secao]) _SECOES_TOPO[secao].render(area, geracao, subSecao);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -206,10 +206,10 @@ function _renderSecaoVisaoGeral(area, geracao) {
         <i class="fas fa-gauge-high text-teal-600"></i> Visão Geral do Sistema
       </h2>
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        ${_cardStat('fa-users', 'Usuários Ativos', usuariosAtivos + ' / ' + (usuarios || []).length, 'text-blue-600', 'bg-blue-50')}
-        ${_cardStat('fa-pills', 'Gatilhos Ativos', gatilhosAtivos + ' / ' + (gatilhos || []).length, 'text-teal-600', 'bg-teal-50')}
-        ${_cardStat('fa-hospital', 'Setores Cadastrados', String(setores.length), 'text-purple-600', 'bg-purple-50')}
-        ${_cardStat('fa-clock', 'SLA Padrão', sla + 'h', 'text-orange-600', 'bg-orange-50')}
+        ${_cardStat('fa-users', 'Usuários Ativos', usuariosAtivos + ' / ' + (usuarios || []).length, 'text-blue-600', 'bg-blue-50', "_abrirSecaoTopo('configuracoes', 'usuarios')")}
+        ${_cardStat('fa-pills', 'Gatilhos Ativos', gatilhosAtivos + ' / ' + (gatilhos || []).length, 'text-teal-600', 'bg-teal-50', "_abrirSecaoTopo('gatilhos')")}
+        ${_cardStat('fa-hospital', 'Setores Cadastrados', String(setores.length), 'text-purple-600', 'bg-purple-50', "_abrirSecaoTopo('configuracoes', 'setores')")}
+        ${_cardStat('fa-clock', 'SLA Padrão', sla + 'h', 'text-orange-600', 'bg-orange-50', "_abrirSecaoTopo('configuracoes', 'sla')")}
       </div>
       <div class="bg-white rounded-xl border border-gray-200 shadow-sm">
         <div class="px-5 py-3.5 border-b border-gray-200 flex items-center justify-between">
@@ -232,9 +232,11 @@ function _renderSecaoVisaoGeral(area, geracao) {
   }).catch(e => { if (geracao === _cfgGeracaoTopo) area.innerHTML = _erroHtml(e.message); });
 }
 
-function _cardStat(icon, label, valor, corTexto, corFundo) {
+function _cardStat(icon, label, valor, corTexto, corFundo, onClick) {
+  const cursor = onClick ? 'cursor-pointer hover:border-teal-400 transition-all' : '';
+  const clickAttr = onClick ? `onclick="${onClick}" title="Clique para gerenciar"` : '';
   return `
-    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center gap-3">
+    <div ${clickAttr} class="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex items-center gap-3 ${cursor}">
       <div class="w-11 h-11 rounded-lg ${corFundo} ${corTexto} flex items-center justify-center flex-shrink-0">
         <i class="fas ${icon}"></i>
       </div>
@@ -265,10 +267,25 @@ function _renderSecaoGatilhos(area, geracao) {
             </h2>
             <p class="text-xs text-gray-400 mt-0.5">Medicamentos monitorados pelo ETL. Alterações refletem na próxima execução do pipeline.</p>
           </div>
-          <button onclick="_gatAbrirModal()"
-                  class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm">
-            <i class="fas fa-plus"></i> Adicionar Novo Gatilho
-          </button>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button onclick="_cfgMapearSetoresGatilhos(this)"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #2563eb !important; color: #ffffff !important;"
+                    title="Mapeia todos os setores que já receberam gatilhos na Busca Ativa e adiciona os faltantes">
+              <i class="fas fa-sync-alt"></i> Mapear Setores dos Gatilhos
+            </button>
+            <button onclick="_abrirSecaoTopo('configuracoes', 'setores')"
+                    class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #9333ea !important; color: #ffffff !important;"
+                    title="Acessar gerenciamento e ativação/desativação de varredura por setor">
+              <i class="fas fa-hospital"></i> Gerenciar Setores
+            </button>
+            <button onclick="_gatAbrirModal()"
+                    class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #0d9488 !important; color: #ffffff !important;">
+              <i class="fas fa-plus"></i> Adicionar Novo Gatilho
+            </button>
+          </div>
         </div>
         <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           <div class="overflow-x-auto">
@@ -499,7 +516,7 @@ const _SUBSECOES_CONFIG = {
   listas:   { label: 'Listas / Dropdowns', icon: 'fa-list',     render: _renderSecaoListas }
 };
 
-function _renderConfiguracoesShell(area) {
+function _renderConfiguracoesShell(area, geracao, subPadrao) {
   area.innerHTML = `
     <div class="flex items-center gap-1 mb-6 border-b border-gray-200 overflow-x-auto">
       ${Object.entries(_SUBSECOES_CONFIG).map(([id, s]) => `
@@ -509,7 +526,7 @@ function _renderConfiguracoesShell(area) {
         </button>`).join('')}
     </div>
     <div id="cfgSubConteudo">${_loadingHtml()}</div>`;
-  _abrirSubConfig('usuarios');
+  _abrirSubConfig(subPadrao || 'usuarios');
 }
 
 function _abrirSubConfig(id) {
@@ -1050,22 +1067,25 @@ function _renderSecaoSetores(area, geracao) {
       const linhas = setores.map((s, i) => _cfgHtmlLinhaSetor(i, s.setor, s.farmaceuticos.filter(Boolean).join(', '), s.emails.filter(Boolean).join(', '), s.ativo)).join('');
 
       area.innerHTML = `
-        <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center justify-between mb-5 gap-3 flex-wrap">
           <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
             <i class="fas fa-hospital text-teal-600"></i> Setores e Responsáveis
           </h2>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <button onclick="_cfgMapearSetoresGatilhos(this)"
-                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #2563eb !important; color: #ffffff !important;"
                     title="Mapeia todos os setores que já receberam gatilhos na Busca Ativa e adiciona os que faltam">
               <i class="fas fa-sync-alt"></i> Mapear Setores dos Gatilhos
             </button>
             <button onclick="_cfgVerificarSetoresDuplicados(this)"
-                    class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+                    class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #f59e0b !important; color: #ffffff !important;">
               <i class="fas fa-clone"></i> Verificar Duplicados
             </button>
             <button onclick="_cfgAdicionarSetor()"
-                    class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
+                    class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #0d9488 !important; color: #ffffff !important;">
               <i class="fas fa-plus"></i> Adicionar Setor
             </button>
           </div>
@@ -1443,7 +1463,7 @@ function _cfgConfirmarImportacaoSetores(nomes) {
       _fecharSubModal();
       mostrarToast(res.mensagem, 'sucesso');
       invalidarConfigCache();
-      _abrirSubConfig('setores');
+      _abrirSecaoTopo('configuracoes', 'setores');
     })
     .withFailureHandler(err => {
       _pararCarregando(btn);
@@ -1649,7 +1669,8 @@ function _cfgAbrirSubModal(titulo, conteudo, labelBtn, onConfirmar) {
           Cancelar
         </button>
         <button id="cfgSubModalBtn"
-                class="px-4 py-2 bg-teal-600 text-white rounded-lg font-semibold text-sm hover:bg-teal-700 transition min-w-[110px] flex items-center justify-center gap-2">
+                class="px-4 py-2 bg-teal-600 text-white rounded-lg font-semibold text-sm hover:bg-teal-700 transition min-w-[110px] flex items-center justify-center gap-2"
+                style="background-color: #0d9488 !important; color: #ffffff !important;">
           ${escapeHtml(labelBtn)}
         </button>
       </div>
