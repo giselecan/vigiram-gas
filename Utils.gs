@@ -145,16 +145,20 @@ function _parseDataFlexivel_(valor) {
 
   const s = String(valor).trim();
 
-  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[ ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  // Formato BR: dd/MM/yyyy ou dd/MM/yy [HH:mm[:ss]]
+  const br = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (br) {
+    let ano = parseInt(br[3], 10);
+    if (ano < 100) ano += 2000;
     const d = new Date(
-      parseInt(br[3], 10), parseInt(br[2], 10) - 1, parseInt(br[1], 10),
+      ano, parseInt(br[2], 10) - 1, parseInt(br[1], 10),
       parseInt(br[4] || '0', 10), parseInt(br[5] || '0', 10), parseInt(br[6] || '0', 10)
     );
     return isNaN(d.getTime()) ? null : d;
   }
 
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  // Formato ISO: yyyy-MM-dd [HH:mm[:ss]]
+  const iso = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
   if (iso) {
     const d = new Date(
       parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10),
