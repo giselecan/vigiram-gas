@@ -593,6 +593,31 @@ function fazerLogout() {
   _mostrarLogin();
 }
 
+/**
+ * Trata erros de sessão expirada ou não autorizada retornados pelo servidor.
+ * Limpa o armazenamento local e redireciona o usuário para o login.
+ * @param {*} e Erro ou mensagem de erro
+ * @returns {boolean} True se era erro de sessão expirada
+ */
+function verificarSessaoExpirada(e) {
+  const msg = (e && e.message) ? e.message : String(e || '');
+  const ehSessaoExpirada =
+    msg.includes('Sessão expirada') ||
+    msg.includes('não autorizada')  ||
+    msg.includes('consolidar base Kanban');
+
+  if (ehSessaoExpirada) {
+    sessionStorage.removeItem('vigi_token');
+    sessionStorage.removeItem('vigi_nome');
+    sessionStorage.removeItem('vigi_perfil');
+    tokenSessao = null;
+    mostrarToast('Sessão expirada ou não autorizada. Faça login novamente.', 'erro');
+    _mostrarLogin();
+    return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------
 // CARREGAMENTO DE CONFIGURAÇÃO
 // ---------------------------------------------------------
@@ -797,19 +822,8 @@ function carregarCasos() {
     const msg = (e && e.message) ? e.message : String(e);
     console.error('[carregarCasos] Falha:', msg);
 
-    const ehSessaoExpirada =
-      msg.includes('Sessão expirada') ||
-      msg.includes('não autorizada')  ||
-      msg.includes('consolidar base Kanban');
-
-    if (ehSessaoExpirada) {
-      sessionStorage.removeItem('vigi_token');
-      sessionStorage.removeItem('vigi_nome');
-      sessionStorage.removeItem('vigi_perfil');
-      tokenSessao = null;
-      mostrarToast('Sessão expirada. Faça login novamente.', 'erro');
-      // reload é inócuo no iframe sandbox do GAS — volta ao login direto.
-      _mostrarLogin();
+    if (verificarSessaoExpirada(e)) {
+      if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.classList.remove('btn-carregando'); }
     } else {
       // Mensagem amigável — o detalhe técnico já foi logado acima
       // (console.error) para diagnóstico, sem expor stack/URL cru ao usuário.

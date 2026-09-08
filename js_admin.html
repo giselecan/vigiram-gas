@@ -1752,7 +1752,8 @@ function _cfgSincronizarSetoresRelatorioSaidas(btn) {
     })
     .withFailureHandler(err => {
       _pararCarregando(btn);
-      mostrarToast('Erro na varredura: ' + err.message, 'erro');
+      if (typeof verificarSessaoExpirada === 'function' && verificarSessaoExpirada(err)) return;
+      mostrarToast('Erro na varredura: ' + (err && err.message ? err.message : err), 'erro');
     })
     .sincronizarSetoresComRelatorioSaidas(tokenSessao, '01/09/2026');
 }
