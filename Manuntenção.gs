@@ -718,59 +718,115 @@ function EXECUTAR_HARMONIZACAO_SETORES_DRY_RUN_() {
 }
 
 /**
+ * Executa simulação (Dry Run) da padronização TOTAL de setores:
+ * Analisa Catálogo de Setores, Usuários, Casos e Planilha, listando tudo que tem acento ou grafia divergente.
+ * NÃO altera nada no banco de dados.
+ */
+function EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN_() {
+  Logger.log('=== DRY-RUN: DIAGNÓSTICO DE PADRONIZAÇÃO TOTAL DE SETORES ===');
+  
+  // 1. Catálogo SCHEMA.FS.SETORES
+  const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
+  Logger.log('1. Analisando Catálogo de Setores (' + docsSetores.length + ' documentos)...');
+  let setoresComAcento = 0;
+  let setoresIdDivergente = 0;
+
+  docsSetores.forEach(function (d) {
+    const original = String(d.setor || '').trim();
+    const padrao = _padronizarNomeSetor_(original);
+    const email = String(d.emailResponsavel || '').trim();
+    const idEsperado = _idDocSetor_(padrao, email);
+    const mudouNome = original !== padrao;
+    const mudouId = d._id !== idEsperado;
+
+    if (mudouNome || mudouId) {
+      if (mudouNome) setoresComAcento++;
+      if (mudouId) setoresIdDivergente++;
+      Logger.log(`   [SETOR DIVERGENTE] ID Atual: "${d._id}" -> Novo ID: "${idEsperado}" | Nome: "${original}" -> "${padrao}" | Resp: ${d.farmaceuticoResponsavel || 'N/I'}`);
+    }
+  });
+  Logger.log(`   • Setores com nome não padronizado/com acento: ${setoresComAcento}`);
+  Logger.log(`   • Setores com ID legado/divergente: ${setoresIdDivergente}`);
+
+  // 2. Usuários SCHEMA.FS.USUARIOS
+  const docsUsuarios = fsListarTodos_(SCHEMA.FS.USUARIOS);
+  Logger.log('\n2. Analisando Setores atribuídos a Usuários (' + docsUsuarios.length + ' usuários)...');
+  let usuariosComAcento = 0;
+
+  docsUsuarios.forEach(function (u) {
+    const atuais = Array.isArray(u.setores) ? u.setores : [];
+    const novos = _normalizarSetoresLista_(atuais);
+    if (JSON.stringify(atuais) !== JSON.stringify(novos)) {
+      usuariosComAcento++;
+      Logger.log(`   [USUÁRIO] "${u.nome || u.email}" -> Setores Atuais: [${atuais.join(', ')}] -> Padronizados: [${novos.join(', ')}]`);
+    }
+  });
+  Logger.log(`   • Usuários que teriam lista de setores padronizada: ${usuariosComAcento}`);
+
+  // 3. Casos SCHEMA.FS.CASOS
+  garantirSetoresUtiCadastrados(null);
+  const mapaSinonimos = _mapaSinonimosSetores_();
+  const todosCasos    = fsListarTodos_(SCHEMA.FS.CASOS);
+  Logger.log('\n3. Analisando Casos no Sistema (' + todosCasos.length + ' casos)...');
+  let casosParaAlterar = 0;
+
+  todosCasos.forEach(function (c) {
+    const setorAtual = String(c.setor || '').trim();
+    const setorCanonico = _resolverSetorCanonico_(setorAtual, mapaSinonimos);
+    if (setorAtual && setorCanonico && setorAtual !== setorCanonico) {
+      casosParaAlterar++;
+      Logger.log(`   [CASO ${c.id}] Pront: ${c.prontuario || 'N/I'} | Setor: "${setorAtual}" -> "${setorCanonico}"`);
+    }
+  });
+  Logger.log(`   • Casos que teriam setor normalizado: ${casosParaAlterar} de ${todosCasos.length}`);
+
+  Logger.log('---------------------------------------------------------');
+  Logger.log('=== FIM DO DRY-RUN (NADA FOI ALTERADO) ===');
+  return {
+    setoresAnalisados: docsSetores.length,
+    setoresComAcento: setoresComAcento,
+    usuariosAlterados: usuariosComAcento,
+    casosAlterados: casosParaAlterar
+  };
+}
+
+function EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN() {
+  return EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN_();
+}
+
+/**
  * Executa simulação (Dry Run) da normalização EXCLUSIVA de setores de todos os casos antigos do sistema.
  * Base: setores cadastrados em SCHEMA.FS.SETORES (assegurando UTI I, II, III e IV).
  * Não altera medicamentos nem dosagens.
  */
 function normalizarSetoresCasosExistentes_dryRun_() {
-  Logger.log('=== DRY-RUN: Normalização Exclusiva de Setores no Banco ===');
-  garantirSetoresUtiCadastrados(null);
-  const mapaSinonimos = _mapaSinonimosSetores_();
-  const todosCasos    = fsListarTodos_(SCHEMA.FS.CASOS);
-
-  Logger.log('Total de casos analisados: ' + todosCasos.length);
-  let paraAlterar = 0;
-
-  todosCasos.forEach(function (c) {
-    const setorAtual = String(c.setor || '').trim();
-    const setorCanonico = _resolverSetorCanonico_(setorAtual, mapaSinonimos);
-
-    const mudouSetor = setorAtual && setorCanonico && setorAtual !== setorCanonico;
-
-    if (mudouSetor) {
-      paraAlterar++;
-      Logger.log(`[CASO ${c.id}] • Setor: "${setorAtual}" -> "${setorCanonico}"`);
-    }
-  });
-
-  Logger.log('---------------------------------------------------------');
-  Logger.log(`Total de casos que teriam setor normalizado: ${paraAlterar} de ${todosCasos.length}`);
-  return { total: todosCasos.length, alterados: paraAlterar };
+  return EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN_();
 }
 
 /**
- * Executa a normalização exclusiva de setores em todo o banco (Firestore e Planilha).
+ * Executa a padronização e normalização universal de setores em todo o banco (Firestore e Planilha).
  * Pode ser selecionada e executada diretamente pelo editor do Google Apps Script.
- * Assegura o mapeamento de UTI I, II, III e IV e não altera medicamentos.
+ * Assegura o catálogo de setores sem acentos, usuários, UTI I, II, III e IV, e todos os casos no Sheets.
  */
 function EXECUTAR_NORMALIZACAO_SETORES_BANCO_() {
-  Logger.log('=== INICIANDO NORMALIZACAO EXCLUSIVA DE SETORES DO BANCO ===');
-  
-  // 1. Garante os 4 setores de UTI (I, II, III e IV)
-  Logger.log('1. Verificando e garantindo setores de UTI I, II, III e IV...');
-  const resUtis = garantirSetoresUtiCadastrados(null);
-  Logger.log(`   • Setores UTI: ${resUtis.criados} criados, ${resUtis.atualizados} atualizados.`);
+  Logger.log('=== INICIANDO NORMALIZACAO UNIVERSAL DE SETORES DO BANCO ===');
+  const resultado = normalizarSetoresBanco(null);
+  Logger.log(resultado.mensagem);
+  Logger.log('=== NORMALIZACAO UNIVERSAL DE SETORES CONCLUIDA COM SUCESSO ===');
+  return resultado;
+}
 
-  // 2. Normaliza setores de casos e notificações
-  Logger.log('2. Normalizando exclusivamente setores de todos os casos e notificações...');
-  const resCasos = normalizarSetoresCasosDePontaAPonta(null);
-  Logger.log(`   • Casos/Notificações com setor ajustado: ${resCasos.alterados} de ${resCasos.totalCasos} (${resCasos.casosSheetsAtualizados} linhas no Sheets).`);
+function EXECUTAR_NORMALIZACAO_SETORES_BANCO() {
+  return EXECUTAR_NORMALIZACAO_SETORES_BANCO_();
+}
 
-  Logger.log('=== NORMALIZACAO EXCLUSIVA DE SETORES CONCLUIDA COM SUCESSO ===');
-  return {
-    utis: resUtis,
-    casos: resCasos
-  };
+/** Execução direta com novo nome oficial */
+function EXECUTAR_PADRONIZACAO_TOTAL_SETORES_() {
+  return EXECUTAR_NORMALIZACAO_SETORES_BANCO_();
+}
+
+function EXECUTAR_PADRONIZACAO_TOTAL_SETORES() {
+  return EXECUTAR_NORMALIZACAO_SETORES_BANCO_();
 }
 
 /** Alias para compatibilidade */

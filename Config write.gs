@@ -134,7 +134,7 @@ function salvarSetores(setores, token) {
     const idsNovos = {};
     const itensBatch = [];
     setores.forEach(function (s) {
-      const setor = String(s.setor || '').trim().toUpperCase();
+      const setor = _padronizarNomeSetor_(s.setor);
       if (!setor) return;
       const email = String(s.email || '').trim();
       const id = _idDocSetor_(setor, email);
@@ -446,14 +446,14 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
     const casosResumo = fsListarComMascara_(SCHEMA.FS.CASOS, ['setor']);
     const docsUsuarios = fsListarTodos_(SCHEMA.FS.USUARIOS);
 
-    // 1) Contagem por nome de setor em cada fonte
+    // 1) Contagem por grafia exata de setor em cada fonte (para detectar acentos vs sem acentos)
     const setoresInfo = {};
     const listaCadastradosNomes = [];
 
     docsSetores.forEach(function (d) {
       const s = String(d.setor || '').trim();
       if (!s) return;
-      const chave = _normalizarSetorComparacao_(s);
+      const chave = s.toUpperCase();
       if (!setoresInfo[chave]) {
         setoresInfo[chave] = {
           nome: s,
@@ -474,7 +474,7 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
     casosResumo.forEach(function (c) {
       const s = String(c.setor || '').trim();
       if (!s) return;
-      const chave = _normalizarSetorComparacao_(s);
+      const chave = s.toUpperCase();
       if (!setoresInfo[chave]) {
         setoresInfo[chave] = {
           nome: s.toUpperCase(),
@@ -492,7 +492,7 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
       setoresUser.forEach(function (s) {
         const limpo = String(s || '').trim();
         if (!limpo) return;
-        const chave = _normalizarSetorComparacao_(limpo);
+        const chave = limpo.toUpperCase();
         if (!setoresInfo[chave]) {
           setoresInfo[chave] = {
             nome: limpo.toUpperCase(),
@@ -508,7 +508,7 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
 
     const listaDistintos = Object.values(setoresInfo);
 
-    // 2) Agrupa por similaridade
+    // 2) Agrupa por similaridade (incluindo 100% de similaridade entre versões com/sem acento)
     const ordenados = listaDistintos.slice().sort(function (a, b) {
       if (a.jaCadastrado !== b.jaCadastrado) return a.jaCadastrado ? -1 : 1;
       return b.totalCasos - a.totalCasos;
@@ -519,16 +519,14 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
 
     for (let i = 0; i < ordenados.length; i++) {
       const itemA = ordenados[i];
-      const chaveA = _normalizarSetorComparacao_(itemA.nome);
-      if (alocados[chaveA]) continue;
+      if (alocados[itemA.nome]) continue;
 
       const grupoAtual = [itemA];
-      alocados[chaveA] = true;
+      alocados[itemA.nome] = true;
 
       for (let j = i + 1; j < ordenados.length; j++) {
         const itemB = ordenados[j];
-        const chaveB = _normalizarSetorComparacao_(itemB.nome);
-        if (alocados[chaveB]) continue;
+        if (alocados[itemB.nome]) continue;
 
         let ehSimilar = false;
         let melhorSim = null;
@@ -546,7 +544,7 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
         if (ehSimilar) {
           itemB.similaridade = melhorSim;
           grupoAtual.push(itemB);
-          alocados[chaveB] = true;
+          alocados[itemB.nome] = true;
         }
       }
 
@@ -554,13 +552,28 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
         const cadastradoAtivo = grupoAtual.find(function (g) { return g.jaCadastrado && g.ativo; });
         const cadastrado = grupoAtual.find(function (g) { return g.jaCadastrado; });
         const maiorCasos = grupoAtual.slice().sort(function (a, b) { return b.totalCasos - a.totalCasos; })[0];
-        const sugestao = cadastradoAtivo ? cadastradoAtivo.nome : (cadastrado ? cadastrado.nome : maiorCasos.nome);
+        const sugestaoBase = cadastradoAtivo ? cadastradoAtivo.nome : (cadastrado ? cadastrado.nome : maiorCasos.nome);
+        const sugestao = _padronizarNomeSetor_(sugestaoBase);
 
         grupos.push({
+          grupoId: sugestao,
+          motivo: 'Variações de acentuação, grafia ou digitação detectadas',
           sugestaoCanonica: sugestao,
           totalCasosGrupo: grupoAtual.reduce(function (acc, g) { return acc + (g.totalCasos || 0); }, 0),
           totalUsuariosGrupo: grupoAtual.reduce(function (acc, g) { return acc + (g.totalUsuarios || 0); }, 0),
-          variantes: grupoAtual
+          variantes: grupoAtual,
+          variacoes: grupoAtual.map(function (item) {
+            return {
+              nome: item.nome,
+              totalCasos: item.totalCasos || 0,
+              totalUsuarios: item.totalUsuarios || 0,
+              origens: {
+                cadastrado: !!item.jaCadastrado,
+                casos: (item.totalCasos || 0) > 0,
+                usuarios: (item.totalUsuarios || 0) > 0
+              }
+            };
+          })
         });
       }
     }
@@ -570,7 +583,12 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
       totalDistintos: listaDistintos.length,
       totalGruposDivergentes: grupos.length,
       grupos: grupos,
-      setoresCadastradosNomes: listaCadastradosNomes
+      setoresCadastradosNomes: listaCadastradosNomes,
+      estatisticas: {
+        totalSetoresCadastrados: listaCadastradosNomes.length,
+        totalCasosAnalisados: casosResumo.length,
+        totalUsuariosAnalisados: docsUsuarios.length
+      }
     };
   });
 }
@@ -580,7 +598,7 @@ function diagnosticarHarmonizacaoGeralSetores(token) {
  * Atualiza Firestore SCHEMA.FS.CASOS, Planilha Sheets (coluna 11), Firestore SCHEMA.FS.USUARIOS
  * e consolida SCHEMA.FS.SETORES registrando sinônimos.
  *
- * @param {Array<{nomeCanonico: string, variantes: string[]}>} plano
+ * @param {Array<{nomeCanonico: string, variantes?: string[], variacoesParaMesclar?: string[]}>} plano
  * @param {string} token
  */
 function executarHarmonizacaoGeralSetores(plano, token) {
@@ -593,8 +611,10 @@ function executarHarmonizacaoGeralSetores(plano, token) {
     const sinonimosPorCanonico = {};
 
     plano.forEach(function (item) {
-      const canonico = String(item.nomeCanonico || '').trim().toUpperCase();
-      const variantes = Array.isArray(item.variantes) ? item.variantes : [];
+      const canonico = _padronizarNomeSetor_(item.nomeCanonico);
+      const variantes = (Array.isArray(item.variantes) && item.variantes.length)
+        ? item.variantes
+        : (Array.isArray(item.variacoesParaMesclar) ? item.variacoesParaMesclar : []);
       if (!canonico || !variantes.length) return;
 
       if (!sinonimosPorCanonico[canonico]) sinonimosPorCanonico[canonico] = [];
@@ -604,8 +624,9 @@ function executarHarmonizacaoGeralSetores(plano, token) {
         if (!vLimpo || vLimpo === canonico) return;
         const chave = _normalizarSetorComparacao_(vLimpo);
         dePara[chave] = canonico;
-        if (sinonimosPorCanonico[canonico].indexOf(vLimpo) === -1) {
-          sinonimosPorCanonico[canonico].push(vLimpo);
+        const sinLimpo = _padronizarNomeSetor_(vLimpo);
+        if (sinLimpo && sinLimpo !== canonico && sinonimosPorCanonico[canonico].indexOf(sinLimpo) === -1) {
+          sinonimosPorCanonico[canonico].push(sinLimpo);
         }
       });
     });
@@ -733,7 +754,7 @@ function _atualizarSetorNosCasosESheets_(dePara) {
   try {
     const ss = getPlanilha_();
     if (ss) {
-      const sheet = ss.getSheetByName(SCHEMA.PLANILHA.CASOS);
+      const sheet = ss.getSheetByName(SCHEMA.ABAS.CASOS);
       if (sheet) {
         atualizadosSheets = _atualizarSetoresEmPlanilha_(sheet, dePara);
       }
@@ -1633,21 +1654,201 @@ function garantirSetoresUtiAdultoCadastrados(token) {
 }
 
 /**
- * Executa a normalização exclusiva de setores:
- * 1. Garante os setores de UTI (I, II, III e IV) e seus sinônimos no catálogo de setores.
- * 2. Normaliza o campo setor de todos os casos e notificações em SCHEMA.FS.CASOS e DB_Casos_RAM.
+ * Varre a coleção SCHEMA.FS.SETORES e padroniza todos os nomes de setores:
+ * - Remove acentos de nomes (ex.: "CLÍNICA MÉDICA" -> "CLINICA MEDICA", "OBSTETRÍCIA" -> "OBSTETRICIA")
+ * - Corrige artefatos/typos (ex.: "CLNICA" -> "CLINICA", "CLINCA" -> "CLINICA")
+ * - Recalcula o ID canônico (_idDocSetor_)
+ * - Se o documento tinha ID legado ou com acento removido incorretamente ("CLNICA_MDICA..."),
+ *   migra os dados para o ID canônico novo e exclui o antigo
+ * - Se já existir outro documento com o ID canônico, funde os dados (ativo, farmacêutico, e-mail, sinônimos)
+ * - Limpa e deduplica o array de sinônimos (sem acentos)
+ * @returns {{ totalAnalisados: number, alterados: number, migradosIds: number, removidosAntigos: number, listaAlteracoes: Array<object> }}
+ */
+function padronizarSetoresCatalogoFirestore_() {
+  const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+  if (!docs || !docs.length) {
+    return { totalAnalisados: 0, alterados: 0, migradosIds: 0, removidosAntigos: 0, listaAlteracoes: [] };
+  }
+
+  const alteracoes = [];
+  let alterados = 0;
+  let migradosIds = 0;
+  let removidosAntigos = 0;
+
+  // Agrupa por novo ID canônico para consolidar duplicatas de mesmo setor e responsável
+  const gruposPorNovoId = {};
+
+  docs.forEach(function (doc) {
+    const setorBruto = String(doc.setor || '').trim();
+    if (!setorBruto) return;
+
+    const nomePadrao = _padronizarNomeSetor_(setorBruto);
+    const email = String(doc.emailResponsavel || '').trim();
+    const novoId = _idDocSetor_(nomePadrao, email);
+    const idAtual = doc._id;
+
+    if (!gruposPorNovoId[novoId]) {
+      gruposPorNovoId[novoId] = [];
+    }
+    gruposPorNovoId[novoId].push({
+      docOriginal: doc,
+      nomePadrao: nomePadrao,
+      idAtual: idAtual,
+      email: email,
+      ativo: _ativoComoBooleano_(doc.ativo),
+      farmaceutico: String(doc.farmaceuticoResponsavel || '').trim(),
+      sinonimos: Array.isArray(doc.sinonimos) ? doc.sinonimos : []
+    });
+  });
+
+  Object.keys(gruposPorNovoId).forEach(function (novoId) {
+    const docsGrupo = gruposPorNovoId[novoId];
+    const nomePadrao = docsGrupo[0].nomePadrao;
+    const email = docsGrupo[0].email;
+
+    let algumAtivo = false;
+    const farmaceuticosSet = {};
+    const sinonimosSet = {};
+    const idsOriginais = [];
+
+    docsGrupo.forEach(function (item) {
+      idsOriginais.push(item.idAtual);
+      if (item.ativo) algumAtivo = true;
+      if (item.farmaceutico) farmaceuticosSet[item.farmaceutico] = true;
+
+      item.sinonimos.forEach(function (s) {
+        const sNorm = _padronizarNomeSetor_(s);
+        if (sNorm && sNorm !== nomePadrao) sinonimosSet[sNorm] = true;
+      });
+
+      const antiga = String(item.docOriginal.setor || '').trim().toUpperCase();
+      if (antiga && antiga !== nomePadrao) {
+        sinonimosSet[antiga] = true;
+      }
+    });
+
+    const listaFarmaceuticos = Object.keys(farmaceuticosSet).join(', ');
+    const listaSinonimos = Object.keys(sinonimosSet);
+
+    const docComMesmoId = docsGrupo.find(function (d) { return d.idAtual === novoId; });
+    let precisaGravar = false;
+
+    if (!docComMesmoId) {
+      precisaGravar = true;
+      migradosIds++;
+    } else {
+      const setorMudou = docComMesmoId.docOriginal.setor !== nomePadrao;
+      const ativoMudou = docComMesmoId.ativo !== algumAtivo;
+      const sinonimosMudaram = JSON.stringify(docComMesmoId.sinonimos.slice().sort()) !== JSON.stringify(listaSinonimos.slice().sort());
+      if (setorMudou || ativoMudou || sinonimosMudaram || docsGrupo.length > 1) {
+        precisaGravar = true;
+      }
+    }
+
+    if (precisaGravar) {
+      alterados++;
+      alteracoes.push({
+        novoId: novoId,
+        idsOriginais: idsOriginais,
+        nomePadrao: nomePadrao,
+        antigos: docsGrupo.map(function (d) { return d.docOriginal.setor; }),
+        farmaceuticos: listaFarmaceuticos,
+        ativo: algumAtivo
+      });
+
+      fsSetDoc_(SCHEMA.FS.SETORES, novoId, {
+        setor: nomePadrao,
+        ativo: algumAtivo,
+        farmaceuticoResponsavel: listaFarmaceuticos,
+        emailResponsavel: email,
+        sinonimos: listaSinonimos,
+        atualizadoEm: new Date()
+      });
+
+      idsOriginais.forEach(function (idVelho) {
+        if (idVelho && idVelho !== novoId) {
+          try {
+            fsDeleteDoc_(SCHEMA.FS.SETORES, idVelho);
+            removidosAntigos++;
+          } catch (eDel) {
+            console.warn('padronizarSetoresCatalogoFirestore_: erro ao remover ID legado ' + idVelho + ' — ' + eDel.message);
+          }
+        }
+      });
+    }
+  });
+
+  return {
+    totalAnalisados: docs.length,
+    alterados: alterados,
+    migradosIds: migradosIds,
+    removidosAntigos: removidosAntigos,
+    listaAlteracoes: alteracoes
+  };
+}
+
+/**
+ * Varre SCHEMA.FS.USUARIOS e padroniza todos os setores vinculados aos usuários
+ * para a grafia canônica sem acentos.
+ * @returns {{ usuariosAnalisados: number, usuariosAlterados: number }}
+ */
+function padronizarSetoresUsuariosFirestore_() {
+  const usuarios = fsListarTodos_(SCHEMA.FS.USUARIOS);
+  let alterados = 0;
+
+  usuarios.forEach(function (u) {
+    const atuais = Array.isArray(u.setores) ? u.setores : [];
+    if (!atuais.length) return;
+
+    const novos = _normalizarSetoresLista_(atuais);
+    if (JSON.stringify(atuais) !== JSON.stringify(novos)) {
+      fsUpdateDoc_(SCHEMA.FS.USUARIOS, u._id, { setores: novos });
+      alterados++;
+    }
+  });
+
+  return { usuariosAnalisados: usuarios.length, usuariosAlterados: alterados };
+}
+
+/**
+ * Executa a normalização universal de setores em TODO o sistema:
+ * 1. Padroniza e consolida o catálogo de setores (SCHEMA.FS.SETORES), removendo acentos e corrigindo IDs e duplicatas.
+ * 2. Garante os setores de UTI (I, II, III e IV) e seus sinônimos no catálogo.
+ * 3. Padroniza os setores vinculados a usuários (SCHEMA.FS.USUARIOS).
+ * 4. Normaliza o campo setor de todos os casos e notificações em SCHEMA.FS.CASOS e DB_Casos_RAM (Sheets).
  * @param {string} token
  */
 function normalizarSetoresBanco(token) {
   function executar() {
+    // 1. Catálogo de setores (SCHEMA.FS.SETORES)
+    const resCatalogo = padronizarSetoresCatalogoFirestore_();
+
+    // 2. Setores essenciais de UTI (I, II, III e IV)
     const resUtis = garantirSetoresUtiCadastrados(token);
+
+    // 3. Usuários (SCHEMA.FS.USUARIOS)
+    const resUsuarios = padronizarSetoresUsuariosFirestore_();
+
+    // 4. Casos (SCHEMA.FS.CASOS e Sheets)
     const resCasos = normalizarSetoresCasosDePontaAPonta(token);
+
+    invalidarConfig();
+    invalidarCasosCache_();
+
+    const msg = 'Normalização e padronização total de setores concluída com sucesso! ' +
+      resCatalogo.alterados + ' setor(es) padronizado(s) no catálogo (' + resCatalogo.removidosAntigos + ' duplicata(s)/IDs legados removidos), ' +
+      resUsuarios.usuariosAlterados + ' usuário(s) atualizado(s), ' +
+      resCasos.alterados + ' caso(s) normalizado(s) no Firestore e ' + resCasos.casosSheetsAtualizados + ' linhas na Planilha. UTIs I a IV asseguradas.';
+
+    fsRegistrarLog_('PADRONIZACAO_TOTAL_SETORES', 'setores', msg);
 
     return {
       sucesso: true,
-      mensagem: 'Normalização exclusiva de setores concluída com sucesso! ' + resCasos.alterados + ' caso(s) normalizado(s) no Firestore e Planilha. UTIs I, II, III e IV asseguradas.',
-      casos: resCasos,
-      utis: resUtis
+      mensagem: msg,
+      catalogo: resCatalogo,
+      utis: resUtis,
+      usuarios: resUsuarios,
+      casos: resCasos
     };
   }
 

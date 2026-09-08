@@ -297,14 +297,14 @@ function _mapaSinonimosSetores_() {
   try {
     const docs = fsListarTodos_(SCHEMA.FS.SETORES);
     docs.forEach(function (doc) {
-      const setor = String(doc.setor || '').trim();
+      const setor = _padronizarNomeSetor_(doc.setor);
       if (!setor) return;
       const chaveOficial = _normalizarSetorComparacao_(setor);
       mapa[chaveOficial] = setor;
 
       if (Array.isArray(doc.sinonimos)) {
         doc.sinonimos.forEach(function (sin) {
-          const s = String(sin || '').trim();
+          const s = _padronizarNomeSetor_(sin);
           if (s) mapa[_normalizarSetorComparacao_(s)] = setor;
         });
       }
@@ -322,74 +322,55 @@ function _mapaSinonimosSetores_() {
  * 2. Padronização de zeros (ex.: "POSTO 01" -> "POSTO 1")
  * 3. Expansão de abreviações hospitalares (ex.: "UTI AD" -> "UTI ADULTO")
  * 4. Correspondência por similaridade (score >= 80%) contra setores cadastrados
- * 5. Fallback limpo padronizado
+ * 5. Fallback limpo padronizado (sem acentos, maiúsculo, zeros e espaços limpos)
  * @param {string} setorBruto
  * @param {{ [chave: string]: string }=} mapaPreCarregado
  * @returns {string}
  */
 function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
-  let limpo = String(setorBruto || '').trim();
+  let limpo = _padronizarNomeSetor_(setorBruto);
   if (!limpo) return '';
-
-  // 0. Tratamento de hierarquia hospitalar por pontos (ex.: "UTI ADULTO III.UTI ADULTO III .03" ou "UTI.3")
-  if (limpo.indexOf('.') !== -1) {
-    const partes = limpo.split('.');
-    const primeiro = partes[0].trim();
-    const idPrimeiro = _extrairIdentificadorUnidadeSetor_(primeiro);
-    const popPrimeiro = _extrairPopulacaoSetor_(primeiro);
-
-    // Se o prefixo antes do ponto já traz a unidade completa (ex: "UTI ADULTO III" ou "UTI PEDIATRICA"), isola-o
-    if (idPrimeiro.numeros.length > 0 || idPrimeiro.letra || popPrimeiro) {
-      limpo = primeiro;
-    } else {
-      // Se era algo como "UTI.3" ou "UTI.ADULTO.III", substitui pontos por espaços para não perder os termos
-      limpo = limpo.replace(/\.+/g, ' ');
-    }
-  }
-
-  // Remove sufixos de leito, box, quarto ou apartamento (ex: "- LEITO 04", "/ BOX 12", "LTO 01")
-  limpo = limpo.replace(/\s*[-/:]?\s*\b(?:LEITO|LTO|BOX|QUARTO|APTO|L)\b\s*[-.:/]?\s*\d+\b/gi, '').trim().replace(/[\s\-_/:]+$/, '');
 
   const mapa = mapaPreCarregado || _mapaSinonimosSetores_();
   const chave = _normalizarSetorComparacao_(limpo);
 
   // 1. Consulta direta por chave normalizada ou sinônimo cadastrado
-  if (mapa[chave]) return mapa[chave];
+  if (mapa[chave]) return _padronizarNomeSetor_(mapa[chave]);
 
   // 2. Padronização de zeros (ex: "POSTO 01" -> "POSTO 1")
   const chaveSemZeros = _normalizarSetorComparacao_(_padronizarZerosSetor_(limpo));
   if (mapa[chaveSemZeros]) {
-    mapa[chave] = mapa[chaveSemZeros];
-    return mapa[chaveSemZeros];
+    mapa[chave] = _padronizarNomeSetor_(mapa[chaveSemZeros]);
+    return mapa[chave];
   }
 
   // 2.1 Conversão de numerais romanos / arábicos (ex: "UTI ADULTO 1" <-> "UTI ADULTO I")
   const chaveRomana = _normalizarSetorComparacao_(_converterArabicoParaRomanoSetor_(chaveSemZeros));
   if (mapa[chaveRomana]) {
-    mapa[chave] = mapa[chaveRomana];
-    return mapa[chaveRomana];
+    mapa[chave] = _padronizarNomeSetor_(mapa[chaveRomana]);
+    return mapa[chave];
   }
   const chaveArabica = _normalizarSetorComparacao_(_converterRomanoParaArabicoSetor_(chaveSemZeros));
   if (mapa[chaveArabica]) {
-    mapa[chave] = mapa[chaveArabica];
-    return mapa[chaveArabica];
+    mapa[chave] = _padronizarNomeSetor_(mapa[chaveArabica]);
+    return mapa[chave];
   }
 
   // 3. Expansão de abreviações hospitalares (ex: "UTI AD" -> "UTI ADULTO")
   const chaveExpandida = _normalizarSetorComparacao_(_expandirAbreviacoesSetor_(chaveSemZeros));
   if (mapa[chaveExpandida]) {
-    mapa[chave] = mapa[chaveExpandida];
-    return mapa[chaveExpandida];
+    mapa[chave] = _padronizarNomeSetor_(mapa[chaveExpandida]);
+    return mapa[chave];
   }
   const chaveExpandidaRomana = _normalizarSetorComparacao_(_converterArabicoParaRomanoSetor_(chaveExpandida));
   if (mapa[chaveExpandidaRomana]) {
-    mapa[chave] = mapa[chaveExpandidaRomana];
-    return mapa[chaveExpandidaRomana];
+    mapa[chave] = _padronizarNomeSetor_(mapa[chaveExpandidaRomana]);
+    return mapa[chave];
   }
   const chaveExpandidaArabica = _normalizarSetorComparacao_(_converterRomanoParaArabicoSetor_(chaveExpandida));
   if (mapa[chaveExpandidaArabica]) {
-    mapa[chave] = mapa[chaveExpandidaArabica];
-    return mapa[chaveExpandidaArabica];
+    mapa[chave] = _padronizarNomeSetor_(mapa[chaveExpandidaArabica]);
+    return mapa[chave];
   }
 
   // 4. Busca inteligente por similaridade contra setores oficiais cadastrados
@@ -398,14 +379,15 @@ function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
   if (candidatos.length > 0) {
     const melhor = _encontrarMelhorCorrespondenciaSetor_(limpo, candidatos);
     if (melhor && melhor.compativel && melhor.score >= 0.80) {
-      mapa[chave] = melhor.setor;
-      mapa[chaveSemZeros] = melhor.setor;
-      return melhor.setor;
+      const canonico = _padronizarNomeSetor_(melhor.setor);
+      mapa[chave] = canonico;
+      mapa[chaveSemZeros] = canonico;
+      return canonico;
     }
   }
 
-  // 5. Fallback limpo: maiúsculo com zeros padronizados e espaços colapsados
-  return _padronizarZerosSetor_(limpo).toUpperCase().replace(/[-_./]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // 5. Fallback limpo: sem acentos, maiúsculo com zeros padronizados e espaços colapsados
+  return _padronizarNomeSetor_(limpo);
 }
 
 /**

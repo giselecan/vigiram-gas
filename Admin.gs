@@ -194,13 +194,13 @@ function editarUsuario(dados, token) {
   });
 }
 
-/** Limpa/dedup a lista de nomes de setor recebida do frontend. */
+/** Limpa/dedup e padroniza a lista de nomes de setor (sem acentos, maiúsculo). */
 function _normalizarSetoresLista_(setores) {
   if (!Array.isArray(setores)) return [];
   const vistos = {};
   const limpos = [];
   setores.forEach(function (s) {
-    const nome = String(s || '').trim().toUpperCase();
+    const nome = _padronizarNomeSetor_(s);
     if (!nome || vistos[nome]) return;
     vistos[nome] = true;
     limpos.push(nome);
@@ -223,9 +223,11 @@ function _normalizarSetoresLista_(setores) {
 function _sincronizarSetoresUsuario_(email, nome, setoresAntigos, setoresNovos) {
   const novosSet = {};
   setoresNovos.forEach(function (setor) {
-    novosSet[setor] = true;
-    fsSetDoc_(SCHEMA.FS.SETORES, _idDocSetor_(setor, email), {
-      setor: setor,
+    const nomeLimpo = _padronizarNomeSetor_(setor);
+    if (!nomeLimpo) return;
+    novosSet[nomeLimpo] = true;
+    fsSetDoc_(SCHEMA.FS.SETORES, _idDocSetor_(nomeLimpo, email), {
+      setor: nomeLimpo,
       ativo: true,
       farmaceuticoResponsavel: nome,
       emailResponsavel: email
@@ -233,8 +235,9 @@ function _sincronizarSetoresUsuario_(email, nome, setoresAntigos, setoresNovos) 
   });
 
   setoresAntigos.forEach(function (setor) {
-    if (novosSet[setor]) return; // continua atribuído, não remove
-    fsDeleteDoc_(SCHEMA.FS.SETORES, _idDocSetor_(setor, email));
+    const nomeLimpo = _padronizarNomeSetor_(setor);
+    if (!nomeLimpo || novosSet[nomeLimpo]) return; // continua atribuído, não remove
+    fsDeleteDoc_(SCHEMA.FS.SETORES, _idDocSetor_(nomeLimpo, email));
   });
 
   if (setoresNovos.length || setoresAntigos.length) invalidarConfig();

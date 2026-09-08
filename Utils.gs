@@ -171,6 +171,69 @@ function _parseDataFlexivel_(valor) {
 }
 
 /**
+ * Sanitiza um texto para uso como parte do ID determinístico de caso (alfanumérico sem acentos).
+ * Ex: "UTI ADULTO III" -> "UTIADULTOIII"
+ * @param {string} texto
+ * @returns {string}
+ */
+function _chaveIdSanitizada_(texto) {
+  if (!texto) return 'NA';
+  const limpo = _removerAcentos_(String(texto)).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return limpo || 'NA';
+}
+
+/**
+ * Padroniza o nome de um setor segundo o padrão canônico do hospital:
+ * - Remove acentos (ex.: "CLÍNICA MÉDICA" -> "CLINICA MEDICA", "OBSTETRÍCIA" -> "OBSTETRICIA")
+ * - Converte para MAIÚSCULAS
+ * - Corrige artefatos/typos comuns de digitação/OCR (ex.: "CLNICA"/"CLINCA" -> "CLINICA", "MDICA"/"MEDCA" -> "MEDICA")
+ * - Remove sufixos de leito, box, quarto ou apartamento
+ * - Remove zeros à esquerda ("POSTO 01" -> "POSTO 1")
+ * - Colapsa separadores e espaços múltiplos em espaço simples
+ * @param {string} nome
+ * @returns {string}
+ */
+function _padronizarNomeSetor_(nome) {
+  if (!nome) return '';
+  let s = String(nome).trim();
+  if (!s) return '';
+
+  // 1. Remove acentos e converte para maiúsculo
+  s = _removerAcentos_(s);
+
+  // 2. Corrige typos/artefatos de digitação e remoção de acentos sem I
+  s = s.replace(/\bCLNICA\b/g, 'CLINICA')
+       .replace(/\bCLINCA\b/g, 'CLINICA')
+       .replace(/\bMDICA\b/g, 'MEDICA')
+       .replace(/\bMEDCA\b/g, 'MEDICA');
+
+  // 3. Trata hierarquia por pontos se houver (ex.: "UTI ADULTO III.03" -> "UTI ADULTO III")
+  if (s.indexOf('.') !== -1) {
+    const partes = s.split('.');
+    const primeiro = partes[0].trim();
+    const idPrimeiro = _extrairIdentificadorUnidadeSetor_(primeiro);
+    const popPrimeiro = _extrairPopulacaoSetor_(primeiro);
+    if (idPrimeiro.numeros.length > 0 || idPrimeiro.letra || popPrimeiro) {
+      s = primeiro;
+    } else {
+      s = s.replace(/\.+/g, ' ');
+    }
+  }
+
+  // 4. Remove sufixos de leito, box, quarto ou apartamento
+  s = s.replace(/\s*[-/:]?\s*\b(?:LEITO|LTO|BOX|QUARTO|APTO|L)\b\s*[-.:/]?\s*\d+\b/gi, '')
+       .trim().replace(/[\s\-_/:]+$/, '');
+
+  // 5. Padroniza zeros à esquerda em números ("POSTO 01" -> "POSTO 1")
+  s = _padronizarZerosSetor_(s);
+
+  // 6. Colapsa separadores e espaços múltiplos
+  s = s.replace(/[-_./]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  return s;
+}
+
+/**
  * Gera o ID do documento da coleção `setores` (SCHEMA.FS.SETORES) a partir
  * do NOME do setor + e-mail do farmacêutico responsável.
  *
@@ -186,7 +249,8 @@ function _parseDataFlexivel_(valor) {
  * @returns {string}
  */
 function _idDocSetor_(setor, email) {
-  const slugSetor = String(setor || '').trim().toUpperCase()
+  const nomePadrao = _padronizarNomeSetor_(setor);
+  const slugSetor = nomePadrao
     .replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
   const slugEmail = String(email || '').trim().toLowerCase()
     .replace(/[^a-z0-9]/g, '_');
@@ -572,8 +636,9 @@ function _atualizarSetoresEmPlanilha_(planilha, deParaChaves) {
     const atual = String(valores[i][0] || '').trim();
     if (!atual) continue;
     const chave = _normalizarSetorComparacao_(atual);
-    if (deParaChaves[chave] && deParaChaves[chave] !== atual) {
-      valores[i][0] = deParaChaves[chave];
+    const destino = deParaChaves[chave] || _padronizarNomeSetor_(atual);
+    if (destino && destino !== atual) {
+      valores[i][0] = destino;
       atualizados++;
     }
   }
