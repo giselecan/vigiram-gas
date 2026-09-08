@@ -101,21 +101,35 @@ function handleInsertDB(e) {
     // o ETL manda dezenas de casos por ciclo e isso é 1 leitura do Firestore.
     const setoresInativos = _setoresInativosMapa_();
     const mapaSinonimos   = _mapaSinonimosSetores_();
+    const mapaGatilhos    = _mapaGatilhosCadastrados_();
     const descartadosPorSetor = {};
     const bloqueadosPorExclusao = [];
 
     dados.forEach(function (caso) {
       const idLimpo = String(caso.id_caso).trim();
 
-      // Descarte por setor desativado ANTES do lookup de dedup — não faz
-      // sentido gastar uma leitura do Firestore por caso que já vai fora.
+      // 1. SETOR CANÔNICO: normaliza zeros ("POSTO 01" -> "POSTO 1"), abreviações,
+      // sinônimos e similaridade para garantir que o setor já entre 100% padronizado.
       const setorCanonico = _resolverSetorCanonico_(caso.unidade_setor, mapaSinonimos);
       const chaveSetor = _normalizarSetorComparacao_(setorCanonico);
+
+      // Descarte por setor desativado ANTES do lookup de dedup — não faz
+      // sentido gastar uma leitura do Firestore por caso que já vai fora.
       if (setoresInativos[chaveSetor]) {
         const nome = setoresInativos[chaveSetor];
         descartadosPorSetor[nome] = (descartadosPorSetor[nome] || 0) + 1;
         return;
       }
+
+      // 2. GATILHO CANÔNICO: normaliza a apresentação/dosagem bruta do robô para
+      // o nome oficial cadastrado (ex: "FITOMENADIONA 10MG/ML AMPOLA" -> "FITOMENADIONA"),
+      // extraindo a dose e unidade para espelhamento correto em E2B e Sheets.
+      const gatilhoInfo = _resolverGatilhoCanonico_(caso.medicamento_suspeito, mapaGatilhos);
+
+      // 3. DEMAIS DADOS NORMALIZADOS: iniciais padrão com pontos e sexo M/F
+      const iniciaisNorm = _normalizarIniciaisPaciente_(caso.iniciais_paciente);
+      const sexoNorm     = _normalizarSexo_(caso.sexo);
+      const prontuario   = String(caso.prontuario || '').trim();
 
       // Anti-duplicação: lookup direto O(1), não precisa carregar a base inteira.
       const existente = fsGetDoc_(SCHEMA.FS.CASOS, idLimpo);
@@ -164,14 +178,17 @@ function handleInsertDB(e) {
         id: idLimpo,
         data: dataEventoBA,
         tipo: 'BA',
-        prontuario: caso.prontuario,
-        iniciais: caso.iniciais_paciente,
-        nascimento: caso.data_nascimento,
-        sexo: caso.sexo || '',
+        prontuario: prontuario,
+        iniciais: iniciaisNorm,
+        nascimento: caso.data_nascimento || '',
+        sexo: sexoNorm,
         setor: setorCanonico,
-        medicamento: caso.medicamento_suspeito,
+        medicamento: gatilhoInfo.medicamento,
+        medicamentoBruto: gatilhoInfo.original,
+        doseMedicamento: gatilhoInfo.dose,
+        doseUnidade: gatilhoInfo.unidade,
         status: SCHEMA.STATUS.TRIAGEM,
-        sla: caso.prazo_sla,
+        sla: caso.prazo_sla || '48',
         motivoDescarte: '', historiaClinica: '', relato: '', exames: '',
         readministrado: '', evolucao: '', desfecho: '', conclusao: '',
         naranjo: '', gravidade: '', farmaceutico: '', numVigimed: '',

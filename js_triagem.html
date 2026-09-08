@@ -23,7 +23,10 @@ function abrirTriagem(id) {
 
   document.getElementById('trgProntuario').innerText = caso.prontuario;
   document.getElementById('trgSetor').innerText      = caso.setor;
-  document.getElementById('trgGatilho').innerText    = caso.medicamento;
+  const gatilhoExib = caso.medicamentoBruto && caso.medicamentoBruto.toUpperCase() !== caso.medicamento.toUpperCase()
+    ? `${escapeHtml(caso.medicamento)} <span class="text-xs text-gray-500 font-normal block mt-0.5">(Dispensado: ${escapeHtml(caso.medicamentoBruto)})</span>`
+    : escapeHtml(caso.medicamento);
+  document.getElementById('trgGatilho').innerHTML    = gatilhoExib;
   document.getElementById('trgIniciais').innerText = caso.paciente || 'N/I';
 
   document.getElementById('formTriagem').reset();
@@ -47,8 +50,18 @@ function fecharModalTriagem() {
 function toggleFormTriagem(isRam) {
   document.getElementById('trgAreaSim').classList.toggle('hidden', isRam !== true);
   document.getElementById('trgAreaNao').classList.toggle('hidden', isRam !== false);
-  document.getElementById('trgMedSuspeito').required    = isRam === true;
+  const inputMed = document.getElementById('trgMedSuspeito');
+  inputMed.required    = isRam === true;
   document.getElementById('trgMotivoDescarte').required = isRam === false;
+
+  // Pré-preenche por comodidade com o gatilho canônico já padronizado
+  if (isRam === true && !inputMed.value.trim() && _triagemIdAtual) {
+    const c = casosGlobais.find(x => x.id === _triagemIdAtual);
+    if (c && c.medicamento && c.medicamento !== 'N/I') {
+      inputMed.value = c.medicamento;
+    }
+  }
+
   if (isRam !== false) toggleMotivoDescarteOutro();
 }
 

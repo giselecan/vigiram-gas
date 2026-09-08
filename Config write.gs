@@ -1393,3 +1393,107 @@ function excluirGatilho(id, token) {
     return { sucesso: true, mensagem: 'Gatilho excluído com sucesso.' };
   });
 }
+
+/**
+ * Normaliza todos os casos existentes no sistema de ponta a ponta (Firestore e Planilha Sheets).
+ * Padroniza os nomes de medicamentos-gatilho e setores de acordo com os cadastros oficiais,
+ * garantindo consistência retroativa total.
+ * @param {string} token
+ * @returns {{ sucesso: boolean, mensagem: string, alterados: number, totalCasos: number }}
+ */
+function normalizarCasosAntigosDePontaAPonta(token) {
+  return _comAdmin_(token, function () {
+    const mapaSinonimos = _mapaSinonimosSetores_();
+    const mapaGatilhos  = _mapaGatilhosCadastrados_();
+    const todosCasos    = fsListarTodos_(SCHEMA.FS.CASOS);
+
+    if (!todosCasos || !todosCasos.length) {
+      return { sucesso: true, mensagem: 'Nenhum caso encontrado para normalizar.', alterados: 0, totalCasos: 0 };
+    }
+
+    const agora = new Date();
+    const paraAtualizarFirestore = [];
+    const deParaSetoresPlanilha = {};
+    const deParaMedicamentosPlanilha = {};
+
+    todosCasos.forEach(function (c) {
+      if (!c || !c.id) return;
+
+      const setorAtual = String(c.setor || '').trim();
+      const medAtual   = String(c.medicamento || '').trim();
+      const iniciaisAtual = String(c.iniciais || '').trim();
+      const sexoAtual  = String(c.sexo || '').trim();
+
+      const setorCanonico = _resolverSetorCanonico_(setorAtual, mapaSinonimos);
+      const gatilhoInfo   = _resolverGatilhoCanonico_(medAtual, mapaGatilhos);
+      const iniciaisNorm  = _normalizarIniciaisPaciente_(iniciaisAtual);
+      const sexoNorm      = _normalizarSexo_(sexoAtual);
+
+      const mudouSetor = setorAtual && setorCanonico && setorAtual !== setorCanonico;
+      const mudouMed   = medAtual && gatilhoInfo.medicamento && medAtual !== gatilhoInfo.medicamento;
+      const mudouIniciais = iniciaisAtual && iniciaisNorm && iniciaisAtual !== iniciaisNorm;
+      const mudouSexo  = sexoAtual && sexoNorm && sexoAtual !== sexoNorm;
+
+      if (mudouSetor || mudouMed || mudouIniciais || mudouSexo || (!c.medicamentoBruto && gatilhoInfo.original)) {
+        const dadosNovos = {
+          auditoria: {
+            atualizadoPor: 'Normalização Sistema (' + __emailSessaoAtual + ')',
+            atualizadoEm: agora
+          }
+        };
+
+        if (mudouSetor) {
+          dadosNovos.setor = setorCanonico;
+          deParaSetoresPlanilha[_normalizarSetorComparacao_(setorAtual)] = setorCanonico;
+        }
+        if (mudouMed) {
+          dadosNovos.medicamento = gatilhoInfo.medicamento;
+          if (!c.medicamentoBruto) dadosNovos.medicamentoBruto = medAtual;
+          if (gatilhoInfo.dose && !c.doseMedicamento) dadosNovos.doseMedicamento = gatilhoInfo.dose;
+          if (gatilhoInfo.unidade && !c.doseUnidade) dadosNovos.doseUnidade = gatilhoInfo.unidade;
+          deParaMedicamentosPlanilha[_normalizarChaveGatilho_(medAtual)] = gatilhoInfo.medicamento;
+        }
+        if (mudouIniciais) dadosNovos.iniciais = iniciaisNorm;
+        if (mudouSexo) dadosNovos.sexo = sexoNorm;
+
+        paraAtualizarFirestore.push({ id: c.id, dados: dadosNovos });
+      }
+    });
+
+    let casosSheetsAtualizados = 0;
+    if (paraAtualizarFirestore.length > 0) {
+      // 1. Atualiza Firestore em lote
+      fsBatchUpdate_(SCHEMA.FS.CASOS, paraAtualizarFirestore);
+
+      // 2. Atualiza Planilha Google Sheets
+      try {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const aba = ss.getSheetByName(SCHEMA.ABAS.CASOS);
+        if (aba) {
+          if (Object.keys(deParaSetoresPlanilha).length > 0) {
+            casosSheetsAtualizados += _atualizarSetoresEmPlanilha_(aba, deParaSetoresPlanilha);
+          }
+          if (Object.keys(deParaMedicamentosPlanilha).length > 0) {
+            casosSheetsAtualizados += _atualizarMedicamentosEmPlanilha_(aba, deParaMedicamentosPlanilha);
+          }
+        }
+      } catch (e) {
+        console.warn('normalizarCasosAntigosDePontaAPonta: falha ao atualizar Sheets — ' + e.message);
+      }
+
+      invalidarConfig();
+      invalidarCasosCache_();
+
+      fsRegistrarLog_('NORMALIZACAO_CASOS_GERAL', 'N/A',
+        paraAtualizarFirestore.length + ' caso(s) normalizados em Firestore e Sheets | Por: ' + __emailSessaoAtual);
+    }
+
+    return {
+      sucesso: true,
+      mensagem: paraAtualizarFirestore.length + ' caso(s) foram normalizados com sucesso em todo o sistema (Firestore e Planilha).',
+      alterados: paraAtualizarFirestore.length,
+      casosSheetsAtualizados: casosSheetsAtualizados,
+      totalCasos: todosCasos.length
+    };
+  });
+}

@@ -51,7 +51,7 @@ const CACHE_CASOS_TTL_SEG = 45;
 // lista (fsListarComMascara_), diferente de SCHEMA.FS.* (nome de coleção).
 const CAMPOS_RESUMO_CASOS = [
   'id', 'data', 'tipo', 'prontuario', 'iniciais', 'nascimento',
-  'setor', 'medicamento', 'status', 'gravidade', 'farmaceutico', 'conclusao',
+  'setor', 'medicamento', 'medicamentoBruto', 'status', 'gravidade', 'farmaceutico', 'conclusao',
   'motivoDescarte', 'triadoPor', 'numVigimed', 'dataVigimed', 'dataTriagem', 'notificador.dataNotificacao',
   'auditoria.atualizadoEm'
 ];
@@ -77,6 +77,7 @@ function _mapearCasoResumo_(doc) {
     data_nascimento: String(doc.nascimento != null ? doc.nascimento : '').trim(),
     setor:           String(doc.setor || 'N/I').trim(),
     medicamento:     String(doc.medicamento || 'N/I').trim(),
+    medicamentoBruto:String(doc.medicamentoBruto || '').trim(),
     status:          String(doc.status || SCHEMA.STATUS.TRIAGEM).trim(),
     gravidade:       String(doc.gravidade || '').trim(),
     farmaceutico:    String(doc.farmaceutico || '').trim(),
@@ -138,6 +139,9 @@ function _mapearCasoCompleto_(doc) {
     data_nascimento: String(doc.nascimento != null ? doc.nascimento : '').trim(),
     setor:           String(doc.setor || 'N/I').trim(),
     medicamento:     String(doc.medicamento || 'N/I').trim(),
+    medicamentoBruto:String(doc.medicamentoBruto || '').trim(),
+    doseMedicamento: String(doc.doseMedicamento || '').trim(),
+    doseUnidade:     String(doc.doseUnidade || '').trim(),
     status:          String(doc.status || SCHEMA.STATUS.TRIAGEM).trim(),
     historiaClinica: String(doc.historiaClinica || '').trim(),
     relatoEvento:    String(doc.relato || '').trim(),
@@ -325,6 +329,12 @@ function salvarDemandaEspontanea(formDados) {
       throw new Error('Preencha os campos obrigatórios: prontuário, iniciais, setor e medicamento.');
     }
 
+    // Normalização canônica padronizada de ponta a ponta
+    const setorCanonico = _resolverSetorCanonico_(setor);
+    const gatilhoInfo   = _resolverGatilhoCanonico_(medicamento);
+    const iniciaisNorm  = _normalizarIniciaisPaciente_(iniciais);
+    const sexoNorm      = _normalizarSexo_(formDados.sexo);
+
     const agora  = new Date();
     const idCaso = `ESP-${prontuario}-${agora.getTime().toString().slice(-6)}`;
 
@@ -335,9 +345,9 @@ function salvarDemandaEspontanea(formDados) {
     let farmaceuticoResponsavel = '';
     try {
       const cfg = getConfig_();
-      const setorUp = setor.toUpperCase().trim();
+      const setorChave = _normalizarSetorComparacao_(setorCanonico);
       const setorObj = (cfg.setores || []).find(function (s) {
-        return s.setor && s.setor.toUpperCase().trim() === setorUp;
+        return s.setor && _normalizarSetorComparacao_(s.setor) === setorChave;
       });
       if (setorObj && setorObj.farmaceutico) {
         farmaceuticoResponsavel = setorObj.farmaceutico;
@@ -361,10 +371,14 @@ function salvarDemandaEspontanea(formDados) {
       data: dataEventoValida,
       tipo: 'DE',
       prontuario: prontuario,
-      iniciais: iniciais.toUpperCase(),
+      iniciais: iniciaisNorm,
       nascimento: formDados.nascimento || '',
-      setor: setor.toUpperCase(),
-      medicamento: medicamento.toUpperCase(),
+      sexo: sexoNorm,
+      setor: setorCanonico,
+      medicamento: gatilhoInfo.medicamento,
+      medicamentoBruto: gatilhoInfo.original,
+      doseMedicamento: gatilhoInfo.dose,
+      doseUnidade: gatilhoInfo.unidade,
       status: SCHEMA.STATUS.INVESTIGACAO,
       sla: 'AGUARDANDO SLA',
       farmaceutico: farmaceuticoResponsavel,
@@ -447,12 +461,15 @@ function registrarTriagem(dados, token) {
             triadoPor: triadoPorFinal
           };
         } else {
+          const medResolvido = _resolverGatilhoCanonico_(dados.medSuspeito);
           atualizacao = {
-            medicamento: String(dados.medSuspeito || '').toUpperCase().trim(),
+            medicamento: medResolvido.medicamento || String(dados.medSuspeito || '').toUpperCase().trim(),
             status: SCHEMA.STATUS.INVESTIGACAO,
             dataTriagem: dataTriagemFinal,
             triadoPor: triadoPorFinal
           };
+          if (medResolvido.dose) atualizacao.doseMedicamento = medResolvido.dose;
+          if (medResolvido.unidade) atualizacao.doseUnidade = medResolvido.unidade;
         }
 
         fsTxnUpdateDoc_(ctx, SCHEMA.FS.CASOS, dados.idCaso, atualizacao);

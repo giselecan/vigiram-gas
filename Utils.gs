@@ -404,6 +404,140 @@ function _atualizarSetoresEmPlanilha_(planilha, deParaChaves) {
 }
 
 /**
+ * Extrai dose numérica e unidade de medida a partir de uma descrição de medicamento.
+ * Ex.: "FITOMENADIONA 10MG/ML AMPOLA" -> { dose: "10", unidade: "MG/ML" }
+ * Ex.: "DIPIRONA 500 MG" -> { dose: "500", unidade: "MG" }
+ * @param {string} texto
+ * @returns {{ dose: string, unidade: string }}
+ */
+function _extrairDoseEUnidadeMedicamento_(texto) {
+  if (!texto) return { dose: '', unidade: '' };
+  const str = String(texto).toUpperCase().trim();
+  const regex = /(?:\b(\d+(?:[.,]\d+)?)\s*(MG\/ML|MCG\/ML|UG\/ML|UI\/ML|G\/ML|MEQ\/ML|MMOL\/ML|MG|MCG|UG|UI|G|KG|ML)(?!\w)|\b(\d+(?:[.,]\d+)?)\s*(%))/i;
+  const match = str.match(regex);
+  if (match) {
+    const dose = (match[1] || match[3] || '').replace(',', '.');
+    const unidade = (match[2] || match[4] || '').toUpperCase();
+    return { dose, unidade };
+  }
+  return { dose: '', unidade: '' };
+}
+
+/**
+ * Limpa apresentações, formas farmacêuticas, embalagens, dosagens e sais de um medicamento
+ * para isolar a substância ativa principal / princípio ativo.
+ * @param {string} texto
+ * @returns {string}
+ */
+function _limparFormaDosagemMedicamento_(texto) {
+  if (!texto) return '';
+  let s = String(texto).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+
+  // 1. Remove doses e concentrações
+  s = s.replace(/\b\d+(?:[.,]\d+)?\s*(?:MG\/ML|MCG\/ML|UG\/ML|UI\/ML|G\/ML|MEQ\/ML|MMOL\/ML|MG|MCG|UG|UI|G|KG|ML)(?!\w)/gi, ' ');
+  s = s.replace(/\b\d+(?:[.,]\d+)?\s*%/g, ' ');
+  s = s.replace(/\b\d+(?:[.,]\d+)?\b/g, ' ');
+
+  // 2. Remove formas farmacêuticas e embalagens
+  s = s.replace(/\b(?:SOLUCAO|SOL|INJETAVEL|INJ|AMPOLA|AMP|FRASCO|FR|COMPRIMIDO|COMP|CAPSULA|CAP|GOTAS|GTS|XAROPE|SUSPENSAO|SUSP|POMADA|CREME|PO|LIOFILIZADO|LIOF|BOLUS|INFUSAO|ENV|ENVELOPE|SERINGA|SER|ADESIVO|TUBO|BISNAGA|COLIRIO|SPRAY|AEROSOL|DRAGEA|DRG)\b/gi, ' ');
+
+  // 3. Remove sais e qualificadores químicos comuns
+  s = s.replace(/\b(?:CLORIDRATO|SULFATO|FOSFATO|ACETATO|CITRATO|CARBONATO|BROMETO|GLUCONATO|MALEATO|SUCCINATO|LACTATO|SODICA|SODICO|POTASSICA|POTASSICO|DIPOTASSICO|DISSODICO|CALCICA|CALCICO|MONOIDRATADA|MONOHIDRATADA|DIIDRATADA|HEMIDRATADA|BASE)\b/gi, ' ');
+
+  // 4. Remove conectivos e pontuação
+  s = s.replace(/\b(?:DE|DO|DA|COM|E|EM|POR|PARA)\b/gi, ' ');
+  s = s.replace(/[-_./\\(),;:+*#&%]+/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+
+  return s;
+}
+
+/**
+ * Normaliza a chave para comparação estrita de medicamentos (sem acento, sem pontuação, sem espaços).
+ * @param {string} str
+ * @returns {string}
+ */
+function _normalizarChaveGatilho_(str) {
+  return String(str || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .trim();
+}
+
+/**
+ * Normaliza as iniciais do paciente para formato padronizado com pontos (ex.: "J.S." ou "J.C.A.").
+ * @param {string} iniciais
+ * @returns {string}
+ */
+function _normalizarIniciaisPaciente_(iniciais) {
+  const str = String(iniciais || '').trim().toUpperCase();
+  if (!str) return 'N/I';
+
+  // Se já for formado por letras soltas ou separadas por espaço/ponto (ex: "J S", "J. S.", "J.S.", "JS")
+  const letras = str.replace(/[^A-Z]/g, '');
+  if (letras.length >= 2 && letras.length <= 4 && (str.length <= 8 || str.indexOf('.') !== -1)) {
+    return letras.split('').join('.') + '.';
+  }
+
+  // Se vier como nome completo por acidente (ex: "JOAO SILVA"), extrai iniciais
+  const partes = str.split(/\s+/).filter(function (p) {
+    return p.length > 2 || !/^(DE|DA|DO|DOS|DAS)$/i.test(p);
+  });
+  if (partes.length >= 2) {
+    return (partes[0][0] + '.' + partes[partes.length - 1][0] + '.');
+  }
+
+  return str.replace(/\s+/g, ' ');
+}
+
+/**
+ * Normaliza o campo sexo para 'M' ou 'F' (alinhado ao E2B D.5 administrativeGenderCode).
+ * @param {string} sexo
+ * @returns {string}
+ */
+function _normalizarSexo_(sexo) {
+  if (!sexo) return '';
+  const s = String(sexo).trim().toUpperCase();
+  if (s === 'M' || s === 'MASCULINO' || s === '1') return 'M';
+  if (s === 'F' || s === 'FEMININO'  || s === '2') return 'F';
+  return '';
+}
+
+/**
+ * Atualiza em lote o nome do medicamento na coluna MEDICAMENTO (coluna 12) da planilha DB_Casos_RAM.
+ * @param {Sheet} planilha
+ * @param {{ [chaveNormalizada: string]: string }} deParaChaves
+ * @returns {number} quantidade de células atualizadas
+ */
+function _atualizarMedicamentosEmPlanilha_(planilha, deParaChaves) {
+  if (!planilha || !deParaChaves || Object.keys(deParaChaves).length === 0) return 0;
+  const ultimaLinha = planilha.getLastRow();
+  if (ultimaLinha < 2) return 0;
+
+  const range = planilha.getRange(2, SCHEMA.COL.MEDICAMENTO, ultimaLinha - 1, 1);
+  const valores = range.getValues();
+  let atualizados = 0;
+
+  for (let i = 0; i < valores.length; i++) {
+    const atual = String(valores[i][0] || '').trim();
+    if (!atual) continue;
+    const chave = _normalizarChaveGatilho_(atual);
+    if (deParaChaves[chave] && deParaChaves[chave] !== atual) {
+      valores[i][0] = deParaChaves[chave];
+      atualizados++;
+    }
+  }
+
+  if (atualizados > 0) {
+    comTrava_(function () {
+      range.setValues(valores);
+    });
+  }
+  return atualizados;
+}
+
+/**
  * Remove linhas do Sheets pelo ID_CASO de forma em lote rápida e segura contra deslocamento.
  * Lê a coluna A (ID_CASO) uma única vez, identifica as linhas e exclui em blocos
  * contíguos ordenados do fim para o início (deleteRows) sob comTrava_.

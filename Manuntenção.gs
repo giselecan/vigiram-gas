@@ -716,3 +716,46 @@ function harmonizarSetores_dryRun_() {
 function EXECUTAR_HARMONIZACAO_SETORES_DRY_RUN_() {
   harmonizarSetores_dryRun_();
 }
+
+/**
+ * Executa simulação (Dry Run) da normalização de todos os casos antigos do sistema.
+ */
+function normalizarGatilhosECasosExistentes_dryRun_() {
+  Logger.log('=== DRY-RUN: Normalização de Casos e Gatilhos de Ponta a Ponta ===');
+  const mapaSinonimos = _mapaSinonimosSetores_();
+  const mapaGatilhos  = _mapaGatilhosCadastrados_();
+  const todosCasos    = fsListarTodos_(SCHEMA.FS.CASOS);
+
+  Logger.log('Total de casos analisados: ' + todosCasos.length);
+  let paraAlterar = 0;
+
+  todosCasos.forEach(function (c) {
+    const setorAtual = String(c.setor || '').trim();
+    const medAtual   = String(c.medicamento || '').trim();
+    const setorCanonico = _resolverSetorCanonico_(setorAtual, mapaSinonimos);
+    const gatilhoInfo   = _resolverGatilhoCanonico_(medAtual, mapaGatilhos);
+
+    const mudouSetor = setorAtual && setorCanonico && setorAtual !== setorCanonico;
+    const mudouMed   = medAtual && gatilhoInfo.medicamento && medAtual !== gatilhoInfo.medicamento;
+
+    if (mudouSetor || mudouMed) {
+      paraAlterar++;
+      Logger.log(`[CASO ${c.id}]`);
+      if (mudouSetor) Logger.log(`   • Setor: "${setorAtual}" -> "${setorCanonico}"`);
+      if (mudouMed) Logger.log(`   • Medicamento: "${medAtual}" -> "${gatilhoInfo.medicamento}" (Dose: ${gatilhoInfo.dose} ${gatilhoInfo.unidade})`);
+    }
+  });
+
+  Logger.log('---------------------------------------------------------');
+  Logger.log(`Total de casos que seriam normalizados: ${paraAlterar} de ${todosCasos.length}`);
+  return { total: todosCasos.length, alterados: paraAlterar };
+}
+
+function EXECUTAR_NORMALIZACAO_GATILHOS_CASOS_() {
+  const prop = PropertiesService.getScriptProperties().getProperty('PERMITIR_NORMALIZACAO_MASSA');
+  if (prop !== 'SIM') {
+    Logger.log('Para executar de fato, adicione a Propriedade do Script PERMITIR_NORMALIZACAO_MASSA=SIM');
+    return normalizarGatilhosECasosExistentes_dryRun_();
+  }
+  return normalizarCasosAntigosDePontaAPonta(null);
+}
