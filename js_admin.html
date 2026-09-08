@@ -271,12 +271,18 @@ function _renderSecaoGatilhos(area, geracao) {
             <button onclick="_cfgMapearSetoresGatilhos(this)"
                     class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #2563eb !important; color: #ffffff !important;"
-                    title="Mapeia todos os setores que já receberam gatilhos na Busca Ativa e adiciona os faltantes">
+                    title="Mapeia todos os setores que já receberam gatilhos na Busca Ativa e associa por similaridade">
               <i class="fas fa-sync-alt"></i> Mapear Setores dos Gatilhos
             </button>
-            <button onclick="_abrirSecaoTopo('configuracoes', 'setores')"
+            <button onclick="_cfgHarmonizarSetoresGeral(this)"
                     class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #9333ea !important; color: #ffffff !important;"
+                    title="Harmoniza e padroniza os nomes de setores com grafias divergentes em todo o sistema">
+              <i class="fas fa-layer-group"></i> Harmonizar Setores
+            </button>
+            <button onclick="_abrirSecaoTopo('configuracoes', 'setores')"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #4f46e5 !important; color: #ffffff !important;"
                     title="Acessar gerenciamento e ativação/desativação de varredura por setor">
               <i class="fas fa-hospital"></i> Gerenciar Setores
             </button>
@@ -1075,8 +1081,14 @@ function _renderSecaoSetores(area, geracao) {
             <button onclick="_cfgMapearSetoresGatilhos(this)"
                     class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #2563eb !important; color: #ffffff !important;"
-                    title="Mapeia todos os setores que já receberam gatilhos na Busca Ativa e adiciona os que faltam">
-              <i class="fas fa-sync-alt"></i> Mapear Setores dos Gatilhos
+                    title="Mapeia setores dos gatilhos e associa por similaridade aos setores cadastrados">
+              <i class="fas fa-sync-alt"></i> Mapear dos Gatilhos
+            </button>
+            <button onclick="_cfgHarmonizarSetoresGeral(this)"
+                    class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #9333ea !important; color: #ffffff !important;"
+                    title="Varre todo o sistema (Casos, Usuários e Setores) para padronizar nomes de setores com grafias divergentes">
+              <i class="fas fa-layer-group"></i> Harmonizar Nomes de Setores
             </button>
             <button onclick="_cfgVerificarSetoresDuplicados(this)"
                     class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
@@ -1407,7 +1419,7 @@ function _cfgMesclarSetoresDuplicados(duplicados) {
 }
 
 // ─────────────────────────────────────────────────────────
-// CONFIGURAÇÕES · SETORES · MAPEAMENTO DOS GATILHOS
+// CONFIGURAÇÕES · SETORES · MAPEAMENTO DOS GATILHOS (POR SIMILARIDADE)
 // ─────────────────────────────────────────────────────────
 
 function _cfgMapearSetoresGatilhos(btn) {
@@ -1420,31 +1432,74 @@ function _cfgMapearSetoresGatilhos(btn) {
         return;
       }
 
-      const listaHtml = res.faltantes.map(f => `
-        <div class="flex items-center justify-between py-2 border-b border-gray-100 text-sm">
-          <div>
-            <span class="font-bold text-gray-800">${escapeHtml(f.nomeExibicao)}</span>
-            <span class="text-xs text-gray-400 block">${f.totalCasos} caso(s) registrado(s)</span>
-          </div>
-          <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${f.totalPendentes > 0 ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}">
-            ${f.totalPendentes} pendente(s)
-          </span>
-        </div>
-      `).join('');
+      const opcoesCadastrados = (res.setoresCadastradosNomes || [])
+        .map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+
+      const cardsHtml = res.faltantes.map((f, idx) => {
+        const temSugestao = !!f.sugestao;
+        const sugerido = temSugestao ? f.sugestao.setorCadastrado : '';
+        const pct = temSugestao ? f.sugestao.porcentagem : 0;
+        const motivo = temSugestao ? f.sugestao.motivo : '';
+
+        return `
+          <div class="border ${temSugestao ? 'border-blue-200 bg-blue-50/40' : 'border-gray-200 bg-gray-50/50'} rounded-xl p-3 text-sm space-y-2.5" data-idx="${idx}">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-gray-800 text-base">${escapeHtml(f.nomeExibicao)}</span>
+                ${temSugestao ? `<span class="bg-blue-100 text-blue-800 text-[11px] font-bold px-2 py-0.5 rounded-full border border-blue-200"><i class="fas fa-layer-group mr-1"></i>${pct}% similar (${escapeHtml(motivo)})</span>` : ''}
+              </div>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${f.totalPendentes > 0 ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}">
+                ${f.totalCasos} caso(s) · ${f.totalPendentes} pendente(s)
+              </span>
+            </div>
+
+            <div class="space-y-1.5 pl-1">
+              ${temSugestao ? `
+                <label class="flex items-start gap-2.5 cursor-pointer text-xs">
+                  <input type="radio" name="decisao_map_${idx}" value="associar" checked onchange="_cfgToggleOutroSetor(${idx}, false)" class="mt-0.5 text-teal-600 focus:ring-teal-500">
+                  <div>
+                    <span class="font-bold text-gray-800">Associar ao setor cadastrado: <span class="text-teal-700 underline font-extrabold">${escapeHtml(sugerido)}</span></span>
+                    <p class="text-gray-500 text-[11px]">Normaliza os ${f.totalCasos} caso(s) para "${escapeHtml(sugerido)}" e cadastra "${escapeHtml(f.nomeExibicao)}" como sinônimo automático para futuras varreduras.</p>
+                  </div>
+                </label>
+              ` : ''}
+
+              <label class="flex items-start gap-2.5 cursor-pointer text-xs">
+                <input type="radio" name="decisao_map_${idx}" value="novo" ${!temSugestao ? 'checked' : ''} onchange="_cfgToggleOutroSetor(${idx}, false)" class="mt-0.5 text-teal-600 focus:ring-teal-500">
+                <div>
+                  <span class="font-bold text-gray-800">Cadastrar como NOVO setor independente ("${escapeHtml(f.nomeExibicao)}")</span>
+                  <p class="text-gray-500 text-[11px]">Adiciona à lista de setores para gerenciar varredura e responsáveis de forma isolada.</p>
+                </div>
+              </label>
+
+              <label class="flex items-start gap-2.5 cursor-pointer text-xs">
+                <input type="radio" name="decisao_map_${idx}" value="outro" onchange="_cfgToggleOutroSetor(${idx}, true)" class="mt-0.5 text-teal-600 focus:ring-teal-500">
+                <div>
+                  <span class="font-bold text-gray-800">Associar a outro setor já existente…</span>
+                </div>
+              </label>
+            </div>
+
+            <div id="containerOutro_${idx}" class="hidden pl-6 pt-1">
+              <select id="selectOutro_${idx}" class="w-full border border-gray-300 rounded px-2.5 py-1.5 text-xs bg-white focus:ring-1 focus:ring-teal-500 outline-none">
+                <option value="">-- Selecione o setor de destino --</option>
+                ${opcoesCadastrados}
+              </select>
+            </div>
+          </div>`;
+      }).join('');
 
       _cfgAbrirSubModal(
-        `Setores dos Gatilhos (${res.faltantes.length} novo(s))`,
+        `Mapeamento de Setores dos Gatilhos (${res.faltantes.length})`,
         `<p class="text-xs text-gray-500 mb-2">
-           Os setores abaixo já receberam gatilhos da Busca Ativa (robô ETL), mas <b>ainda não constam no cadastro de setores</b>.
+           Identificamos setores nos casos de Busca Ativa que não constam exatamente no cadastro oficial. O sistema analisou similaridade fonética, siglas e variações:
          </p>
-         <p class="text-xs text-gray-500 mb-3">
-           Ao importá-los, eles aparecerão na tabela com a chave de <b>Varredura (Ativo/Inativo)</b> disponível para você ligar ou desligar.
-         </p>
-         <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50 mb-3">
-           ${listaHtml}
+         <div class="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+           ${cardsHtml}
          </div>`,
-        `Importar ${res.faltantes.length} Setor(es)`,
-        () => _cfgConfirmarImportacaoSetores(res.faltantes.map(f => f.nomeExibicao))
+        'Confirmar e Aplicar',
+        () => _cfgConfirmarAssociacaoSetores(res.faltantes),
+        'max-w-2xl'
       );
     })
     .withFailureHandler(err => {
@@ -1452,6 +1507,64 @@ function _cfgMapearSetoresGatilhos(btn) {
       mostrarToast('Erro ao mapear setores: ' + err.message, 'erro');
     })
     .mapearSetoresDosGatilhos(tokenSessao);
+}
+
+function _cfgToggleOutroSetor(idx, mostrar) {
+  const container = document.getElementById('containerOutro_' + idx);
+  if (container) {
+    if (mostrar) container.classList.remove('hidden');
+    else container.classList.add('hidden');
+  }
+}
+
+function _cfgConfirmarAssociacaoSetores(faltantes) {
+  const decisoes = [];
+  let erro = null;
+
+  faltantes.forEach((f, idx) => {
+    if (erro) return;
+    const selecionado = document.querySelector(`input[name="decisao_map_${idx}"]:checked`);
+    const tipo = selecionado ? selecionado.value : 'novo';
+
+    if (tipo === 'associar') {
+      const alvo = f.sugestao ? f.sugestao.setorCadastrado : '';
+      if (!alvo) { erro = `Setor "${f.nomeExibicao}" sem sugestão válida para associar.`; return; }
+      decisoes.push({ setorOriginal: f.nomeExibicao, tipo: 'associar', setorAlvo: alvo });
+    } else if (tipo === 'novo') {
+      decisoes.push({ setorOriginal: f.nomeExibicao, tipo: 'novo' });
+    } else if (tipo === 'outro') {
+      const select = document.getElementById('selectOutro_' + idx);
+      const alvo = select ? select.value.trim() : '';
+      if (!alvo) {
+        erro = `Selecione o setor de destino para "${f.nomeExibicao}".`;
+        return;
+      }
+      decisoes.push({ setorOriginal: f.nomeExibicao, tipo: 'associar', setorAlvo: alvo });
+    }
+  });
+
+  if (erro) {
+    mostrarToast(erro, 'erro');
+    return;
+  }
+
+  const btn = document.getElementById('cfgSubModalBtn');
+  _iniciarCarregando(btn);
+
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      _fecharSubModal();
+      mostrarToast(res.mensagem, 'sucesso');
+      invalidarConfigCache();
+      _abrirSecaoTopo('configuracoes', 'setores');
+      if (typeof carregarCasos === 'function') carregarCasos();
+    })
+    .withFailureHandler(err => {
+      _pararCarregando(btn);
+      mostrarToast('Erro ao associar setores: ' + err.message, 'erro');
+    })
+    .associarENormalizarSetoresDosGatilhos(decisoes, tokenSessao);
 }
 
 function _cfgConfirmarImportacaoSetores(nomes) {
@@ -1470,6 +1583,124 @@ function _cfgConfirmarImportacaoSetores(nomes) {
       mostrarToast('Erro ao importar setores: ' + err.message, 'erro');
     })
     .importarSetoresDosGatilhos(nomes, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// CONFIGURAÇÕES · HARMONIZAÇÃO GERAL DE SETORES (TODO O SISTEMA)
+// ─────────────────────────────────────────────────────────
+
+function _cfgHarmonizarSetoresGeral(btn) {
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      if (!res.grupos || !res.grupos.length) {
+        mostrarToast(`Todos os setores do sistema já estão 100% harmonizados e padronizados! (${res.estatisticas.totalSetoresCadastrados} setores cadastrados).`, 'sucesso');
+        return;
+      }
+
+      const cardsHtml = res.grupos.map((g, idx) => _cfgHtmlGrupoHarmonizacao(g, idx)).join('');
+
+      _cfgAbrirSubModal(
+        `Harmonização de Setores (${res.grupos.length} grupo(s) divergente(s))`,
+        `<div class="space-y-2 mb-3">
+           <p class="text-xs text-gray-600">
+             O sistema detectou variações de nomenclatura para os mesmos setores em <b>Casos</b>, <b>Usuários</b> e <b>Cadastro de Setores</b>.
+           </p>
+           <p class="text-xs text-gray-500">
+             Escolha a grafia oficial (canônica) para cada grupo. Ao confirmar, o sistema unificará todos os casos (Firestore e Planilha), perfis de usuários e setores, registrando as demais como sinônimos automáticos.
+           </p>
+         </div>
+         <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+           ${cardsHtml}
+         </div>`,
+        'Harmonizar em Todo o Sistema',
+        () => _cfgConfirmarHarmonizacaoGeral(res.grupos),
+        'max-w-2xl'
+      );
+    })
+    .withFailureHandler(err => {
+      _pararCarregando(btn);
+      mostrarToast('Erro ao diagnosticar setores: ' + err.message, 'erro');
+    })
+    .diagnosticarHarmonizacaoGeralSetores(tokenSessao);
+}
+
+function _cfgHtmlGrupoHarmonizacao(g, idx) {
+  const opcoesHtml = g.variacoes.map(v => {
+    const isSugestao = v.nome === g.sugestaoCanonica;
+    const badges = [];
+    if (v.origens.cadastrado) badges.push('<span class="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.5 rounded font-bold">Cadastro</span>');
+    if (v.origens.casos) badges.push(`<span class="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.5 rounded font-bold">${v.totalCasos} caso(s)</span>`);
+    if (v.origens.usuarios) badges.push(`<span class="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.5 rounded font-bold">${v.totalUsuarios} usuário(s)</span>`);
+
+    return `
+      <label class="flex items-center justify-between gap-2 p-2 rounded-lg border ${isSugestao ? 'border-teal-300 bg-white shadow-sm' : 'border-gray-200 bg-gray-50'} hover:bg-teal-50/50 cursor-pointer text-xs transition">
+        <div class="flex items-center gap-2">
+          <input type="radio" name="harm_canonico_${idx}" value="${escapeHtml(v.nome)}" ${isSugestao ? 'checked' : ''} class="text-teal-600 focus:ring-teal-500">
+          <span class="font-bold text-gray-800 text-sm">${escapeHtml(v.nome)}</span>
+          ${isSugestao ? '<span class="text-[10px] bg-teal-100 text-teal-800 font-bold px-1.5 py-0.5 rounded">Sugerido</span>' : ''}
+        </div>
+        <div class="flex items-center gap-1.5 flex-wrap justify-end">
+          ${badges.join('')}
+        </div>
+      </label>`;
+  }).join('');
+
+  return `
+    <div class="border border-purple-200 bg-purple-50/30 rounded-xl p-3.5 space-y-2.5" data-grupo-idx="${idx}">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <div>
+          <span class="text-xs font-bold uppercase text-purple-900 tracking-wider">Grupo: ${escapeHtml(g.grupoId)}</span>
+          <p class="text-[11px] text-gray-500">${escapeHtml(g.motivo)}</p>
+        </div>
+        <span class="text-xs font-bold text-purple-700 bg-purple-100 px-2.5 py-1 rounded-full">
+          Total: ${g.totalCasosGrupo} casos · ${g.totalUsuariosGrupo} usuários
+        </span>
+      </div>
+      <div class="space-y-1.5">
+        ${opcoesHtml}
+      </div>
+      <div class="pt-1 flex items-center gap-2 text-xs">
+        <label class="text-gray-500 whitespace-nowrap">Ou digitar outro nome oficial:</label>
+        <input type="text" id="harm_custom_${idx}" placeholder="Deixar em branco para usar a seleção acima"
+               class="flex-1 border border-gray-300 rounded px-2.5 py-1 text-xs bg-white focus:ring-1 focus:ring-purple-500 outline-none">
+      </div>
+    </div>`;
+}
+
+function _cfgConfirmarHarmonizacaoGeral(grupos) {
+  const plano = grupos.map((g, idx) => {
+    const inputCustom = document.getElementById('harm_custom_' + idx);
+    const radio = document.querySelector(`input[name="harm_canonico_${idx}"]:checked`);
+    const customNome = inputCustom ? inputCustom.value.trim() : '';
+    const nomeCanonico = customNome || (radio ? radio.value : g.sugestaoCanonica);
+    const variacoes = g.variacoes.map(v => v.nome);
+
+    return {
+      grupoId: g.grupoId,
+      nomeCanonico: nomeCanonico,
+      variacoesParaMesclar: variacoes
+    };
+  });
+
+  const btn = document.getElementById('cfgSubModalBtn');
+  _iniciarCarregando(btn);
+
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      _fecharSubModal();
+      mostrarToast(res.mensagem, 'sucesso');
+      invalidarConfigCache();
+      _abrirSecaoTopo('configuracoes', 'setores');
+      if (typeof carregarCasos === 'function') carregarCasos();
+    })
+    .withFailureHandler(err => {
+      _pararCarregando(btn);
+      mostrarToast('Erro ao harmonizar setores: ' + err.message, 'erro');
+    })
+    .executarHarmonizacaoGeralSetores(plano, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1653,14 +1884,14 @@ function _pararCarregando(btn) {
  * empurram os botões para fora da tela nem "estouram" o modal, em qualquer
  * altura de viewport (max-h-[92vh] com folga de 4vh para a margem do overlay).
  */
-function _cfgAbrirSubModal(titulo, conteudo, labelBtn, onConfirmar) {
+function _cfgAbrirSubModal(titulo, conteudo, labelBtn, onConfirmar, tamanhoModal = 'max-w-sm') {
   const anterior = document.getElementById('cfgSubModal');
   if (anterior) anterior.remove();
   const div = document.createElement('div');
   div.id = 'cfgSubModal';
   div.className = 'absolute inset-0 bg-black/50 flex items-center justify-center z-10 sm:rounded-2xl p-4';
   div.innerHTML = `
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm max-h-[92vh] flex flex-col fade-in">
+    <div class="bg-white rounded-xl shadow-2xl w-full ${tamanhoModal} max-h-[92vh] flex flex-col fade-in">
       <h3 class="text-base font-bold text-gray-800 px-6 pt-6 pb-3 border-b flex-shrink-0">${escapeHtml(titulo)}</h3>
       <div class="px-6 py-4 overflow-y-auto flex-1 min-h-0">${conteudo}</div>
       <div class="flex justify-end gap-3 px-6 pb-6 pt-3 border-t flex-shrink-0">

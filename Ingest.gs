@@ -100,6 +100,7 @@ function handleInsertDB(e) {
     // robô tenha varrido a dispensação. Lido UMA vez por lote (não por caso):
     // o ETL manda dezenas de casos por ciclo e isso é 1 leitura do Firestore.
     const setoresInativos = _setoresInativosMapa_();
+    const mapaSinonimos   = _mapaSinonimosSetores_();
     const descartadosPorSetor = {};
     const bloqueadosPorExclusao = [];
 
@@ -108,7 +109,8 @@ function handleInsertDB(e) {
 
       // Descarte por setor desativado ANTES do lookup de dedup — não faz
       // sentido gastar uma leitura do Firestore por caso que já vai fora.
-      const chaveSetor = _normalizarSetorComparacao_(caso.unidade_setor);
+      const setorCanonico = _resolverSetorCanonico_(caso.unidade_setor, mapaSinonimos);
+      const chaveSetor = _normalizarSetorComparacao_(setorCanonico);
       if (setoresInativos[chaveSetor]) {
         const nome = setoresInativos[chaveSetor];
         descartadosPorSetor[nome] = (descartadosPorSetor[nome] || 0) + 1;
@@ -166,7 +168,7 @@ function handleInsertDB(e) {
         iniciais: caso.iniciais_paciente,
         nascimento: caso.data_nascimento,
         sexo: caso.sexo || '',
-        setor: caso.unidade_setor,
+        setor: setorCanonico,
         medicamento: caso.medicamento_suspeito,
         status: SCHEMA.STATUS.TRIAGEM,
         sla: caso.prazo_sla,
@@ -182,7 +184,7 @@ function handleInsertDB(e) {
 
       paraInserir.push({ id: idLimpo, objeto: objetoCaso });
 
-      const setor = String(caso.unidade_setor).toUpperCase().trim();
+      const setor = String(setorCanonico).toUpperCase().trim();
       if (!novosCasosPorSetor[setor]) novosCasosPorSetor[setor] = [];
       novosCasosPorSetor[setor].push(caso);
     });

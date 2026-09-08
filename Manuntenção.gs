@@ -686,5 +686,33 @@ function EXECUTAR_MAPEAR_SETORES_GATILHOS_DRY_RUN_() {
   mapearSetoresDosGatilhos_dryRun_();
 }
 
+/**
+ * Executa o diagnóstico de harmonização e similaridade de setores no Editor do Apps Script.
+ * Apenas analisa e exibe o log dos grupos divergentes encontrados, sem alterar nada.
+ */
+function harmonizarSetores_dryRun_() {
+  Logger.log('=== DRY-RUN: Diagnóstico de Harmonização Geral de Setores ===');
+  const diag = diagnosticarHarmonizacaoGeralSetores(null);
+  Logger.log('Total de setores distintos no sistema: ' + diag.totalDistintos);
+  Logger.log('Total de grupos com grafias divergentes: ' + diag.totalGruposDivergentes);
 
+  if (!diag.grupos || !diag.grupos.length) {
+    Logger.log('Parabéns! Todos os setores no sistema estão unificados e padronizados.');
+    return diag;
+  }
 
+  diag.grupos.forEach(function (g, idx) {
+    Logger.log('---------------------------------------------------------');
+    Logger.log(`GRUPO ${idx + 1} -> Sugestão Canônica: [${g.sugestaoCanonica}] (${g.totalCasosGrupo} caso(s), ${g.totalUsuariosGrupo} usuário(s))`);
+    g.variantes.forEach(function (v) {
+      const matchInfo = v.similaridade ? ` (Similaridade: ${v.similaridade.porcentagem}% - ${v.similaridade.motivo})` : '';
+      Logger.log(`   • "${v.nome}" | Casos: ${v.totalCasos} | Usuários: ${v.totalUsuarios} | Cadastrado: ${v.jaCadastrado ? 'SIM' : 'NÃO'}${matchInfo}`);
+    });
+  });
+
+  return diag;
+}
+
+function EXECUTAR_HARMONIZACAO_SETORES_DRY_RUN_() {
+  harmonizarSetores_dryRun_();
+}

@@ -204,9 +204,203 @@ function _normalizarSetorComparacao_(setor) {
   return String(setor || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toUpperCase()
-    .replace(/[-_]+/g, ' ')
+    .replace(/[-_./]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Remove zeros à esquerda em números dentro do nome do setor (ex.: "POSTO 01" -> "POSTO 1").
+ * @param {string} s
+ * @returns {string}
+ */
+function _padronizarZerosSetor_(s) {
+  return String(s || '').replace(/\b0+(\d+)\b/g, function (m, p1) { return p1; });
+}
+
+/**
+ * Dicionário de abreviações e termos hospitalares comuns no Brasil.
+ */
+const _ABREVIACOES_HOSPITALARES_ = {
+  'UTI': 'UNIDADE DE TERAPIA INTENSIVA',
+  'CTI': 'CENTRO DE TERAPIA INTENSIVA',
+  'CC': 'CENTRO CIRURGICO',
+  'CO': 'CENTRO OBSTETRICO',
+  'CM': 'CLINICA MEDICA',
+  'PED': 'PEDIATRIA',
+  'PEDIATRICA': 'PEDIATRIA',
+  'PEDIATRICO': 'PEDIATRIA',
+  'NEO': 'NEONATAL',
+  'NEONATOLOGIA': 'NEONATAL',
+  'ENF': 'ENFERMARIA',
+  'AD': 'ADULTO',
+  'PS': 'PRONTO SOCORRO',
+  'PA': 'PRONTO ATENDIMENTO',
+  'AMB': 'AMBULATORIO',
+  'APTO': 'APARTAMENTO',
+  'APTOS': 'APARTAMENTO',
+  'CIR': 'CIRURGIA',
+  'CIRURGICA': 'CIRURGIA',
+  'CIRURGICO': 'CIRURGIA',
+  'OBST': 'OBSTETRICIA',
+  'OBSTETRICA': 'OBSTETRICIA',
+  'RPA': 'RECUPERACAO POS ANESTESICA',
+  'HD': 'HOSPITAL DIA',
+  'ISOL': 'ISOLAMENTO',
+  'CARDIO': 'CARDIOLOGIA',
+  'ONCO': 'ONCOLOGIA'
+};
+
+/**
+ * Expande tokens abreviados para seu equivalente completo.
+ * @param {string} str
+ * @returns {string}
+ */
+function _expandirAbreviacoesSetor_(str) {
+  const tokens = String(str || '').split(' ');
+  return tokens.map(function (t) { return _ABREVIACOES_HOSPITALARES_[t] || t; }).join(' ');
+}
+
+/**
+ * Distância de Levenshtein entre duas strings.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function _levenshteinDistancia_(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const d = [];
+  for (let i = 0; i <= m; i++) d[i] = [i];
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+    }
+  }
+  return d[m][n];
+}
+
+/**
+ * Calcula a similaridade entre dois nomes de setores considerando acentuação,
+ * pontuação, zeros à esquerda, abreviações hospitalares e sobreposição de termos.
+ * @param {string} s1
+ * @param {string} s2
+ * @returns {{ score: number, porcentagem: number, motivo: string, compativel: boolean }}
+ */
+function _calcularSimilaridadeSetores_(s1, s2) {
+  const n1 = _normalizarSetorComparacao_(s1);
+  const n2 = _normalizarSetorComparacao_(s2);
+  if (!n1 || !n2) return { score: 0, porcentagem: 0, motivo: 'Vazio', compativel: false };
+  if (n1 === n2) return { score: 1.0, porcentagem: 100, motivo: 'Grafia idêntica', compativel: true };
+
+  const z1 = _padronizarZerosSetor_(n1);
+  const z2 = _padronizarZerosSetor_(n2);
+  if (z1 === z2) return { score: 0.98, porcentagem: 98, motivo: 'Numeração equivalente (com/sem zeros)', compativel: true };
+
+  const e1 = _expandirAbreviacoesSetor_(z1);
+  const e2 = _expandirAbreviacoesSetor_(z2);
+  if (e1 === e2) return { score: 0.95, porcentagem: 95, motivo: 'Abreviação hospitalar compatível', compativel: true };
+
+  const t1 = z1.split(' ').filter(Boolean);
+  const t2 = z2.split(' ').filter(Boolean);
+  const set1 = {}; t1.forEach(function (x) { set1[x] = true; });
+  const set2 = {}; t2.forEach(function (x) { set2[x] = true; });
+  let inter = 0;
+  t1.forEach(function (x) { if (set2[x]) inter++; });
+  const dice = (2 * inter) / (t1.length + t2.length);
+
+  const menor = t1.length <= t2.length ? t1 : t2;
+  const maiorSet = t1.length <= t2.length ? set2 : set1;
+  const contemTodos = menor.length > 0 && menor.every(function (x) { return !!maiorSet[x]; });
+
+  const maxLen = Math.max(z1.length, z2.length);
+  const dist = _levenshteinDistancia_(z1, z2);
+  const levSim = maxLen > 0 ? (1 - dist / maxLen) : 0;
+
+  const maxLenExp = Math.max(e1.length, e2.length);
+  const distExp = _levenshteinDistancia_(e1, e2);
+  const levSimExp = maxLenExp > 0 ? (1 - distExp / maxLenExp) : 0;
+
+  let score = Math.max(levSim, levSimExp, dice);
+  let motivo = 'Similaridade léxica';
+
+  if (contemTodos) {
+    const scoreSubset = 0.82 + (0.13 * (inter / Math.max(t1.length, t2.length)));
+    if (scoreSubset > score) {
+      score = scoreSubset;
+      motivo = 'Contém todos os termos chave';
+    }
+  }
+
+  if (levSim >= 0.85) motivo = 'Grafia muito próxima (variação/digitação)';
+  else if (dice >= 0.70) motivo = 'Termos quase idênticos';
+
+  score = Math.round(score * 100) / 100;
+  const pct = Math.round(score * 100);
+  return { score: score, porcentagem: pct, motivo: motivo, compativel: pct >= 55 };
+}
+
+/**
+ * Encontra a melhor correspondência para um setor dentro de uma lista de candidatos.
+ * @param {string} setorAlvo
+ * @param {string[]} listaCandidatos
+ * @returns {{ setor: string, score: number, porcentagem: number, motivo: string, compativel: boolean } | null}
+ */
+function _encontrarMelhorCorrespondenciaSetor_(setorAlvo, listaCandidatos) {
+  if (!setorAlvo || !Array.isArray(listaCandidatos) || !listaCandidatos.length) return null;
+  let melhor = null;
+  for (let i = 0; i < listaCandidatos.length; i++) {
+    const cand = String(listaCandidatos[i] || '').trim();
+    if (!cand) continue;
+    const sim = _calcularSimilaridadeSetores_(setorAlvo, cand);
+    if (!melhor || sim.score > melhor.score) {
+      melhor = {
+        setor: cand,
+        score: sim.score,
+        porcentagem: sim.porcentagem,
+        motivo: sim.motivo,
+        compativel: sim.compativel
+      };
+    }
+  }
+  return (melhor && melhor.compativel) ? melhor : null;
+}
+
+/**
+ * Atualiza em lote o nome do setor na coluna SETOR (coluna 11) da planilha DB_Casos_RAM.
+ * Lê a coluna 11 uma única vez, aplica o de-para em memória e regrava de uma só vez sob trava.
+ * @param {Sheet} planilha
+ * @param {{ [chaveNormalizada: string]: string }} deParaChaves — mapa chave_normalizada -> nome_canonico
+ * @returns {number} quantidade de células atualizadas
+ */
+function _atualizarSetoresEmPlanilha_(planilha, deParaChaves) {
+  if (!planilha || !deParaChaves || Object.keys(deParaChaves).length === 0) return 0;
+  const ultimaLinha = planilha.getLastRow();
+  if (ultimaLinha < 2) return 0;
+
+  const range = planilha.getRange(2, SCHEMA.COL.SETOR, ultimaLinha - 1, 1);
+  const valores = range.getValues();
+  let atualizados = 0;
+
+  for (let i = 0; i < valores.length; i++) {
+    const atual = String(valores[i][0] || '').trim();
+    if (!atual) continue;
+    const chave = _normalizarSetorComparacao_(atual);
+    if (deParaChaves[chave] && deParaChaves[chave] !== atual) {
+      valores[i][0] = deParaChaves[chave];
+      atualizados++;
+    }
+  }
+
+  if (atualizados > 0) {
+    comTrava_(function () {
+      range.setValues(valores);
+    });
+  }
+  return atualizados;
 }
 
 /**

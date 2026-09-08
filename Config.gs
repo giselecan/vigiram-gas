@@ -263,6 +263,17 @@ function _setoresInativosMapa_() {
       const chave = _normalizarSetorComparacao_(setor);
       if (!estado[chave]) estado[chave] = { algumAtivo: false, nome: setor };
       if (_ativoComoBooleano_(doc.ativo)) estado[chave].algumAtivo = true;
+
+      // Também mapeia sinônimos registrados para o mesmo estado de ativo/inativo
+      if (Array.isArray(doc.sinonimos)) {
+        doc.sinonimos.forEach(function (sin) {
+          const s = String(sin || '').trim();
+          if (!s) return;
+          const chaveSin = _normalizarSetorComparacao_(s);
+          if (!estado[chaveSin]) estado[chaveSin] = { algumAtivo: false, nome: setor };
+          if (_ativoComoBooleano_(doc.ativo)) estado[chaveSin].algumAtivo = true;
+        });
+      }
     });
   } catch (e) {
     console.error('_setoresInativosMapa_: falha ao ler Firestore, nenhum setor será bloqueado — ' + e.message);
@@ -274,6 +285,49 @@ function _setoresInativosMapa_() {
     if (!estado[chave].algumAtivo) inativos[chave] = estado[chave].nome;
   });
   return inativos;
+}
+
+/**
+ * Monta o mapa [chaveNormalizada] -> nomeCanonico, cobrindo os nomes oficiais
+ * e todos os sinônimos registrados em cada documento de SCHEMA.FS.SETORES.
+ * @returns {{ [chave: string]: string }}
+ */
+function _mapaSinonimosSetores_() {
+  const mapa = {};
+  try {
+    const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+    docs.forEach(function (doc) {
+      const setor = String(doc.setor || '').trim();
+      if (!setor) return;
+      const chaveOficial = _normalizarSetorComparacao_(setor);
+      mapa[chaveOficial] = setor;
+
+      if (Array.isArray(doc.sinonimos)) {
+        doc.sinonimos.forEach(function (sin) {
+          const s = String(sin || '').trim();
+          if (s) mapa[_normalizarSetorComparacao_(s)] = setor;
+        });
+      }
+    });
+  } catch (e) {
+    console.error('_mapaSinonimosSetores_: falha ao ler Firestore — ' + e.message);
+  }
+  return mapa;
+}
+
+/**
+ * Resolve o nome canônico oficial de um setor a partir de qualquer variação ou sinônimo cadastrado.
+ * Se não houver sinônimo cadastrado, retorna o próprio nome formatado em maiúsculas limpo.
+ * @param {string} setorBruto
+ * @param {{ [chave: string]: string }=} mapaPreCarregado
+ * @returns {string}
+ */
+function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
+  const limpo = String(setorBruto || '').trim();
+  if (!limpo) return '';
+  const mapa = mapaPreCarregado || _mapaSinonimosSetores_();
+  const chave = _normalizarSetorComparacao_(limpo);
+  return mapa[chave] || limpo.toUpperCase();
 }
 
 /**

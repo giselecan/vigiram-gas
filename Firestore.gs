@@ -243,6 +243,34 @@ function fsBatchDelete_(colecao, ids) {
   }
 }
 
+/**
+ * Atualiza campos parciais de VÁRIOS documentos em lote com updateMask num único :commit.
+ * Evita sobrescrever outros campos do documento.
+ * @param {string} colecao
+ * @param {Array<{id: string, dados: object}>} itens
+ * @param {string[]} camposMascara - array de nomes de campos (ex: ['setor'])
+ */
+function fsBatchUpdate_(colecao, itens, camposMascara) {
+  if (!itens || !itens.length) return;
+  const cfg = fsConfig_();
+  const prefixo = 'projects/' + cfg.projectId + '/databases/' + cfg.databaseId + '/documents/' + colecao + '/';
+  const url = fsUrlBase_() + ':commit';
+  const CHUNK = 400;
+
+  for (let i = 0; i < itens.length; i += CHUNK) {
+    const writes = itens.slice(i, i + CHUNK).map(function (it) {
+      const writeObj = {
+        update: { name: prefixo + it.id, fields: fsParaCamposFs_(it.dados) }
+      };
+      if (camposMascara && camposMascara.length) {
+        writeObj.updateMask = { fieldPaths: camposMascara };
+      }
+      return writeObj;
+    });
+    fsFetch_('post', url, { writes: writes });
+  }
+}
+
 function fsUpdateDoc_(colecao, id, camposParciais) {
   const nomesCampos = Object.keys(camposParciais);
   const mascara = nomesCampos.map(function (c) { return 'updateMask.fieldPaths=' + encodeURIComponent(c); }).join('&');

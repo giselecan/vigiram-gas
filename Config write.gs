@@ -191,8 +191,10 @@ function mapearSetoresDosGatilhos(token) {
     const todosCasos = fsListarTodos_(SCHEMA.FS.CASOS);
     const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
 
-    // 1) Mapa dos setores já cadastrados
+    // 1) Mapa dos setores já cadastrados e sinônimos
     const cadastradosPorChave = {};
+    const listaCadastradosNomes = [];
+
     docsSetores.forEach(function (d) {
       const s = String(d.setor || '').trim();
       if (!s) return;
@@ -203,11 +205,32 @@ function mapearSetoresDosGatilhos(token) {
           ativo: _ativoComoBooleano_(d.ativo),
           responsaveis: []
         };
+        if (listaCadastradosNomes.indexOf(s) === -1) {
+          listaCadastradosNomes.push(s);
+        }
       }
       if (d.farmaceuticoResponsavel) {
         cadastradosPorChave[chave].responsaveis.push(d.farmaceuticoResponsavel);
       }
+
+      // Também registra sinônimos conhecidos
+      if (Array.isArray(d.sinonimos)) {
+        d.sinonimos.forEach(function (sin) {
+          const sSin = String(sin || '').trim();
+          if (!sSin) return;
+          const chaveSin = _normalizarSetorComparacao_(sSin);
+          if (!cadastradosPorChave[chaveSin]) {
+            cadastradosPorChave[chaveSin] = {
+              nome: s,
+              ativo: _ativoComoBooleano_(d.ativo),
+              responsaveis: []
+            };
+          }
+        });
+      }
     });
+
+    listaCadastradosNomes.sort(function (a, b) { return a.localeCompare(b); });
 
     // 2) Mapeia setores encontrados nos casos/gatilhos
     const setoresGatilhos = {};
@@ -242,19 +265,524 @@ function mapearSetoresDosGatilhos(token) {
       return a.nomeExibicao.localeCompare(b.nomeExibicao);
     });
 
+    // 3) Para os faltantes, busca correspondência por similaridade
     const faltantes = listaSetoresGatilhos.filter(function (s) {
       return !s.jaCadastrado;
+    });
+
+    faltantes.forEach(function (f) {
+      const match = _encontrarMelhorCorrespondenciaSetor_(f.nomeExibicao, listaCadastradosNomes);
+      if (match) {
+        f.sugestao = {
+          setorCadastrado: match.setor,
+          score: match.score,
+          porcentagem: match.porcentagem,
+          motivo: match.motivo
+        };
+        f.tipoMatch = 'SIMILAR';
+      } else {
+        f.sugestao = null;
+        f.tipoMatch = 'NOVO';
+      }
     });
 
     return {
       sucesso: true,
       totalCasosAnalisados: todosCasos.length,
       totalSetoresGatilhos: listaSetoresGatilhos.length,
-      totalSetoresCadastrados: Object.keys(cadastradosPorChave).length,
+      totalSetoresCadastrados: listaCadastradosNomes.length,
+      setoresCadastradosNomes: listaCadastradosNomes,
       setores: listaSetoresGatilhos,
       faltantes: faltantes
     };
   });
+}
+
+/**
+ * Associa setores dos gatilhos a setores cadastrados (normalizando em todo o sistema)
+ * e/ou importa novos setores para SCHEMA.FS.SETORES.
+ *
+ * @param {Array<{setorOrigem: string, acao: 'associar'|'novo', setorDestino?: string}>} decisoes
+ * @param {string} token
+ */
+function associarENormalizarSetoresDosGatilhos(decisoes, token) {
+  return _comAdmin_(token, function () {
+    if (!Array.isArray(decisoes) || !decisoes.length) {
+      return { sucesso: false, mensagem: 'Nenhuma decisão informada para processar.' };
+    }
+
+    const dePara = {};
+    const sinonimosPorDestino = {};
+    const paraCriarNovos = [];
+
+    decisoes.forEach(function (d) {
+      const origem = String(d.setorOrigem || '').trim().toUpperCase();
+      const acao = String(d.acao || 'novo').toLowerCase();
+      const destino = String(d.setorDestino || '').trim().toUpperCase();
+
+      if (!origem) return;
+
+      if (acao === 'associar' && destino && destino !== origem) {
+        const chaveOrigem = _normalizarSetorComparacao_(origem);
+        dePara[chaveOrigem] = destino;
+        if (!sinonimosPorDestino[destino]) sinonimosPorDestino[destino] = [];
+        if (sinonimosPorDestino[destino].indexOf(origem) === -1) {
+          sinonimosPorDestino[destino].push(origem);
+        }
+      } else if (acao === 'novo') {
+        paraCriarNovos.push(origem);
+      }
+    });
+
+    let casosAtualizados = 0;
+    let usuariosAtualizados = 0;
+    let novosCadastrados = 0;
+    const setoresAssociados = Object.keys(dePara).length;
+
+    // 1) Se houver associações, atualiza casos em Firestore e Sheets
+    if (setoresAssociados > 0) {
+      const resCasos = _atualizarSetorNosCasosESheets_(dePara);
+      casosAtualizados = resCasos.casosAtualizadosFs;
+
+      // Atualiza usuários
+      usuariosAtualizados = _atualizarUsuariosParaSetoresCanonicos_(dePara);
+
+      // Registra sinônimos nos setores de destino no Firestore
+      const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
+      const docsPorChave = {};
+      docsSetores.forEach(function (doc) {
+        if (!doc.setor) return;
+        const chave = _normalizarSetorComparacao_(doc.setor);
+        if (!docsPorChave[chave]) docsPorChave[chave] = [];
+        docsPorChave[chave].push(doc);
+      });
+
+      Object.keys(sinonimosPorDestino).forEach(function (destino) {
+        const chaveDestino = _normalizarSetorComparacao_(destino);
+        const docs = docsPorChave[chaveDestino] || [];
+        const novosSin = sinonimosPorDestino[destino];
+
+        if (docs.length > 0) {
+          docs.forEach(function (doc) {
+            const sinonimosAtuais = Array.isArray(doc.sinonimos) ? doc.sinonimos.slice() : [];
+            novosSin.forEach(function (s) {
+              if (s !== destino && sinonimosAtuais.indexOf(s) === -1) {
+                sinonimosAtuais.push(s);
+              }
+            });
+            fsUpdateDoc_(SCHEMA.FS.SETORES, doc._id, { sinonimos: sinonimosAtuais });
+          });
+        }
+      });
+
+      // Remove documentos de setores que eram variantes antigas
+      Object.keys(dePara).forEach(function (chaveOrigem) {
+        const docsOrigem = docsPorChave[chaveOrigem] || [];
+        docsOrigem.forEach(function (doc) {
+          fsDeleteDoc_(SCHEMA.FS.SETORES, doc._id);
+        });
+      });
+    }
+
+    // 2) Se houver novos setores para cadastrar
+    if (paraCriarNovos.length > 0) {
+      const docsExistentes = fsListarTodos_(SCHEMA.FS.SETORES);
+      const existentesChaves = {};
+      docsExistentes.forEach(function (d) {
+        if (d.setor) existentesChaves[_normalizarSetorComparacao_(d.setor)] = true;
+      });
+
+      const batchCriar = [];
+      paraCriarNovos.forEach(function (novo) {
+        const chave = _normalizarSetorComparacao_(novo);
+        if (existentesChaves[chave]) return;
+        existentesChaves[chave] = true;
+        const id = _idDocSetor_(novo, '');
+        batchCriar.push({
+          id: id,
+          dados: {
+            setor: novo,
+            ativo: true,
+            farmaceuticoResponsavel: '',
+            emailResponsavel: '',
+            sinonimos: []
+          }
+        });
+        novosCadastrados++;
+      });
+
+      if (batchCriar.length > 0) {
+        fsBatchSet_(SCHEMA.FS.SETORES, batchCriar);
+      }
+    }
+
+    invalidarConfig();
+    invalidarCasosCache_();
+
+    fsRegistrarLog_('SETORES_ASSOCIADOS_E_NORMALIZADOS', 'setores',
+      setoresAssociados + ' setor(es) associado(s), ' + casosAtualizados + ' caso(s) normalizado(s), ' +
+      novosCadastrados + ' novo(s) setor(es) cadastrado(s) | Por: ' + __emailSessaoAtual);
+
+    return {
+      sucesso: true,
+      setoresAssociados: setoresAssociados,
+      casosAtualizados: casosAtualizados,
+      usuariosAtualizados: usuariosAtualizados,
+      novosCadastrados: novosCadastrados,
+      mensagem: `Processamento concluído com sucesso: ${casosAtualizados} caso(s) normalizado(s) em todo o sistema, ${setoresAssociados} associação(ões) registrada(s) e ${novosCadastrados} novo(s) setor(es) cadastrado(s).`
+    };
+  });
+}
+
+/**
+ * Diagnostica divergências e similaridades em nomes de setores em TODO o sistema:
+ * lê SCHEMA.FS.SETORES, SCHEMA.FS.CASOS e SCHEMA.FS.USUARIOS, agrupando
+ * grafias similares e sugerindo o padrão canônico para unificação.
+ * @returns {{ sucesso: boolean, totalDistintos: number, totalGruposDivergentes: number, grupos: Array<object>, setoresCadastradosNomes: string[] }}
+ */
+function diagnosticarHarmonizacaoGeralSetores(token) {
+  return _comAdmin_(token, function () {
+    const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
+    const casosResumo = fsListarComMascara_(SCHEMA.FS.CASOS, ['setor']);
+    const docsUsuarios = fsListarTodos_(SCHEMA.FS.USUARIOS);
+
+    // 1) Contagem por nome de setor em cada fonte
+    const setoresInfo = {};
+    const listaCadastradosNomes = [];
+
+    docsSetores.forEach(function (d) {
+      const s = String(d.setor || '').trim();
+      if (!s) return;
+      const chave = _normalizarSetorComparacao_(s);
+      if (!setoresInfo[chave]) {
+        setoresInfo[chave] = {
+          nome: s,
+          totalCasos: 0,
+          totalUsuarios: 0,
+          jaCadastrado: true,
+          ativo: _ativoComoBooleano_(d.ativo)
+        };
+        if (listaCadastradosNomes.indexOf(s) === -1) listaCadastradosNomes.push(s);
+      } else {
+        setoresInfo[chave].jaCadastrado = true;
+        if (_ativoComoBooleano_(d.ativo)) setoresInfo[chave].ativo = true;
+      }
+    });
+
+    listaCadastradosNomes.sort(function (a, b) { return a.localeCompare(b); });
+
+    casosResumo.forEach(function (c) {
+      const s = String(c.setor || '').trim();
+      if (!s) return;
+      const chave = _normalizarSetorComparacao_(s);
+      if (!setoresInfo[chave]) {
+        setoresInfo[chave] = {
+          nome: s.toUpperCase(),
+          totalCasos: 0,
+          totalUsuarios: 0,
+          jaCadastrado: false,
+          ativo: false
+        };
+      }
+      setoresInfo[chave].totalCasos++;
+    });
+
+    docsUsuarios.forEach(function (u) {
+      const setoresUser = Array.isArray(u.setores) ? u.setores : [];
+      setoresUser.forEach(function (s) {
+        const limpo = String(s || '').trim();
+        if (!limpo) return;
+        const chave = _normalizarSetorComparacao_(limpo);
+        if (!setoresInfo[chave]) {
+          setoresInfo[chave] = {
+            nome: limpo.toUpperCase(),
+            totalCasos: 0,
+            totalUsuarios: 0,
+            jaCadastrado: false,
+            ativo: false
+          };
+        }
+        setoresInfo[chave].totalUsuarios++;
+      });
+    });
+
+    const listaDistintos = Object.values(setoresInfo);
+
+    // 2) Agrupa por similaridade
+    const ordenados = listaDistintos.slice().sort(function (a, b) {
+      if (a.jaCadastrado !== b.jaCadastrado) return a.jaCadastrado ? -1 : 1;
+      return b.totalCasos - a.totalCasos;
+    });
+
+    const grupos = [];
+    const alocados = {};
+
+    for (let i = 0; i < ordenados.length; i++) {
+      const itemA = ordenados[i];
+      const chaveA = _normalizarSetorComparacao_(itemA.nome);
+      if (alocados[chaveA]) continue;
+
+      const grupoAtual = [itemA];
+      alocados[chaveA] = true;
+
+      for (let j = i + 1; j < ordenados.length; j++) {
+        const itemB = ordenados[j];
+        const chaveB = _normalizarSetorComparacao_(itemB.nome);
+        if (alocados[chaveB]) continue;
+
+        let ehSimilar = false;
+        let melhorSim = null;
+
+        for (let k = 0; k < grupoAtual.length; k++) {
+          const sim = _calcularSimilaridadeSetores_(grupoAtual[k].nome, itemB.nome);
+          if (sim.compativel && sim.porcentagem >= 60) {
+            ehSimilar = true;
+            if (!melhorSim || sim.porcentagem > melhorSim.porcentagem) {
+              melhorSim = sim;
+            }
+          }
+        }
+
+        if (ehSimilar) {
+          itemB.similaridade = melhorSim;
+          grupoAtual.push(itemB);
+          alocados[chaveB] = true;
+        }
+      }
+
+      if (grupoAtual.length > 1) {
+        const cadastradoAtivo = grupoAtual.find(function (g) { return g.jaCadastrado && g.ativo; });
+        const cadastrado = grupoAtual.find(function (g) { return g.jaCadastrado; });
+        const maiorCasos = grupoAtual.slice().sort(function (a, b) { return b.totalCasos - a.totalCasos; })[0];
+        const sugestao = cadastradoAtivo ? cadastradoAtivo.nome : (cadastrado ? cadastrado.nome : maiorCasos.nome);
+
+        grupos.push({
+          sugestaoCanonica: sugestao,
+          totalCasosGrupo: grupoAtual.reduce(function (acc, g) { return acc + (g.totalCasos || 0); }, 0),
+          totalUsuariosGrupo: grupoAtual.reduce(function (acc, g) { return acc + (g.totalUsuarios || 0); }, 0),
+          variantes: grupoAtual
+        });
+      }
+    }
+
+    return {
+      sucesso: true,
+      totalDistintos: listaDistintos.length,
+      totalGruposDivergentes: grupos.length,
+      grupos: grupos,
+      setoresCadastradosNomes: listaCadastradosNomes
+    };
+  });
+}
+
+/**
+ * Executa a harmonização e padronização dos nomes de setores em TODO o sistema:
+ * Atualiza Firestore SCHEMA.FS.CASOS, Planilha Sheets (coluna 11), Firestore SCHEMA.FS.USUARIOS
+ * e consolida SCHEMA.FS.SETORES registrando sinônimos.
+ *
+ * @param {Array<{nomeCanonico: string, variantes: string[]}>} plano
+ * @param {string} token
+ */
+function executarHarmonizacaoGeralSetores(plano, token) {
+  return _comAdmin_(token, function () {
+    if (!Array.isArray(plano) || !plano.length) {
+      return { sucesso: false, mensagem: 'Nenhum grupo informado para harmonizar.' };
+    }
+
+    const dePara = {};
+    const sinonimosPorCanonico = {};
+
+    plano.forEach(function (item) {
+      const canonico = String(item.nomeCanonico || '').trim().toUpperCase();
+      const variantes = Array.isArray(item.variantes) ? item.variantes : [];
+      if (!canonico || !variantes.length) return;
+
+      if (!sinonimosPorCanonico[canonico]) sinonimosPorCanonico[canonico] = [];
+
+      variantes.forEach(function (v) {
+        const vLimpo = String(v || '').trim().toUpperCase();
+        if (!vLimpo || vLimpo === canonico) return;
+        const chave = _normalizarSetorComparacao_(vLimpo);
+        dePara[chave] = canonico;
+        if (sinonimosPorCanonico[canonico].indexOf(vLimpo) === -1) {
+          sinonimosPorCanonico[canonico].push(vLimpo);
+        }
+      });
+    });
+
+    const totalVariantesParaMudar = Object.keys(dePara).length;
+    if (totalVariantesParaMudar === 0) {
+      return { sucesso: true, mensagem: 'Todos os nomes já estavam idênticos aos canônicos.' };
+    }
+
+    // 1) Atualiza casos_ram no Firestore e na Planilha
+    const resCasos = _atualizarSetorNosCasosESheets_(dePara);
+
+    // 2) Atualiza usuários no Firestore
+    const usuariosAtualizados = _atualizarUsuariosParaSetoresCanonicos_(dePara);
+
+    // 3) Consolida SCHEMA.FS.SETORES
+    const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
+    const docsPorChave = {};
+    docsSetores.forEach(function (doc) {
+      if (!doc.setor) return;
+      const chave = _normalizarSetorComparacao_(doc.setor);
+      if (!docsPorChave[chave]) docsPorChave[chave] = [];
+      docsPorChave[chave].push(doc);
+    });
+
+    let setoresConsolidados = 0;
+
+    Object.keys(sinonimosPorCanonico).forEach(function (canonico) {
+      const chaveCanonico = _normalizarSetorComparacao_(canonico);
+      const docs = docsPorChave[chaveCanonico] || [];
+      const sinAdicionais = sinonimosPorCanonico[canonico];
+
+      if (docs.length > 0) {
+        docs.forEach(function (doc) {
+          const sinAtuais = Array.isArray(doc.sinonimos) ? doc.sinonimos.slice() : [];
+          sinAdicionais.forEach(function (s) {
+            if (s !== canonico && sinAtuais.indexOf(s) === -1) {
+              sinAtuais.push(s);
+            }
+          });
+          fsUpdateDoc_(SCHEMA.FS.SETORES, doc._id, { sinonimos: sinAtuais, ativo: true });
+        });
+      } else {
+        const id = _idDocSetor_(canonico, '');
+        fsSetDoc_(SCHEMA.FS.SETORES, id, {
+          setor: canonico,
+          ativo: true,
+          farmaceuticoResponsavel: '',
+          emailResponsavel: '',
+          sinonimos: sinAdicionais
+        });
+      }
+      setoresConsolidados++;
+    });
+
+    // Remove documentos de setores que eram variantes antigas
+    let docsRemovidos = 0;
+    Object.keys(dePara).forEach(function (chaveVariante) {
+      const docs = docsPorChave[chaveVariante] || [];
+      docs.forEach(function (doc) {
+        const chaveDoc = _normalizarSetorComparacao_(doc.setor);
+        if (dePara[chaveDoc]) {
+          fsDeleteDoc_(SCHEMA.FS.SETORES, doc._id);
+          docsRemovidos++;
+        }
+      });
+    });
+
+    invalidarConfig();
+    invalidarCasosCache_();
+
+    fsRegistrarLog_('SETORES_HARMONIZADOS_GERAL', 'setores',
+      `${plano.length} grupo(s) harmonizado(s), ${resCasos.casosAtualizadosFs} caso(s) atualizado(s) no Firestore, ` +
+      `${resCasos.casosAtualizadosSheets} na planilha, ${usuariosAtualizados} usuário(s) realinhado(s) | Por: ${__emailSessaoAtual}`);
+
+    return {
+      sucesso: true,
+      gruposProcessados: plano.length,
+      casosAtualizadosFs: resCasos.casosAtualizadosFs,
+      casosAtualizadosSheets: resCasos.casosAtualizadosSheets,
+      usuariosAtualizados: usuariosAtualizados,
+      setoresConsolidados: setoresConsolidados,
+      docsRemovidos: docsRemovidos,
+      mensagem: `Harmonização concluída com sucesso! ${resCasos.casosAtualizadosFs} caso(s) padronizado(s) no banco, ` +
+        `${resCasos.casosAtualizadosSheets} na planilha, ${usuariosAtualizados} usuário(s) realinhado(s) e ` +
+        `${plano.length} grupo(s) unificado(s) em todo o sistema.`
+    };
+  });
+}
+
+/**
+ * Atualiza o campo `setor` de todos os casos em Firestore e na planilha
+ * de acordo com o dicionário dePara ({ [chaveNormalizada]: nomeCanonico }).
+ * @param {{ [chaveNormalizada: string]: string }} dePara
+ * @returns {{ casosAtualizadosFs: number, casosAtualizadosSheets: number }}
+ */
+function _atualizarSetorNosCasosESheets_(dePara) {
+  if (!dePara || Object.keys(dePara).length === 0) {
+    return { casosAtualizadosFs: 0, casosAtualizadosSheets: 0 };
+  }
+
+  // 1) Firestore SCHEMA.FS.CASOS
+  const casosResumo = fsListarComMascara_(SCHEMA.FS.CASOS, ['setor']);
+  const paraAtualizar = [];
+
+  casosResumo.forEach(function (c) {
+    const s = String(c.setor || '').trim();
+    if (!s) return;
+    const chave = _normalizarSetorComparacao_(s);
+    if (dePara[chave] && dePara[chave] !== s) {
+      paraAtualizar.push({
+        id: c._id,
+        dados: { setor: dePara[chave] }
+      });
+    }
+  });
+
+  if (paraAtualizar.length > 0) {
+    fsBatchUpdate_(SCHEMA.FS.CASOS, paraAtualizar, ['setor']);
+    invalidarCasosCache_();
+  }
+
+  // 2) Google Sheets DB_Casos_RAM (coluna 11)
+  let atualizadosSheets = 0;
+  try {
+    const ss = getPlanilha_();
+    if (ss) {
+      const sheet = ss.getSheetByName(SCHEMA.PLANILHA.CASOS);
+      if (sheet) {
+        atualizadosSheets = _atualizarSetoresEmPlanilha_(sheet, dePara);
+      }
+    }
+  } catch (e) {
+    console.error('Erro ao atualizar setores na planilha: ' + e.message);
+  }
+
+  return {
+    casosAtualizadosFs: paraAtualizar.length,
+    casosAtualizadosSheets: atualizadosSheets
+  };
+}
+
+/**
+ * Atualiza os setores atribuídos a usuários trocando qualquer variante antiga pelo nome canônico.
+ * @param {{ [chaveNormalizada: string]: string }} dePara
+ * @returns {number} quantidade de usuários atualizados
+ */
+function _atualizarUsuariosParaSetoresCanonicos_(dePara) {
+  if (!dePara || !Object.keys(dePara).length) return 0;
+  const usuarios = fsListarTodos_(SCHEMA.FS.USUARIOS);
+  let atualizados = 0;
+
+  usuarios.forEach(function (u) {
+    const atuais = Array.isArray(u.setores) ? u.setores : [];
+    if (!atuais.length) return;
+
+    let mudou = false;
+    const vistos = {};
+    const novo = [];
+
+    atuais.forEach(function (s) {
+      const chave = _normalizarSetorComparacao_(s);
+      const final = dePara[chave] ? dePara[chave] : String(s || '').trim().toUpperCase();
+      if (dePara[chave] && dePara[chave] !== s) mudou = true;
+      if (final && !vistos[final]) {
+        vistos[final] = true;
+        novo.push(final);
+      }
+    });
+
+    if (mudou) {
+      fsUpdateDoc_(SCHEMA.FS.USUARIOS, u._id, { setores: novo });
+      atualizados++;
+    }
+  });
+
+  return atualizados;
 }
 
 /**
