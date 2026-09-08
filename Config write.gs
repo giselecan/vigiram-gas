@@ -1403,7 +1403,7 @@ function excluirGatilho(id, token) {
  * @returns {{ sucesso: boolean, mensagem: string, alterados: number, casosSheetsAtualizados: number, totalCasos: number }}
  */
 function normalizarSetoresCasosDePontaAPonta(token) {
-  return _comAdmin_(token, function () {
+  function executar() {
     // 1. Assegura que os setores essenciais de UTI (I, II, III e IV) estão devidamente mapeados
     garantirSetoresUtiCadastrados(token);
 
@@ -1432,7 +1432,7 @@ function normalizarSetoresCasosDePontaAPonta(token) {
           dados: {
             setor: setorCanonico,
             auditoria: {
-              atualizadoPor: 'Normalização Setores (' + __emailSessaoAtual + ')',
+              atualizadoPor: 'Normalização Setores (' + (__emailSessaoAtual || 'SISTEMA') + ')',
               atualizadoEm: agora
             }
           }
@@ -1461,7 +1461,7 @@ function normalizarSetoresCasosDePontaAPonta(token) {
       invalidarCasosCache_();
 
       fsRegistrarLog_('NORMALIZACAO_SETORES_GERAL', 'setores',
-        paraAtualizarFirestore.length + ' caso(s) tiveram setor normalizado em Firestore e Sheets | Por: ' + __emailSessaoAtual);
+        paraAtualizarFirestore.length + ' caso(s) tiveram setor normalizado em Firestore e Sheets | Por: ' + (__emailSessaoAtual || 'SISTEMA'));
     }
 
     return {
@@ -1471,7 +1471,24 @@ function normalizarSetoresCasosDePontaAPonta(token) {
       casosSheetsAtualizados: casosSheetsAtualizados,
       totalCasos: todosCasos.length
     };
-  });
+  }
+
+  if (token) {
+    return _comAdmin_(token, executar);
+  }
+  const emailAntigo = __emailSessaoAtual;
+  try {
+    if (!__emailSessaoAtual) {
+      try {
+        __emailSessaoAtual = (Session.getActiveUser() && Session.getActiveUser().getEmail()) || 'sistema@hospital.local';
+      } catch (_) {
+        __emailSessaoAtual = 'sistema@hospital.local';
+      }
+    }
+    return executar();
+  } finally {
+    __emailSessaoAtual = emailAntigo;
+  }
 }
 
 /** Alias para compatibilidade retroativa */
@@ -1489,7 +1506,7 @@ function normalizarCasosAntigosDePontaAPonta(token) {
  * @returns {{ criados: number, atualizados: number, totalUtis: number }}
  */
 function garantirSetoresUtiCadastrados(token) {
-  return _comAdmin_(token, function () {
+  function executar() {
     const docs = fsListarTodos_(SCHEMA.FS.SETORES);
     const docsPorChave = {};
     docs.forEach(function (d) {
@@ -1602,7 +1619,12 @@ function garantirSetoresUtiCadastrados(token) {
       atualizados: atualizados,
       totalUtis: utisDefinicoes.length
     };
-  });
+  }
+
+  if (token) {
+    return _comAdmin_(token, executar);
+  }
+  return executar();
 }
 
 /** Alias para compatibilidade */
@@ -1617,7 +1639,7 @@ function garantirSetoresUtiAdultoCadastrados(token) {
  * @param {string} token
  */
 function normalizarSetoresBanco(token) {
-  return _comAdmin_(token, function () {
+  function executar() {
     const resUtis = garantirSetoresUtiCadastrados(token);
     const resCasos = normalizarSetoresCasosDePontaAPonta(token);
 
@@ -1627,7 +1649,12 @@ function normalizarSetoresBanco(token) {
       casos: resCasos,
       utis: resUtis
     };
-  });
+  }
+
+  if (token) {
+    return _comAdmin_(token, executar);
+  }
+  return executar();
 }
 
 /** Alias para chamadas existentes do frontend */
@@ -1644,7 +1671,7 @@ function normalizarBancoCompleto(token) {
  * @returns {{ sucesso: boolean, mensagem: string, alterados: number, totalDispensacoes: number, divergencias: any[] }}
  */
 function sincronizarSetoresComRelatorioSaidas(token, dataCorteStr) {
-  return _comAdmin_(token, function () {
+  function executar() {
     const res = varreduraGatilhosRetroativaRelatorioSaidas_(true, dataCorteStr || '01/09/2026');
     return {
       sucesso: true,
@@ -1654,6 +1681,11 @@ function sincronizarSetoresComRelatorioSaidas(token, dataCorteStr) {
       totalDispensacoes: res.totalDispensacoesMapeadas,
       divergencias: res.divergencias
     };
-  });
+  }
+
+  if (token) {
+    return _comAdmin_(token, executar);
+  }
+  return executar();
 }
 

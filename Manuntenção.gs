@@ -1033,6 +1033,9 @@ function varreduraGatilhosRetroativaRelatorioSaidas_(confirmar, dataCorteStr) {
 function EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_DRY_RUN_() {
   return varreduraGatilhosRetroativaRelatorioSaidas_(false, '01/09/2026');
 }
+function EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_DRY_RUN() {
+  return EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_DRY_RUN_();
+}
 
 /**
  * PASSO 2: Executa de fato a varredura retroativa a partir de 01/09/2026.
@@ -1041,4 +1044,7 @@ function EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_DRY_RUN_() {
  */
 function EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_01_09_() {
   return varreduraGatilhosRetroativaRelatorioSaidas_(true, '01/09/2026');
+}
+function EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_01_09() {
+  return EXECUTAR_VARREDURA_GATILHOS_RETROATIVA_01_09_();
 }
