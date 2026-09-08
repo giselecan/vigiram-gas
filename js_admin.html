@@ -1055,6 +1055,11 @@ function _renderSecaoSetores(area, geracao) {
             <i class="fas fa-hospital text-teal-600"></i> Setores e Responsáveis
           </h2>
           <div class="flex items-center gap-2">
+            <button onclick="_cfgMapearSetoresGatilhos(this)"
+                    class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition"
+                    title="Mapeia todos os setores que já receberam gatilhos na Busca Ativa e adiciona os que faltam">
+              <i class="fas fa-sync-alt"></i> Mapear Setores dos Gatilhos
+            </button>
             <button onclick="_cfgVerificarSetoresDuplicados(this)"
                     class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition">
               <i class="fas fa-clone"></i> Verificar Duplicados
@@ -1066,7 +1071,7 @@ function _renderSecaoSetores(area, geracao) {
           </div>
         </div>
         <p class="text-xs text-gray-400 mb-1">Mais de um farmacêutico no mesmo setor? Separe os nomes por vírgula e os e-mails por vírgula, NA MESMA ORDEM (ex.: "João Silva, Maria Souza" / "joao@x.com, maria@x.com").</p>
-        <p class="text-xs text-gray-400 mb-3"><i class="fas fa-circle-info mr-1"></i>Setor <b>Inativo</b> deixa de ser varrido: os gatilhos que o robô encontrar nele são descartados na entrada, não viram caso nem e-mail. O descarte fica registrado no log e na auditoria.</p>
+        <p class="text-xs text-gray-400 mb-3"><i class="fas fa-circle-info mr-1"></i>Setor <b>Inativo</b> deixa de ser varrido: os gatilhos que o robô encontrar nele são descartados na entrada, não viram caso nem e-mail. Ao desativar, você pode optar por limpar retroativamente os gatilhos pendentes.</p>
         <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
           <div class="overflow-x-auto">
           <table class="w-full text-left" id="tabelaSetores">
@@ -1122,7 +1127,7 @@ function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails, ativo) {
             <div class="flex items-center gap-2" title="Desligado: o robô para de gerar casos para este setor.">
               <label class="relative inline-flex items-center cursor-pointer">
                 <input type="checkbox" class="sr-only peer" data-campo="ativo" data-idx="${idx}" ${lig ? 'checked' : ''}
-                       onchange="_cfgAtualizarRotuloVarredura(${idx})">
+                       onchange="_cfgToggleVarreduraSetor(${idx})">
                 <div class="w-10 h-5 bg-gray-300 rounded-full peer peer-checked:bg-teal-600 transition-colors"></div>
                 <span class="absolute left-0.5 top-0.5 bg-white w-4 h-4 rounded-full shadow transition-transform peer-checked:translate-x-5"></span>
               </label>
@@ -1136,6 +1141,65 @@ function _cfgHtmlLinhaSetor(idx, setor, farmaceuticos, emails, ativo) {
             </button>
           </td>
         </tr>`;
+}
+
+/**
+ * Alterna a varredura do setor. Se estiver desativando, solicita confirmação
+ * de SIM ou NÃO para limpar retroativamente os gatilhos não triados pendentes daquele setor.
+ */
+function _cfgToggleVarreduraSetor(idx) {
+  const linha = document.getElementById('setorLinha_' + idx);
+  if (!linha) return;
+  const chk = linha.querySelector('input[data-campo="ativo"]');
+  const inputSetor = linha.querySelector('input[data-campo="setor"]');
+  const nomeSetor = inputSetor ? inputSetor.value.trim() : '';
+
+  if (!nomeSetor) {
+    _cfgAtualizarRotuloVarredura(idx);
+    return;
+  }
+
+  const lig = !!(chk && chk.checked);
+
+  if (!lig) {
+    // DESATIVANDO: Pergunta com Sim ou Não se deseja limpar retroativamente
+    const querLimpar = confirm(
+      `Você desativou a varredura do setor "${nomeSetor}".\n\n` +
+      `Deseja também LIMPAR RETROATIVAMENTE todos os gatilhos não triados (pendentes de triagem) deste setor?\n\n` +
+      `• Clique em [OK] para SIM (desativa e apaga os gatilhos não triados pendentes deste setor)\n` +
+      `• Clique em [Cancelar] para NÃO (apenas desativa a varredura, mantendo os existentes)`
+    );
+
+    _cfgAtualizarRotuloVarredura(idx);
+
+    google.script.run
+      .withSuccessHandler(res => {
+        mostrarToast(res.mensagem, 'sucesso');
+        if (res.apagados > 0 && typeof carregarCasos === 'function') {
+          carregarCasos(); // atualiza o Kanban se estiver aberto na sessão
+        }
+      })
+      .withFailureHandler(err => {
+        mostrarToast('Erro ao atualizar setor: ' + err.message, 'erro');
+        chk.checked = true;
+        _cfgAtualizarRotuloVarredura(idx);
+      })
+      .alternarStatusSetorComLimpeza(nomeSetor, false, querLimpar, tokenSessao);
+  } else {
+    // ATIVANDO: Reativa a varredura
+    _cfgAtualizarRotuloVarredura(idx);
+
+    google.script.run
+      .withSuccessHandler(res => {
+        mostrarToast(res.mensagem, 'sucesso');
+      })
+      .withFailureHandler(err => {
+        mostrarToast('Erro ao reativar setor: ' + err.message, 'erro');
+        chk.checked = false;
+        _cfgAtualizarRotuloVarredura(idx);
+      })
+      .alternarStatusSetorComLimpeza(nomeSetor, true, false, tokenSessao);
+  }
 }
 
 /** Sincroniza o rótulo Ativo/Inativo com o toggle da linha (só visual). */
@@ -1320,6 +1384,72 @@ function _cfgMesclarSetoresDuplicados(duplicados) {
     })
     .withFailureHandler(e => { _pararCarregando(btn); mostrarToast(e.message, 'erro'); })
     .mesclarSetoresDuplicados(payload, tokenSessao);
+}
+
+// ─────────────────────────────────────────────────────────
+// CONFIGURAÇÕES · SETORES · MAPEAMENTO DOS GATILHOS
+// ─────────────────────────────────────────────────────────
+
+function _cfgMapearSetoresGatilhos(btn) {
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      if (!res.faltantes || !res.faltantes.length) {
+        mostrarToast(`Todos os setores varridos já estão cadastrados (${res.totalSetoresGatilhos} setor(es) encontrados em ${res.totalCasosAnalisados} casos).`, 'sucesso');
+        return;
+      }
+
+      const listaHtml = res.faltantes.map(f => `
+        <div class="flex items-center justify-between py-2 border-b border-gray-100 text-sm">
+          <div>
+            <span class="font-bold text-gray-800">${escapeHtml(f.nomeExibicao)}</span>
+            <span class="text-xs text-gray-400 block">${f.totalCasos} caso(s) registrado(s)</span>
+          </div>
+          <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${f.totalPendentes > 0 ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-600'}">
+            ${f.totalPendentes} pendente(s)
+          </span>
+        </div>
+      `).join('');
+
+      _cfgAbrirSubModal(
+        `Setores dos Gatilhos (${res.faltantes.length} novo(s))`,
+        `<p class="text-xs text-gray-500 mb-2">
+           Os setores abaixo já receberam gatilhos da Busca Ativa (robô ETL), mas <b>ainda não constam no cadastro de setores</b>.
+         </p>
+         <p class="text-xs text-gray-500 mb-3">
+           Ao importá-los, eles aparecerão na tabela com a chave de <b>Varredura (Ativo/Inativo)</b> disponível para você ligar ou desligar.
+         </p>
+         <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50 mb-3">
+           ${listaHtml}
+         </div>`,
+        `Importar ${res.faltantes.length} Setor(es)`,
+        () => _cfgConfirmarImportacaoSetores(res.faltantes.map(f => f.nomeExibicao))
+      );
+    })
+    .withFailureHandler(err => {
+      _pararCarregando(btn);
+      mostrarToast('Erro ao mapear setores: ' + err.message, 'erro');
+    })
+    .mapearSetoresDosGatilhos(tokenSessao);
+}
+
+function _cfgConfirmarImportacaoSetores(nomes) {
+  const btn = document.getElementById('cfgSubModalBtn');
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      _fecharSubModal();
+      mostrarToast(res.mensagem, 'sucesso');
+      invalidarConfigCache();
+      _abrirSubConfig('setores');
+    })
+    .withFailureHandler(err => {
+      _pararCarregando(btn);
+      mostrarToast('Erro ao importar setores: ' + err.message, 'erro');
+    })
+    .importarSetoresDosGatilhos(nomes, tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────

@@ -398,48 +398,6 @@ function _gatilhosNaoTriadosAnterioresA_(dataCorteObj) {
 }
 
 /**
- * Remove linhas do Sheets pelo ID_CASO de forma em lote rápida e segura contra deslocamento.
- * @param {Sheet} planilha
- * @param {Set<string>} idsSet
- * @returns {number} quantidade de linhas excluídas
- */
-function _removerLinhasPlanilhaPorIds_(planilha, idsSet) {
-  if (!planilha || !idsSet || idsSet.size === 0) return 0;
-  const ultimaLinha = planilha.getLastRow();
-  if (ultimaLinha < 2) return 0;
-
-  const dadosIds = planilha.getRange(2, SCHEMA.COL.ID, ultimaLinha - 1, 1).getValues();
-  const linhasParaExcluir = [];
-
-  for (let i = 0; i < dadosIds.length; i++) {
-    const idNaLinha = String(dadosIds[i][0] || '').trim();
-    if (idNaLinha && idsSet.has(idNaLinha)) {
-      linhasParaExcluir.push(i + 2);
-    }
-  }
-
-  if (linhasParaExcluir.length === 0) return 0;
-
-  // Agrupa em blocos contíguos do fim para o início para não invalidar índices durante deleteRows
-  comTrava_(function () {
-    let i = linhasParaExcluir.length - 1;
-    while (i >= 0) {
-      let fim = linhasParaExcluir[i];
-      let qtd = 1;
-      while (i > 0 && linhasParaExcluir[i - 1] === fim - qtd) {
-        qtd++;
-        i--;
-      }
-      const inicio = fim - qtd + 1;
-      planilha.deleteRows(inicio, qtd);
-      i--;
-    }
-  });
-
-  return linhasParaExcluir.length;
-}
-
-/**
  * PASSO 1 (Gatilhos): DRY-RUN — lista e conta quantos gatilhos não triados
  * anteriores à data limite seriam excluídos. Não faz nenhuma alteração.
  * @param {string|Date=} dataCorte — padrão '01/09/2026'
@@ -626,5 +584,107 @@ function EXECUTAR_LIMPEZA_GATILHOS_ANTERIORES_01_09_() {
 function EXECUTAR_DRY_RUN_GATILHOS_ANTERIORES_01_09_() {
   limparGatilhosNaoTriadosAntigos_dryRun_('01/09/2026');
 }
+
+// ═════════════════════════════════════════════════════════════════════════
+// MAPEAMENTO DE SETORES DOS GATILHOS & LIMPEZA POR SETOR (EDITOR)
+// ═════════════════════════════════════════════════════════════════════════
+
+/**
+ * Mapeia todos os setores que já receberam gatilhos e lista quais estão
+ * cadastrados e quais estão faltantes em SCHEMA.FS.SETORES. Apenas loga.
+ */
+function mapearSetoresDosGatilhos_dryRun_() {
+  Logger.log('=== DRY-RUN: Mapeamento de Setores da Busca Ativa ===');
+  const todosCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+  const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
+
+  const cadastradosPorChave = {};
+  docsSetores.forEach(function (d) {
+    const s = String(d.setor || '').trim();
+    if (!s) return;
+    cadastradosPorChave[_normalizarSetorComparacao_(s)] = s;
+  });
+
+  const setoresGatilhos = {};
+  todosCasos.forEach(function (c) {
+    const s = String(c.setor || '').trim();
+    if (!s) return;
+    const chave = _normalizarSetorComparacao_(s);
+    if (!setoresGatilhos[chave]) {
+      setoresGatilhos[chave] = {
+        nome: s.toUpperCase(),
+        total: 0,
+        pendentes: 0,
+        jaCadastrado: !!cadastradosPorChave[chave]
+      };
+    }
+    setoresGatilhos[chave].total++;
+    const isGatilho = String(c.tipo || '').trim().toUpperCase() !== 'DE';
+    const st = String(c.status || '').trim().toUpperCase();
+    if (isGatilho && (st === String(SCHEMA.STATUS.TRIAGEM).toUpperCase() || st === 'PENDENTE TRIAGEM')) {
+      setoresGatilhos[chave].pendentes++;
+    }
+  });
+
+  const lista = Object.values(setoresGatilhos).sort(function (a, b) {
+    return a.nome.localeCompare(b.nome);
+  });
+
+  const faltantes = lista.filter(function (s) { return !s.jaCadastrado; });
+  const cadastrados = lista.filter(function (s) { return s.jaCadastrado; });
+
+  Logger.log('Total de casos analisados: ' + todosCasos.length);
+  Logger.log('Total de setores distintos encontrados nos casos: ' + lista.length);
+  Logger.log('Setores já cadastrados: ' + cadastrados.length);
+  Logger.log('Setores FALTANTES (não cadastrados): ' + faltantes.length);
+
+  if (faltantes.length > 0) {
+    Logger.log('--- SETORES FALTANTES ---');
+    faltantes.forEach(function (f) {
+      Logger.log('  [FALTANTE] ' + f.nome + ' | Total de casos: ' + f.total + ' | Pendentes de triagem: ' + f.pendentes);
+    });
+  } else {
+    Logger.log('Todos os setores encontrados já constam no cadastro.');
+  }
+
+  return { total: lista.length, faltantes: faltantes.length };
+}
+
+/**
+ * Importa todos os setores encontrados nos casos que ainda não estão cadastrados em SCHEMA.FS.SETORES.
+ * @param {boolean} confirmar — deve ser true
+ */
+function importarSetoresFaltantesDosGatilhos_(confirmar) {
+  if (confirmar !== true) {
+    throw new Error('Chame importarSetoresFaltantesDosGatilhos_(true) para confirmar a importação.');
+  }
+  return importarSetoresDosGatilhos(null, null);
+}
+
+/**
+ * Limpa retroativamente os gatilhos não triados (status TRIAGEM / tipo BA) de um setor específico.
+ * @param {string} nomeSetor
+ * @param {boolean} confirmar — deve ser true
+ */
+function limparGatilhosNaoTriadosPorSetor_(nomeSetor, confirmar) {
+  const props = PropertiesService.getScriptProperties();
+  const permitido = props.getProperty(_PROP_PERMITIR_LIMPEZA_GATILHOS) ||
+                    props.getProperty(_PROP_PERMITIR_LIMPEZA);
+  if (String(permitido).toUpperCase() !== 'SIM') {
+    throw new Error('Limpeza bloqueada: defina PERMITIR_LIMPEZA_GATILHOS = SIM nas propriedades do script.');
+  }
+  if (confirmar !== true) {
+    throw new Error('Chame limparGatilhosNaoTriadosPorSetor_("' + nomeSetor + '", true) para confirmar.');
+  }
+
+  const res = alternarStatusSetorComLimpeza(nomeSetor, false, true, null);
+  Logger.log('Resultado: ' + res.mensagem);
+  return res;
+}
+
+function EXECUTAR_MAPEAR_SETORES_GATILHOS_DRY_RUN_() {
+  mapearSetoresDosGatilhos_dryRun_();
+}
+
 
 

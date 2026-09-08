@@ -196,6 +196,49 @@ function _normalizarSetorComparacao_(setor) {
     .trim();
 }
 
+/**
+ * Remove linhas do Sheets pelo ID_CASO de forma em lote rápida e segura contra deslocamento.
+ * Lê a coluna A (ID_CASO) uma única vez, identifica as linhas e exclui em blocos
+ * contíguos ordenados do fim para o início (deleteRows) sob comTrava_.
+ * @param {Sheet} planilha
+ * @param {Set<string>} idsSet
+ * @returns {number} quantidade de linhas excluídas
+ */
+function _removerLinhasPlanilhaPorIds_(planilha, idsSet) {
+  if (!planilha || !idsSet || idsSet.size === 0) return 0;
+  const ultimaLinha = planilha.getLastRow();
+  if (ultimaLinha < 2) return 0;
+
+  const dadosIds = planilha.getRange(2, SCHEMA.COL.ID, ultimaLinha - 1, 1).getValues();
+  const linhasParaExcluir = [];
+
+  for (let i = 0; i < dadosIds.length; i++) {
+    const idNaLinha = String(dadosIds[i][0] || '').trim();
+    if (idNaLinha && idsSet.has(idNaLinha)) {
+      linhasParaExcluir.push(i + 2);
+    }
+  }
+
+  if (linhasParaExcluir.length === 0) return 0;
+
+  comTrava_(function () {
+    let i = linhasParaExcluir.length - 1;
+    while (i >= 0) {
+      let fim = linhasParaExcluir[i];
+      let qtd = 1;
+      while (i > 0 && linhasParaExcluir[i - 1] === fim - qtd) {
+        qtd++;
+        i--;
+      }
+      const inicio = fim - qtd + 1;
+      planilha.deleteRows(inicio, qtd);
+      i--;
+    }
+  });
+
+  return linhasParaExcluir.length;
+}
+
 /** Padroniza a saída das respostas HTTP da API em JSON. */
 function createJsonResponse(obj) {
   return ContentService

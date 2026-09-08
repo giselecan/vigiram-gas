@@ -177,6 +177,298 @@ function salvarSetores(setores, token) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MAPEAMENTO E SINCRONIZAÇÃO DE SETORES DOS GATILHOS (BUSCA ATIVA)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Mapeia todos os setores que já receberam gatilhos/casos na Busca Ativa (casos_ram)
+ * e compara com a coleção de setores cadastrados (SCHEMA.FS.SETORES).
+ * Identifica setores faltantes para que o admin possa gerenciar a varredura deles.
+ * @returns {{ sucesso: boolean, totalCasosAnalisados: number, totalSetoresGatilhos: number, totalSetoresCadastrados: number, setores: Array<object>, faltantes: Array<object> }}
+ */
+function mapearSetoresDosGatilhos(token) {
+  return _comAdmin_(token, function () {
+    const todosCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+    const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
+
+    // 1) Mapa dos setores já cadastrados
+    const cadastradosPorChave = {};
+    docsSetores.forEach(function (d) {
+      const s = String(d.setor || '').trim();
+      if (!s) return;
+      const chave = _normalizarSetorComparacao_(s);
+      if (!cadastradosPorChave[chave]) {
+        cadastradosPorChave[chave] = {
+          nome: s,
+          ativo: _ativoComoBooleano_(d.ativo),
+          responsaveis: []
+        };
+      }
+      if (d.farmaceuticoResponsavel) {
+        cadastradosPorChave[chave].responsaveis.push(d.farmaceuticoResponsavel);
+      }
+    });
+
+    // 2) Mapeia setores encontrados nos casos/gatilhos
+    const setoresGatilhos = {};
+    todosCasos.forEach(function (c) {
+      const s = String(c.setor || '').trim();
+      if (!s) return;
+      const chave = _normalizarSetorComparacao_(s);
+      if (!setoresGatilhos[chave]) {
+        setoresGatilhos[chave] = {
+          chave: chave,
+          nomeExibicao: s.toUpperCase(),
+          totalCasos: 0,
+          totalGatilhos: 0,
+          totalPendentes: 0,
+          jaCadastrado: !!cadastradosPorChave[chave],
+          ativo: cadastradosPorChave[chave] ? cadastradosPorChave[chave].ativo : true
+        };
+      }
+
+      setoresGatilhos[chave].totalCasos++;
+      const isGatilho = String(c.tipo || '').trim().toUpperCase() !== 'DE';
+      if (isGatilho) {
+        setoresGatilhos[chave].totalGatilhos++;
+        const st = String(c.status || '').trim().toUpperCase();
+        if (st === String(SCHEMA.STATUS.TRIAGEM).toUpperCase() || st === 'PENDENTE TRIAGEM') {
+          setoresGatilhos[chave].totalPendentes++;
+        }
+      }
+    });
+
+    const listaSetoresGatilhos = Object.values(setoresGatilhos).sort(function (a, b) {
+      return a.nomeExibicao.localeCompare(b.nomeExibicao);
+    });
+
+    const faltantes = listaSetoresGatilhos.filter(function (s) {
+      return !s.jaCadastrado;
+    });
+
+    return {
+      sucesso: true,
+      totalCasosAnalisados: todosCasos.length,
+      totalSetoresGatilhos: listaSetoresGatilhos.length,
+      totalSetoresCadastrados: Object.keys(cadastradosPorChave).length,
+      setores: listaSetoresGatilhos,
+      faltantes: faltantes
+    };
+  });
+}
+
+/**
+ * Importa para SCHEMA.FS.SETORES os setores encontrados nos gatilhos que ainda
+ * não estavam cadastrados, permitindo ativar/desativar a varredura de cada um.
+ * @param {string[]=} setoresNomes — array de nomes de setor (se vazio, importa todos os faltantes)
+ */
+function importarSetoresDosGatilhos(setoresNomes, token) {
+  return _comAdmin_(token, function () {
+    let nomes = Array.isArray(setoresNomes) ? setoresNomes : null;
+
+    if (!nomes || nomes.length === 0) {
+      const mapa = mapearSetoresDosGatilhos(token);
+      nomes = (mapa.faltantes || []).map(function (f) { return f.nomeExibicao; });
+    }
+
+    if (!nomes.length) {
+      return { sucesso: true, adicionados: 0, mensagem: 'Nenhum setor novo para importar.' };
+    }
+
+    const docsExistentes = fsListarTodos_(SCHEMA.FS.SETORES);
+    const existentesChaves = {};
+    docsExistentes.forEach(function (d) {
+      if (d.setor) existentesChaves[_normalizarSetorComparacao_(d.setor)] = true;
+    });
+
+    const itensBatch = [];
+    const nomesAdicionados = [];
+
+    nomes.forEach(function (nome) {
+      const limpo = String(nome || '').trim().toUpperCase();
+      if (!limpo) return;
+      const chave = _normalizarSetorComparacao_(limpo);
+      if (existentesChaves[chave]) return;
+
+      existentesChaves[chave] = true;
+      const id = _idDocSetor_(limpo, '');
+      itensBatch.push({
+        id: id,
+        dados: {
+          setor:                   limpo,
+          ativo:                   true, // Já nasce ativo para varredura
+          farmaceuticoResponsavel: '',
+          emailResponsavel:        ''
+        }
+      });
+      nomesAdicionados.push(limpo);
+    });
+
+    if (itensBatch.length > 0) {
+      fsBatchSet_(SCHEMA.FS.SETORES, itensBatch);
+      invalidarConfig();
+      fsRegistrarLog_('SETORES_IMPORTADOS_GATILHOS', 'setores',
+        itensBatch.length + ' setor(es) importados dos gatilhos: ' + nomesAdicionados.join(', ') + ' | Por: ' + __emailSessaoAtual);
+    }
+
+    return {
+      sucesso: true,
+      adicionados: itensBatch.length,
+      nomes: nomesAdicionados,
+      mensagem: itensBatch.length + ' setor(es) importado(s) dos gatilhos com sucesso.'
+    };
+  });
+}
+
+/**
+ * Alterna o status ativo/inativo da varredura de um setor. Se desativado E limparRetroativo === true,
+ * remove retroativamente todos os gatilhos não triados (pendentes) pertencentes àquele setor,
+ * gravando lápides em CASOS_EXCLUIDOS para impedir que o robô ETL os recrie.
+ *
+ * @param {string} nomeSetor
+ * @param {boolean} ativo
+ * @param {boolean} limparRetroativo — se true e ativo === false, limpa casos pendentes do setor
+ * @param {string} token
+ */
+function alternarStatusSetorComLimpeza(nomeSetor, ativo, limparRetroativo, token) {
+  return _comAdmin_(token, function () {
+    const setorLimpo = String(nomeSetor || '').trim();
+    if (!setorLimpo) throw new Error('Nome do setor não informado.');
+
+    const chaveAlvo = _normalizarSetorComparacao_(setorLimpo);
+    const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+    const docsSetor = docs.filter(function (d) {
+      return _normalizarSetorComparacao_(d.setor) === chaveAlvo;
+    });
+
+    if (docsSetor.length === 0) {
+      // Se não existia no cadastro, cria-o com o status solicitado
+      const idNovo = _idDocSetor_(setorLimpo.toUpperCase(), '');
+      fsSetDoc_(SCHEMA.FS.SETORES, idNovo, {
+        setor: setorLimpo.toUpperCase(),
+        ativo: !!ativo,
+        farmaceuticoResponsavel: '',
+        emailResponsavel: ''
+      });
+    } else {
+      // Atualiza o flag ativo em todos os documentos correspondentes do setor
+      docsSetor.forEach(function (d) {
+        fsUpdateDoc_(SCHEMA.FS.SETORES, d._id, {
+          ativo: !!ativo
+        });
+      });
+    }
+
+    invalidarConfig();
+
+    let apagadosFs = 0;
+    let falhasFs = 0;
+    let linhasSheet = 0;
+
+    // Se foi desativado E o usuário confirmou a limpeza retroativa
+    if (!ativo && limparRetroativo) {
+      const todosCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+      const casosAlvo = todosCasos.filter(function (c) {
+        if (!c.setor) return false;
+        if (_normalizarSetorComparacao_(c.setor) !== chaveAlvo) return false;
+        // Apenas não triados (PENDENTE TRIAGEM)
+        const st = String(c.status || '').trim().toUpperCase();
+        const pendente = (st === String(SCHEMA.STATUS.TRIAGEM).toUpperCase()) || (st === 'PENDENTE TRIAGEM');
+        if (!pendente) return false;
+        // Apenas gatilhos de Busca Ativa (preserva Demanda Espontânea)
+        if (String(c.tipo || '').trim().toUpperCase() === 'DE') return false;
+        return true;
+      });
+
+      if (casosAlvo.length > 0) {
+        const idsAlvo = casosAlvo.map(function (c) { return String(c._id || c.id).trim(); });
+
+        // 1. Grava lápides anti-ressurreição em CASOS_EXCLUIDOS
+        const lapides = casosAlvo.map(function (c) {
+          const id = String(c._id || c.id).trim();
+          return {
+            id: id,
+            dados: {
+              id: id,
+              motivo: 'Limpeza retroativa: setor "' + setorLimpo + '" desativado',
+              excluidoPor: __emailSessaoAtual || 'ADMIN',
+              excluidoEm: new Date(),
+              tipoOriginal: String(c.tipo || 'BA'),
+              statusOriginal: String(c.status || SCHEMA.STATUS.TRIAGEM)
+            }
+          };
+        });
+
+        try {
+          fsBatchSet_(SCHEMA.FS.CASOS_EXCLUIDOS, lapides);
+        } catch (eLapide) {
+          console.warn('Falha ao gravar lápides em lote: ' + eLapide.message);
+        }
+
+        // 2. Apaga do Firestore
+        try {
+          fsBatchDelete_(SCHEMA.FS.CASOS, idsAlvo);
+          apagadosFs = idsAlvo.length;
+        } catch (eBatch) {
+          idsAlvo.forEach(function (id) {
+            try {
+              fsDeleteDoc_(SCHEMA.FS.CASOS, id);
+              apagadosFs++;
+            } catch (eUnit) {
+              falhasFs++;
+            }
+          });
+        }
+
+        // 3. Remove linhas espelho do Sheets
+        try {
+          const planilha = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SCHEMA.ABAS.CASOS);
+          if (planilha) {
+            linhasSheet = _removerLinhasPlanilhaPorIds_(planilha, new Set(idsAlvo));
+          }
+        } catch (eSheet) {
+          console.warn('Falha ao remover linhas do espelho Sheets: ' + eSheet.message);
+        }
+
+        // 4. Invalida cache do Kanban
+        invalidarCasosCache_();
+
+        fsRegistrarLog_('SETOR_DESATIVADO_COM_LIMPEZA', setorLimpo,
+          'Setor desativado e ' + apagadosFs + ' gatilho(s) não triado(s) removidos retroativamente (' +
+          falhasFs + ' falhas, ' + linhasSheet + ' linhas Sheets) | Por: ' + __emailSessaoAtual);
+      } else {
+        fsRegistrarLog_('SETOR_DESATIVADO', setorLimpo,
+          'Setor desativado com limpeza retroativa, porém nenhum gatilho não triado foi encontrado | Por: ' + __emailSessaoAtual);
+      }
+    } else if (!ativo) {
+      fsRegistrarLog_('SETOR_DESATIVADO', setorLimpo,
+        'Setor desativado (gatilhos existentes preservados) | Por: ' + __emailSessaoAtual);
+    } else {
+      fsRegistrarLog_('SETOR_ATIVADO', setorLimpo,
+        'Varredura do setor ativada | Por: ' + __emailSessaoAtual);
+    }
+
+    let mensagem = ativo
+      ? ('Varredura do setor "' + setorLimpo + '" ativada.')
+      : (limparRetroativo
+          ? (apagadosFs > 0
+              ? ('Setor "' + setorLimpo + '" desativado. ' + apagadosFs + ' gatilho(s) não triado(s) removido(s) retroativamente.')
+              : ('Setor "' + setorLimpo + '" desativado. Não havia gatilhos não triados pendentes neste setor.'))
+          : ('Setor "' + setorLimpo + '" desativado. Gatilhos existentes foram mantidos.'));
+
+    return {
+      sucesso: true,
+      ativo: !!ativo,
+      setor: setorLimpo,
+      apagados: apagadosFs,
+      falhas: falhasFs,
+      linhasSheet: linhasSheet,
+      mensagem: mensagem
+    };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DIAGNÓSTICO + MESCLAGEM DE SETORES DUPLICADOS
 //
 // Duplicata real (mesmo setor físico, mesmo responsável) só surge quando o
