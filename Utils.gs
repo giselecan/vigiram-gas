@@ -219,6 +219,32 @@ function _padronizarZerosSetor_(s) {
 }
 
 /**
+ * Converte numerais arábicos (1 a 10) para romanos em tokens de setores (ex: "UTI ADULTO 1" -> "UTI ADULTO I").
+ * @param {string} s
+ * @returns {string}
+ */
+function _converterArabicoParaRomanoSetor_(s) {
+  if (!s) return '';
+  const mapa = { '1': 'I', '2': 'II', '3': 'III', '4': 'IV', '5': 'V', '6': 'VI', '7': 'VII', '8': 'VIII', '9': 'IX', '10': 'X' };
+  return String(s).replace(/\b(\d{1,2})\b/g, function (match, n) {
+    return mapa[n] || match;
+  });
+}
+
+/**
+ * Converte numerais romanos (I a X) para arábicos em tokens de setores (ex: "UTI ADULTO I" -> "UTI ADULTO 1").
+ * @param {string} s
+ * @returns {string}
+ */
+function _converterRomanoParaArabicoSetor_(s) {
+  if (!s) return '';
+  const mapa = { 'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5', 'VI': '6', 'VII': '7', 'VIII': '8', 'IX': '9', 'X': '10' };
+  return String(s).replace(/\b(X|IX|VIII|VII|VI|V|IV|III|II|I)\b/g, function (match, r) {
+    return mapa[r] || match;
+  });
+}
+
+/**
  * Dicionário de abreviações e termos hospitalares comuns no Brasil.
  */
 const _ABREVIACOES_HOSPITALARES_ = {

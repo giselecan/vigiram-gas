@@ -759,3 +759,33 @@ function EXECUTAR_NORMALIZACAO_GATILHOS_CASOS_() {
   }
   return normalizarCasosAntigosDePontaAPonta(null);
 }
+
+/**
+ * Executa IMEDIATAMENTE a normalização completa de todos os gatilhos, setores UTI Adulto e casos do banco.
+ * Pode ser selecionada e executada diretamente pelo editor do Google Apps Script sem exigir propriedades manuais.
+ */
+function EXECUTAR_NORMALIZACAO_BANCO_COMPLETA_() {
+  Logger.log('=== INICIANDO NORMALIZACAO COMPLETA DO BANCO (GATILHOS, SETORES E CASOS) ===');
+  
+  // 1. Garante os 3 setores de UTI Adulto
+  Logger.log('1. Verificando e cadastrando setores de UTI ADULTO I, II e III...');
+  const resUtis = garantirSetoresUtiAdultoCadastrados(null);
+  Logger.log(`   • Setores UTI Adulto: ${resUtis.criados} criados, ${resUtis.jaExistiam} já existiam.`);
+
+  // 2. Normaliza gatilhos
+  Logger.log('2. Normalizando coleção de gatilhos...');
+  const resGatilhos = normalizarColecaoGatilhos(null);
+  Logger.log(`   • Gatilhos: ${resGatilhos.alterados} alterados de ${resGatilhos.total}.`);
+
+  // 3. Normaliza casos e notificações
+  Logger.log('3. Normalizando todos os casos e notificações do banco...');
+  const resCasos = normalizarCasosAntigosDePontaAPonta(null);
+  Logger.log(`   • Casos/Notificações: ${resCasos.alterados} alterados de ${resCasos.totalCasos} (${resCasos.casosSheetsAtualizados} linhas no Sheets).`);
+
+  Logger.log('=== NORMALIZACAO COMPLETA CONCLUIDA COM SUCESSO ===');
+  return {
+    utis: resUtis,
+    gatilhos: resGatilhos,
+    casos: resCasos
+  };
+}

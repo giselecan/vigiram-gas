@@ -328,8 +328,17 @@ function _mapaSinonimosSetores_() {
  * @returns {string}
  */
 function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
-  const limpo = String(setorBruto || '').trim();
+  let limpo = String(setorBruto || '').trim();
   if (!limpo) return '';
+
+  // Se vier com dot-notation de sistema hospitalar (ex.: "UTI ADULTO II.UTI ADULTO II.09"), isola o setor principal
+  if (limpo.indexOf('.') !== -1) {
+    const partePrefixo = limpo.split('.')[0].trim();
+    if (partePrefixo.length >= 3) {
+      limpo = partePrefixo;
+    }
+  }
+
   const mapa = mapaPreCarregado || _mapaSinonimosSetores_();
   const chave = _normalizarSetorComparacao_(limpo);
 
@@ -343,11 +352,28 @@ function _resolverSetorCanonico_(setorBruto, mapaPreCarregado) {
     return mapa[chaveSemZeros];
   }
 
+  // 2.1 Conversão de numerais romanos / arábicos (ex: "UTI ADULTO 1" <-> "UTI ADULTO I")
+  const chaveRomana = _normalizarSetorComparacao_(_converterArabicoParaRomanoSetor_(chaveSemZeros));
+  if (mapa[chaveRomana]) {
+    mapa[chave] = mapa[chaveRomana];
+    return mapa[chaveRomana];
+  }
+  const chaveArabica = _normalizarSetorComparacao_(_converterRomanoParaArabicoSetor_(chaveSemZeros));
+  if (mapa[chaveArabica]) {
+    mapa[chave] = mapa[chaveArabica];
+    return mapa[chaveArabica];
+  }
+
   // 3. Expansão de abreviações hospitalares (ex: "UTI AD" -> "UTI ADULTO")
   const chaveExpandida = _normalizarSetorComparacao_(_expandirAbreviacoesSetor_(chaveSemZeros));
   if (mapa[chaveExpandida]) {
     mapa[chave] = mapa[chaveExpandida];
     return mapa[chaveExpandida];
+  }
+  const chaveExpandidaRomana = _normalizarSetorComparacao_(_converterArabicoParaRomanoSetor_(chaveExpandida));
+  if (mapa[chaveExpandidaRomana]) {
+    mapa[chave] = mapa[chaveExpandidaRomana];
+    return mapa[chaveExpandidaRomana];
   }
 
   // 4. Busca inteligente por similaridade contra setores oficiais cadastrados

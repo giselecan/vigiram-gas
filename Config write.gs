@@ -1497,3 +1497,156 @@ function normalizarCasosAntigosDePontaAPonta(token) {
     };
   });
 }
+
+/**
+ * Normaliza todos os medicamentos cadastrados na coleção SCHEMA.FS.GATILHOS.
+ * Remove formas farmacêuticas, dosagens, embalagens e sais do nome principal,
+ * preservando a entrada limpa como princípio ativo canônico.
+ * Também atualiza a aba DB_Antidotos no Sheets.
+ * @param {string} token
+ * @returns {{ sucesso: boolean, alterados: number, total: number, detalhes: Array }}
+ */
+function normalizarColecaoGatilhos(token) {
+  return _comAdmin_(token, function () {
+    const docs = fsListarTodos_(SCHEMA.FS.GATILHOS);
+    if (!docs || !docs.length) {
+      return { sucesso: true, alterados: 0, total: 0, detalhes: [] };
+    }
+
+    const mapaGatilhos = _mapaGatilhosCadastrados_();
+    let alterados = 0;
+    const detalhes = [];
+    const deParaAntidotos = {};
+
+    docs.forEach(function (doc) {
+      const nomeAtual = String(doc.medicamento || doc._id || '').trim();
+      if (!nomeAtual) return;
+
+      const gatilhoInfo = _resolverGatilhoCanonico_(nomeAtual, mapaGatilhos);
+      const nomeCanonico = gatilhoInfo.medicamento;
+
+      if (nomeCanonico && nomeCanonico !== nomeAtual) {
+        alterados++;
+        detalhes.push({ de: nomeAtual, para: nomeCanonico });
+        deParaAntidotos[nomeAtual] = nomeCanonico;
+
+        fsUpdateDoc_(SCHEMA.FS.GATILHOS, doc._id, {
+          medicamento: nomeCanonico,
+          atualizadoEm: new Date()
+        });
+      }
+    });
+
+    if (alterados > 0) {
+      try {
+        const ss = SpreadsheetApp.getActiveSpreadsheet();
+        const aba = ss.getSheetByName(SCHEMA.ABAS.ANTIDOTOS);
+        if (aba) {
+          const uLinha = aba.getLastRow();
+          if (uLinha >= 2) {
+            const range = aba.getRange(2, 1, uLinha - 1, 1);
+            const vals = range.getValues();
+            let mudou = false;
+            for (let i = 0; i < vals.length; i++) {
+              const val = String(vals[i][0] || '').trim();
+              if (deParaAntidotos[val]) {
+                vals[i][0] = deParaAntidotos[val];
+                mudou = true;
+              }
+            }
+            if (mudou) {
+              comTrava_(function () { range.setValues(vals); });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('normalizarColecaoGatilhos: erro ao atualizar Sheets — ' + e.message);
+      }
+      invalidarConfig();
+    }
+
+    return {
+      sucesso: true,
+      alterados: alterados,
+      total: docs.length,
+      detalhes: detalhes
+    };
+  });
+}
+
+/**
+ * Garante que os 3 setores de UTI Adulto (I, II e III) e seus sinônimos
+ * estejam devidamente cadastrados na coleção SCHEMA.FS.SETORES.
+ * @param {string} token
+ * @returns {{ criados: number, jaExistiam: number }}
+ */
+function garantirSetoresUtiAdultoCadastrados(token) {
+  return _comAdmin_(token, function () {
+    const docs = fsListarTodos_(SCHEMA.FS.SETORES);
+    const setoresExistentes = new Set(docs.map(function (d) {
+      return _normalizarSetorComparacao_(d.setor);
+    }));
+
+    const utisParaGarantir = [
+      {
+        setor: 'UTI ADULTO I',
+        sinonimos: ['UTI ADULTO 1', 'UTI AD 1', 'UTI AD I', 'UTI ADULTO 01']
+      },
+      {
+        setor: 'UTI ADULTO II',
+        sinonimos: ['UTI ADULTO 2', 'UTI AD 2', 'UTI AD II', 'UTI ADULTO 02']
+      },
+      {
+        setor: 'UTI ADULTO III',
+        sinonimos: ['UTI ADULTO 3', 'UTI AD 3', 'UTI AD III', 'UTI ADULTO 03']
+      }
+    ];
+
+    let criados = 0;
+    let jaExistiam = 0;
+
+    utisParaGarantir.forEach(function (u) {
+      const chaveOficial = _normalizarSetorComparacao_(u.setor);
+      if (setoresExistentes.has(chaveOficial)) {
+        jaExistiam++;
+      } else {
+        const idDoc = _idDocSetor_(u.setor, 'sistema@hospital.local');
+        fsSetDoc_(SCHEMA.FS.SETORES, idDoc, {
+          setor: u.setor,
+          ativo: true,
+          farmaceuticoResponsavel: 'Farmacêutico Responsável',
+          emailResponsavel: '',
+          sinonimos: u.sinonimos,
+          criadoEm: new Date()
+        });
+        criados++;
+      }
+    });
+
+    if (criados > 0) invalidarConfig();
+    return { criados: criados, jaExistiam: jaExistiam };
+  });
+}
+
+/**
+ * Executa a normalização integral de ponta a ponta:
+ * 1. Garante os 3 setores de UTI ADULTO (I, II, III) no catálogo de setores.
+ * 2. Normaliza a coleção SCHEMA.FS.GATILHOS (e aba DB_Antidotos).
+ * 3. Normaliza todos os casos e notificações em SCHEMA.FS.CASOS (e aba DB_Casos_RAM).
+ * @param {string} token
+ */
+function normalizarBancoCompleto(token) {
+  return _comAdmin_(token, function () {
+    const resUtis = garantirSetoresUtiAdultoCadastrados(token);
+    const resGatilhos = normalizarColecaoGatilhos(token);
+    const resCasos = normalizarCasosAntigosDePontaAPonta(token);
+
+    return {
+      sucesso: true,
+      mensagem: 'Normalização integral concluída com sucesso! ' + resCasos.alterados + ' caso(s) normalizado(s), ' + resGatilhos.alterados + ' gatilho(s) canônico(s) ajustado(s), e setores de UTI Adulto configurados.',
+      casos: resCasos,
+      gatilhos: resGatilhos,
+      utis: resUtis
+    };
+  });
+}

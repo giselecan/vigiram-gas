@@ -268,6 +268,12 @@ function _renderSecaoGatilhos(area, geracao) {
             <p class="text-xs text-gray-400 mt-0.5">Medicamentos monitorados pelo ETL. Alterações refletem na próxima execução do pipeline.</p>
           </div>
           <div class="flex items-center gap-2 flex-wrap">
+            <button onclick="_cfgNormalizarBancoCompleto(this)"
+                    class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #059669 !important; color: #ffffff !important;"
+                    title="Normaliza todos os gatilhos, cadastra as 3 UTIs Adulto (I, II, III) e padroniza retroativamente todos os casos e notificações do banco">
+              <i class="fas fa-check-double"></i> Normalizar Banco Completo
+            </button>
             <button onclick="_cfgMapearSetoresGatilhos(this)"
                     class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #2563eb !important; color: #ffffff !important;"
@@ -1078,6 +1084,12 @@ function _renderSecaoSetores(area, geracao) {
             <i class="fas fa-hospital text-teal-600"></i> Setores e Responsáveis
           </h2>
           <div class="flex items-center gap-2 flex-wrap">
+            <button onclick="_cfgNormalizarBancoCompleto(this)"
+                    class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
+                    style="background-color: #059669 !important; color: #ffffff !important;"
+                    title="Normaliza todos os gatilhos, cadastra as 3 UTIs Adulto (I, II, III) e padroniza retroativamente todos os casos e notificações do banco">
+              <i class="fas fa-check-double"></i> Normalizar Banco Completo
+            </button>
             <button onclick="_cfgMapearSetoresGatilhos(this)"
                     class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #2563eb !important; color: #ffffff !important;"
@@ -1701,6 +1713,26 @@ function _cfgConfirmarHarmonizacaoGeral(grupos) {
       mostrarToast('Erro ao harmonizar setores: ' + err.message, 'erro');
     })
     .executarHarmonizacaoGeralSetores(plano, tokenSessao);
+}
+
+function _cfgNormalizarBancoCompleto(btn) {
+  if (!confirm('Deseja iniciar a Normalização Completa do Banco de Dados?\n\nEsta operação irá:\n1. Padronizar todos os nomes de gatilhos (removendo dosagens/formas/sais do princípio ativo).\n2. Garantir o cadastro individual das 3 UTIs Adulto (I, II e III) e seus sinônimos.\n3. Normalizar retroativamente todos os casos e notificações existentes (Firestore e Planilha).\n\nDeseja continuar?')) {
+    return;
+  }
+  _iniciarCarregando(btn);
+  google.script.run
+    .withSuccessHandler(res => {
+      _pararCarregando(btn);
+      mostrarToast(res.mensagem || 'Normalização concluída com sucesso!', 'sucesso');
+      invalidarConfigCache();
+      if (typeof carregarCasos === 'function') carregarCasos();
+      _abrirSecaoTopo('configuracoes', 'setores');
+    })
+    .withFailureHandler(err => {
+      _pararCarregando(btn);
+      mostrarToast('Erro na normalização completa: ' + err.message, 'erro');
+    })
+    .normalizarBancoCompleto(tokenSessao);
 }
 
 // ─────────────────────────────────────────────────────────
