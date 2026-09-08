@@ -763,11 +763,34 @@ function EXECUTAR_PADRONIZACAO_TOTAL_SETORES_DRY_RUN_() {
   });
   Logger.log(`   • Usuários que teriam lista de setores padronizada: ${usuariosComAcento}`);
 
-  // 3. Casos SCHEMA.FS.CASOS
+  // 3. Novos setores a auto-cadastrar a partir dos casos
   garantirSetoresUtiCadastrados(null);
   const mapaSinonimos = _mapaSinonimosSetores_();
   const todosCasos    = fsListarTodos_(SCHEMA.FS.CASOS);
-  Logger.log('\n3. Analisando Casos no Sistema (' + todosCasos.length + ' casos)...');
+  Logger.log('\n3. Identificando setores novos nos casos para auto-cadastro no catálogo...');
+  const cadastradosChaves = {};
+  docsSetores.forEach(function (d) {
+    const s = _padronizarNomeSetor_(d.setor);
+    if (s) cadastradosChaves[_normalizarSetorComparacao_(s)] = true;
+  });
+  const novosSetores = [];
+  todosCasos.forEach(function (c) {
+    [c.setor, c.unidade_setor, c.setorRelatorioOriginal].forEach(function (bruto) {
+      const s = _padronizarNomeSetor_(bruto);
+      if (s && s !== 'N/I' && s !== 'NA') {
+        const chave = _normalizarSetorComparacao_(s);
+        if (!cadastradosChaves[chave]) {
+          cadastradosChaves[chave] = true;
+          novosSetores.push(s);
+          Logger.log(`   [NOVO SETOR IDENTIFICADO] "${s}" (presente no caso ${c.id})`);
+        }
+      }
+    });
+  });
+  Logger.log(`   • Novos setores que serão auto-cadastrados: ${novosSetores.length}`);
+
+  // 4. Casos SCHEMA.FS.CASOS
+  Logger.log('\n4. Analisando Casos no Sistema (' + todosCasos.length + ' casos)...');
   let casosParaAlterar = 0;
 
   todosCasos.forEach(function (c) {

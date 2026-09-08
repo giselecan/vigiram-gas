@@ -268,18 +268,6 @@ function _renderSecaoGatilhos(area, geracao) {
             <p class="text-xs text-gray-400 mt-0.5">Medicamentos monitorados pelo ETL. Alterações refletem na próxima execução do pipeline.</p>
           </div>
           <div class="flex items-center gap-2 flex-wrap">
-            <button onclick="_cfgMapearSetoresGatilhos(this)"
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
-                    style="background-color: #2563eb !important; color: #ffffff !important;"
-                    title="Mapeia todos os setores que já receberam gatilhos na Busca Ativa e associa por similaridade">
-              <i class="fas fa-sync-alt"></i> Mapear Setores dos Gatilhos
-            </button>
-            <button onclick="_cfgHarmonizarSetoresGeral(this)"
-                    class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
-                    style="background-color: #9333ea !important; color: #ffffff !important;"
-                    title="Harmoniza e padroniza os nomes de setores com grafias divergentes em todo o sistema">
-              <i class="fas fa-layer-group"></i> Harmonizar Setores
-            </button>
             <button onclick="_abrirSecaoTopo('configuracoes', 'setores')"
                     class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #4f46e5 !important; color: #ffffff !important;"
@@ -1081,31 +1069,14 @@ function _renderSecaoSetores(area, geracao) {
             <button onclick="_cfgNormalizarSetoresBanco(this)"
                     class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #059669 !important; color: #ffffff !important;"
-                    title="Normaliza exclusivamente os setores dos casos com base nos setores cadastrados, considerando UTI I, II, III e IV">
-              <i class="fas fa-check-double"></i> Normalizar Setores
+                    title="Padroniza nomes de setores sem acento, cadastra novos setores encontrados nos casos e sincroniza com a planilha">
+              <i class="fas fa-check-double"></i> Normalizar e Cadastrar Setores
             </button>
             <button onclick="_cfgSincronizarSetoresRelatorioSaidas(this)"
                     class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
                     style="background-color: #4f46e5 !important; color: #ffffff !important;"
                     title="Varre os relatórios de saídas do Drive a partir de 01/09 para corrigir os setores dos casos diretamente a partir da coluna SETOR original da dispensação">
               <i class="fas fa-file-invoice"></i> Varrer Relatório Saídas (Drive)
-            </button>
-            <button onclick="_cfgMapearSetoresGatilhos(this)"
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
-                    style="background-color: #2563eb !important; color: #ffffff !important;"
-                    title="Mapeia setores dos gatilhos e associa por similaridade aos setores cadastrados">
-              <i class="fas fa-sync-alt"></i> Mapear dos Gatilhos
-            </button>
-            <button onclick="_cfgHarmonizarSetoresGeral(this)"
-                    class="bg-purple-600 hover:bg-purple-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
-                    style="background-color: #9333ea !important; color: #ffffff !important;"
-                    title="Varre todo o sistema (Casos, Usuários e Setores) para padronizar nomes de setores com grafias divergentes">
-              <i class="fas fa-layer-group"></i> Harmonizar Nomes de Setores
-            </button>
-            <button onclick="_cfgVerificarSetoresDuplicados(this)"
-                    class="bg-amber-500 hover:bg-amber-600 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
-                    style="background-color: #f59e0b !important; color: #ffffff !important;">
-              <i class="fas fa-clone"></i> Verificar Duplicados
             </button>
             <button onclick="_cfgAdicionarSetor()"
                     class="bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2 rounded-lg text-sm flex items-center gap-2 transition shadow-sm"
@@ -1716,14 +1687,14 @@ function _cfgConfirmarHarmonizacaoGeral(grupos) {
 }
 
 function _cfgNormalizarSetoresBanco(btn) {
-  if (!confirm('Deseja iniciar a Normalização de Setores do Banco de Dados?\n\nEsta operação é aplicada EXCLUSIVAMENTE AOS SETORES, tendo como base os setores cadastrados:\n1. Garante o cadastro e sinônimos das UTIs (UTI I, II, III e IV).\n2. Normaliza retroativamente o campo SETOR de todos os casos e notificações (Firestore e Planilha), sem alterar medicamentos.\n\nDeseja continuar?')) {
+  if (!confirm('Deseja iniciar a Normalização e Cadastro de Setores do Banco de Dados?\n\nEsta operação:\n1. Padroniza todos os nomes de setores para grafia sem acento e em caixa alta (ex: CLINICA MEDICA).\n2. Cadastra automaticamente no catálogo de setores novos setores identificados nos casos e notificações.\n3. Normaliza retroativamente o campo SETOR em todos os casos e usuários (Firestore e Planilha).\n4. Garante o cadastro e sinônimos das UTIs (UTI I, II, III e IV).\n\nDeseja continuar?')) {
     return;
   }
   _iniciarCarregando(btn);
   google.script.run
     .withSuccessHandler(res => {
       _pararCarregando(btn);
-      mostrarToast(res.mensagem || 'Normalização de setores concluída com sucesso!', 'sucesso');
+      mostrarToast(res.mensagem || 'Normalização e cadastro de setores concluídos com sucesso!', 'sucesso');
       invalidarConfigCache();
       if (typeof carregarCasos === 'function') carregarCasos();
       _abrirSecaoTopo('configuracoes', 'setores');

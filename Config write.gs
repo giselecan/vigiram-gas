@@ -1811,11 +1811,86 @@ function padronizarSetoresUsuariosFirestore_() {
 }
 
 /**
+ * Identifica todos os setores presentes nos casos cadastrados (SCHEMA.FS.CASOS)
+ * que ainda não constam no catálogo oficial de setores (SCHEMA.FS.SETORES), e cadastra-os
+ * automaticamente com nomenclatura 100% padronizada sem acento.
+ * @returns {{ totalCasosAnalisados: number, novosCadastrados: number, setoresCadastrados: string[] }}
+ */
+function cadastrarNovosSetoresDosCasosFirestore_() {
+  const docsSetores = fsListarTodos_(SCHEMA.FS.SETORES);
+  const todosCasos = fsListarTodos_(SCHEMA.FS.CASOS);
+
+  const cadastradosChaves = {};
+  docsSetores.forEach(function (d) {
+    const s = _padronizarNomeSetor_(d.setor);
+    if (!s) return;
+    cadastradosChaves[_normalizarSetorComparacao_(s)] = true;
+    if (Array.isArray(d.sinonimos)) {
+      d.sinonimos.forEach(function (sin) {
+        const sSin = _padronizarNomeSetor_(sin);
+        if (sSin) cadastradosChaves[_normalizarSetorComparacao_(sSin)] = true;
+      });
+    }
+  });
+
+  const novosParaInserir = [];
+  const nomesInseridos = [];
+
+  todosCasos.forEach(function (c) {
+    // Coleta possíveis campos onde o setor possa estar informado
+    const candidatosSetor = [
+      c.setor,
+      c.unidade_setor,
+      c.setorRelatorioOriginal
+    ];
+
+    candidatosSetor.forEach(function (bruto) {
+      const s = String(bruto || '').trim();
+      if (!s) return;
+
+      const padrao = _padronizarNomeSetor_(s);
+      if (!padrao || padrao === 'N/I' || padrao === 'NA') return;
+
+      const chave = _normalizarSetorComparacao_(padrao);
+      if (!cadastradosChaves[chave]) {
+        cadastradosChaves[chave] = true; // evita duplicatas no lote
+        const id = _idDocSetor_(padrao, '');
+        novosParaInserir.push({
+          id: id,
+          dados: {
+            setor:                   padrao,
+            ativo:                   true, // Já nasce ativo para varredura e visualização
+            farmaceuticoResponsavel: String(c.farmaceutico || '').trim().toUpperCase(),
+            emailResponsavel:        '',
+            sinonimos:               (s.toUpperCase() !== padrao) ? [s.toUpperCase()] : [],
+            criadoEm:                new Date()
+          }
+        });
+        nomesInseridos.push(padrao);
+      }
+    });
+  });
+
+  if (novosParaInserir.length > 0) {
+    fsBatchSet_(SCHEMA.FS.SETORES, novosParaInserir);
+    fsRegistrarLog_('NOVOS_SETORES_AUTOCADASTRADOS', 'setores',
+      novosParaInserir.length + ' novo(s) setor(es) auto-cadastrados a partir dos casos: ' + nomesInseridos.join(', '));
+  }
+
+  return {
+    totalCasosAnalisados: todosCasos.length,
+    novosCadastrados: novosParaInserir.length,
+    setoresCadastrados: nomesInseridos
+  };
+}
+
+/**
  * Executa a normalização universal de setores em TODO o sistema:
  * 1. Padroniza e consolida o catálogo de setores (SCHEMA.FS.SETORES), removendo acentos e corrigindo IDs e duplicatas.
  * 2. Garante os setores de UTI (I, II, III e IV) e seus sinônimos no catálogo.
- * 3. Padroniza os setores vinculados a usuários (SCHEMA.FS.USUARIOS).
- * 4. Normaliza o campo setor de todos os casos e notificações em SCHEMA.FS.CASOS e DB_Casos_RAM (Sheets).
+ * 3. Auto-cadastra quaisquer novos setores encontrados nos casos que ainda não estejam em SCHEMA.FS.SETORES.
+ * 4. Padroniza os setores vinculados a usuários (SCHEMA.FS.USUARIOS).
+ * 5. Normaliza o campo setor de todos os casos e notificações em SCHEMA.FS.CASOS e DB_Casos_RAM (Sheets).
  * @param {string} token
  */
 function normalizarSetoresBanco(token) {
@@ -1826,19 +1901,26 @@ function normalizarSetoresBanco(token) {
     // 2. Setores essenciais de UTI (I, II, III e IV)
     const resUtis = garantirSetoresUtiCadastrados(token);
 
-    // 3. Usuários (SCHEMA.FS.USUARIOS)
+    // 3. Cadastra automaticamente novos setores encontrados nos casos que ainda não estavam no catálogo
+    const resNovos = cadastrarNovosSetoresDosCasosFirestore_();
+
+    // 4. Usuários (SCHEMA.FS.USUARIOS)
     const resUsuarios = padronizarSetoresUsuariosFirestore_();
 
-    // 4. Casos (SCHEMA.FS.CASOS e Sheets)
+    // 5. Casos (SCHEMA.FS.CASOS e Sheets)
     const resCasos = normalizarSetoresCasosDePontaAPonta(token);
 
     invalidarConfig();
     invalidarCasosCache_();
 
-    const msg = 'Normalização e padronização total de setores concluída com sucesso! ' +
-      resCatalogo.alterados + ' setor(es) padronizado(s) no catálogo (' + resCatalogo.removidosAntigos + ' duplicata(s)/IDs legados removidos), ' +
-      resUsuarios.usuariosAlterados + ' usuário(s) atualizado(s), ' +
-      resCasos.alterados + ' caso(s) normalizado(s) no Firestore e ' + resCasos.casosSheetsAtualizados + ' linhas na Planilha. UTIs I a IV asseguradas.';
+    let msg = 'Normalização e padronização total de setores concluída com sucesso! ' +
+      resCatalogo.alterados + ' setor(es) padronizado(s) no catálogo (' + resCatalogo.removidosAntigos + ' duplicata(s)/IDs legados removidos). ';
+
+    if (resNovos.novosCadastrados > 0) {
+      msg += resNovos.novosCadastrados + ' novo(s) setor(es) cadastrado(s) automaticamente (' + resNovos.setoresCadastrados.join(', ') + '). ';
+    }
+
+    msg += resCasos.alterados + ' caso(s) normalizado(s) no Firestore e ' + resCasos.casosSheetsAtualizados + ' linhas na Planilha. UTIs I a IV asseguradas.';
 
     fsRegistrarLog_('PADRONIZACAO_TOTAL_SETORES', 'setores', msg);
 
@@ -1847,6 +1929,7 @@ function normalizarSetoresBanco(token) {
       mensagem: msg,
       catalogo: resCatalogo,
       utis: resUtis,
+      novosSetores: resNovos,
       usuarios: resUsuarios,
       casos: resCasos
     };
