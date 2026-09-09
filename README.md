@@ -191,6 +191,7 @@ arquivos `.gs`/`.html`/`.json` de runtime.
 | `VIGIRAM_OWNER_EMAIL` | Opcional — CSV de e-mails autorizados a rodar o sistema (ver `verificarAmbienteAutorizado_()` em `Security.gs`). Sem essa propriedade, usa a lista padrão no código. |
 | `VIGIRAM_AUTHORIZED_SCRIPT_ID` | Opcional — trava a execução a um único `scriptId` (ver `travarAmbienteAtual_()` em `Security.gs`). **Nunca copiar de outro projeto** — deve ser o scriptId do próprio projeto, definido rodando `travarAmbienteAtual_()` nele mesmo. |
 | `VIGIRAM_URL_MIGRACAO` | Opcional — usada só numa implantação **antiga** que deve parar de servir o app e mostrar uma tela de transição redirecionando para a implantação **nova** (ver `plano_migracao_conta_pessoal.md`, Fase 5/6, e `obterUrlMigracao_()`/`paginaRedirecionamentoMigracao_()` em `Router.gs`). Definir com a URL `.../exec` da implantação nova. `action=getTriggers` (robô ETL) continua funcionando normalmente mesmo com essa property definida. Deixar em branco/ausente em qualquer implantação que deva continuar servindo o app normalmente (inclusive a implantação nova). |
+| `EMAIL_REMETENTE_ALIAS` | Opcional — ver `_camposRemetenteEmail_()` em `Utils.gs` e `plano_migracao_conta_pessoal.md`, Seção 2 (Opção A). Só faz efeito se o alias também estiver configurado em Gmail → Contas e importação → "Enviar e-mail como", na conta que efetivamente roda o script. Sem essa property, remetente = conta que fez o deploy (comportamento de sempre). |
 
 ### Dependências do manifesto (`appsscript.json`)
 

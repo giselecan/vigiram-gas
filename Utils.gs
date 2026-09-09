@@ -36,6 +36,22 @@ function getSheet_(nomeAba) {
   return getPlanilha_().getSheetByName(nomeAba);
 }
 
+/**
+ * Alias opcional de remetente dos e-mails de alerta (ver
+ * plano_migracao_conta_pessoal.md, Seção 2, Opção A — "Enviar como"). Sem a
+ * Script Property EMAIL_REMETENTE_ALIAS, os e-mails saem normalmente como a
+ * conta que fez o deploy (comportamento de sempre). Com ela configurada — e
+ * o alias correspondente configurado em Gmail → Contas e importação →
+ * "Enviar e-mail como" na conta que roda o script — os e-mails passam a
+ * sair com esse remetente (ex.: mantém a aparência institucional mesmo com
+ * o VigiRAM rodando na conta pessoal). Não afeta a cota de envio: quem
+ * processa o envio continua sendo sempre a conta que executa o script.
+ */
+function _camposRemetenteEmail_() {
+  const alias = PropertiesService.getScriptProperties().getProperty('EMAIL_REMETENTE_ALIAS');
+  return alias ? { name: 'VigiRAM', from: alias } : { name: 'VigiRAM' };
+}
+
 /** Retorna a aba pelo nome, lançando erro claro se não existir. */
 function getSheetOuErro_(nomeAba) {
   const aba = getSheet_(nomeAba);

@@ -431,9 +431,9 @@ function _alertarDescarteFinal_(item, mensagemErro) {
     const destino = (cfg.geral && cfg.geral.EMAIL_COORDENACAO) || 'farmacia.clinica@hospital.com';
     const idRef = item.idCaso || (item.payload && item.payload.idCaso) || '-';
 
-    MailApp.sendEmail({
+    MailApp.sendEmail(Object.assign({
       to: destino,
-      name: 'VigiRAM',
+    }, _camposRemetenteEmail_(), {
       subject: '[VigiRAM] Falha permanente no espelho Sheets (' + item.tipo + ')',
       body:
         'Um item foi descartado da fila de retry do Mirror após ' + MIRROR_RETRY_MAX + ' tentativas.\n\n' +
@@ -442,7 +442,7 @@ function _alertarDescarteFinal_(item, mensagemErro) {
         'Erro: ' + mensagemErro + '\n\n' +
         'Ação recomendada: verificar manualmente se o caso está correto no Firestore ' +
         'e, se necessário, rodar sincronizarTodosOsCasosParaSheets(false) para reconciliar.'
-    });
+    }));
   } catch (e) {
     console.error('Mirror: falha ao enviar alerta de descarte final: ' + e.message);
   }
