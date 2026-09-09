@@ -8,6 +8,33 @@
  */
 
 /**
+ * Migração de conta (ver plano_migracao_conta_pessoal.md, Fase 5/6):
+ * enquanto a implantação institucional (antiga) continuar publicada como
+ * plano B, ela deve parar de servir o app e passar a mostrar uma tela de
+ * transição redirecionando para a nova implantação (conta pessoal).
+ *
+ * Ativar: Script Properties do projeto ANTIGO → definir VIGIRAM_URL_MIGRACAO
+ * com a URL .../exec da implantação NOVA. Enquanto a property não existir,
+ * doGet funciona exatamente como antes (sem efeito nenhum na implantação
+ * nova/atual).
+ */
+const _PROP_URL_MIGRACAO = 'VIGIRAM_URL_MIGRACAO';
+
+function obterUrlMigracao_() {
+  return PropertiesService.getScriptProperties().getProperty(_PROP_URL_MIGRACAO) || '';
+}
+
+function paginaRedirecionamentoMigracao_(novaUrl) {
+  const template = HtmlService.createTemplateFromFile('redirecionamento');
+  template.novaUrl = novaUrl;
+  const html = template.evaluate();
+  html.setTitle('VigiRAM mudou de endereço');
+  html.addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  aplicarFavicon_(html); // Favicon.gs
+  return html;
+}
+
+/**
  * POST — envio de dados do PowerShell (ETL). Autenticado por HMAC.
  */
 function doPost(e) {
@@ -46,6 +73,15 @@ function doPost(e) {
 function doGet(e) {
   try {
     verificarAmbienteAutorizado_();
+
+    // 0. Migração de conta: implantação antiga com VIGIRAM_URL_MIGRACAO
+    // configurada mostra a tela de transição em vez do app. O robô
+    // PowerShell (action=getTriggers) fica de fora para não quebrar o ETL
+    // caso ainda não tenha sido reapontado para a URL nova (Fase 5).
+    const urlMigracao = obterUrlMigracao_();
+    if (urlMigracao && !(e.parameter && e.parameter.action === 'getTriggers')) {
+      return paginaRedirecionamentoMigracao_(urlMigracao);
+    }
 
     // 1. Rota do robô PowerShell
     if (e.parameter && e.parameter.action === 'getTriggers') {
