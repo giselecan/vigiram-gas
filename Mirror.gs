@@ -431,9 +431,8 @@ function _alertarDescarteFinal_(item, mensagemErro) {
     const destino = (cfg.geral && cfg.geral.EMAIL_COORDENACAO) || 'farmacia.clinica@hospital.com';
     const idRef = item.idCaso || (item.payload && item.payload.idCaso) || '-';
 
-    MailApp.sendEmail({
+    _enviarEmail_({
       to: destino,
-      name: 'VigiRAM',
       subject: '[VigiRAM] Falha permanente no espelho Sheets (' + item.tipo + ')',
       body:
         'Um item foi descartado da fila de retry do Mirror após ' + MIRROR_RETRY_MAX + ' tentativas.\n\n' +

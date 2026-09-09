@@ -226,7 +226,7 @@ function enviarRelatorioDiarioGatilhos() {
     const { assunto, html } = _montarEmailRelatorioDiarioAgrupado_(setoresPorEmail[email], LINK_SISTEMA);
 
     try {
-      MailApp.sendEmail({ to: email, name: 'VigiRAM', subject: assunto, htmlBody: html });
+      _enviarEmail_({ to: email, subject: assunto, htmlBody: html });
     } catch (e) {
       console.error('Falha ao enviar relatório diário para ' + email + ': ' + e.message);
     }
@@ -328,7 +328,7 @@ function _enviarNovaDemandaEspontanea_(caso) {
 
   const { assunto, html } = _montarEmailNovaDemandaEspontanea_(caso, LINK_SISTEMA);
 
-  MailApp.sendEmail({ to: emailsDestino.join(','), name: 'VigiRAM', subject: assunto, htmlBody: html });
+  _enviarEmail_({ to: emailsDestino.join(','), subject: assunto, htmlBody: html });
 }
 
 /** Monta assunto + HTML do alerta de nova Demanda Espontânea — usado no envio real e no e-mail de teste. */
@@ -405,7 +405,7 @@ function _enviarInvestigacaoConcluida_(caso) {
   const LINK_FORM = _resolverLinkSistema_(cfg) + '?page=form';
   const { assunto, html } = _montarEmailInvestigacaoConcluida_(caso, LINK_FORM);
 
-  MailApp.sendEmail({ to: emailNotificador, name: 'VigiRAM', subject: assunto, htmlBody: html });
+  _enviarEmail_({ to: emailNotificador, subject: assunto, htmlBody: html });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -602,7 +602,7 @@ function enviarEmailTeste(tipo, destinatario, token) {
       throw new Error('Tipo de e-mail de teste inválido: ' + tipo);
     }
 
-    MailApp.sendEmail({ to: email, name: 'VigiRAM', subject: '[TESTE] ' + montado.assunto, htmlBody: montado.html });
+    _enviarEmail_({ to: email, subject: '[TESTE] ' + montado.assunto, htmlBody: montado.html });
     return { sucesso: true, mensagem: 'E-mail de teste enviado para ' + email + '.' };
   });
 }

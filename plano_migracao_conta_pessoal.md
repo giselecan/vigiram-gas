@@ -188,12 +188,39 @@ ou acima do limite → só a Opção B resolve de verdade; a Opção A sozinha
 apenas maquia o problema e o sistema continuará falhando silenciosamente
 acima da cota.
 
-✅ **Decidido:** volume medido está bem abaixo de 100 e-mails/dia. O envio
-segue **direto pela conta pessoal**, sem alias e sem relay institucional —
-`MailApp.sendEmail()` continua como está em `Notify.gs`/`Mirror.gs`, sem
-nenhuma mudança de código. Reavaliar essa decisão só se o volume crescer
-de forma relevante no futuro (ex.: mais setores/unidades usando o
-sistema).
+✅ **Decidido (revisado 2x):** volume medido está bem abaixo de 100
+e-mails/dia (risco de cota, item 1.1, não se aplica). Mesmo assim, optou-se
+por manter o **remetente visível institucional** nos e-mails de alerta —
+por preferência, não por cota.
+
+A primeira tentativa foi a **Opção A** (alias "Enviar como" em Gmail, via
+`EMAIL_REMETENTE_ALIAS` — ver `_camposRemetenteEmail_()` em `Utils.gs`).
+Na prática, essa opção esbarrou em dois bloqueios em cadeia na conta
+institucional: **Verificação em duas etapas desativada** (pré-requisito do
+próprio Google pra liberar "Senhas de app") e, mesmo se fosse ativada,
+**nenhum acesso ao Admin Console do Workspace** pra confirmar/liberar a
+política caso a organização bloqueie "Senhas de app" — ou seja, sem
+controle suficiente sobre a conta institucional pra garantir que essa rota
+funcione.
+
+**Decisão final: Opção B** (relay minúsculo e separado, publicado sob a
+conta institucional — `relay-institucional/Relay.gs`) é o mecanismo
+principal, porque não depende de NENHUMA configuração de segurança da
+conta institucional nem de acesso de administrador — só de conseguir criar
+um projeto Apps Script novo (qualquer usuário Workspace normal consegue,
+sem precisar ser admin). `_enviarEmail_()` (`Utils.gs`) tenta esse relay
+primeiro (`RELAY_EMAIL_URL`/`RELAY_EMAIL_SECRET`); se ele não estiver
+configurado ou estiver fora do ar, cai automaticamente para o envio direto
+pela conta pessoal — com o alias cosmético de `EMAIL_REMETENTE_ALIAS`
+(Opção A) como fallback de aparência, se algum dia o alias vier a ser
+configurado. Nenhuma das duas rotas depende da outra: dá pra usar só o
+relay, só o alias, as duas, ou nenhuma (comportamento original).
+
+⚠️ Diferença importante de Opção A: no relay, o e-mail sai **de fato** da
+conta institucional (roda `MailApp.sendEmail()` publicado como
+`USER_DEPLOYING` = a conta institucional) — por isso não consome a cota da
+conta pessoal, ao contrário do alias, cuja cota consumida é sempre da
+conta que efetivamente executa o script.
 
 ---
 
@@ -381,14 +408,49 @@ com cada passo validado antes do próximo:
 ### Fase 6 — Estabilização e desligamento do acesso institucional
 1. Observar por 3–7 dias: e-mails chegando, ETL inserindo casos,
    espelho de auditoria gravando, XML E2B gerando corretamente.
-2. Só depois desse período: revogar `clasp login` institucional e — o
-   passo mais delicado — **arquivar (não excluir)** a
-   implantação/projeto Apps Script institucional (mantém histórico e
-   serve de restauração de emergência). O Firestore/GCP institucional
-   **não é tocado** neste passo — continua exatamente como está, já que
-   permanece fora do escopo desta migração.
-3. Nunca excluir a planilha de auditoria antiga nem o projeto Apps
-   Script antigo — são registro histórico/LGPD.
+2. Só depois desse período: revogar `clasp login` institucional.
+
+✅ **Decisão revisada (motivo: reduzir risco de apropriação da ideia/código
+do sistema por quem ainda tem acesso admin institucional):** ao contrário
+da recomendação padrão de só arquivar, a decisão aqui é **excluir apenas o
+"coração" do sistema** — o projeto Apps Script institucional em si (todo o
+código-fonte: `Router.gs`, `Cases.gs`, `Notify.gs`, o painel, o Kanban, a
+lógica de negócio — é isso que constitui a "ideia" do VigiRAM). Isso é
+diferente de apagar dados:
+
+| O que é | Fica ou apaga? | Por quê |
+|---|---|---|
+| Projeto Apps Script institucional (o código) | **Apagar** | É o "coração"/a IP do sistema — não deve continuar acessível/copiável por quem tem acesso admin institucional. |
+| Firestore/projeto GCP institucional (os dados clínicos) | **Fica, intocado** | Já é um recurso GCP separado do Apps Script — apagar o projeto Apps Script **não apaga** o Firestore. Continua fora do escopo desta migração (decisão da introdução deste documento). |
+| Planilha-espelho de auditoria (Sheets) | **Fica, intocada** | É um arquivo do Drive, também separado do projeto Apps Script — apagar o Apps Script **não apaga** a planilha. Preservar por exigência de histórico/LGPD. |
+
+Antes de excluir o projeto Apps Script institucional, confirmar (ordem
+importa — irreversível depois de esvaziar a lixeira):
+1. Este repositório Git já tem o código mais atual (`git log` / GitHub) —
+   serve como cópia de segurança do "coração" fora do Apps Script.
+2. A implantação nova (pessoal) está estável há pelo menos os 3–7 dias do
+   passo 1 acima.
+3. `FIRESTORE_PROJECT_ID` / `FIRESTORE_CLIENT_EMAIL` / `FIRESTORE_PRIVATE_KEY`
+   e `PLANILHA_ID` já estão configurados e testados no projeto **novo** —
+   depois de excluir o antigo, ele é a **única** porta de entrada para
+   esses dados.
+4. Nenhum trigger instalável ativo restando no projeto antigo (Fase 5,
+   passo 2) — um projeto com trigger ativo sendo excluído pode deixar
+   execuções pendentes/erros no log, sem efeito prático mas evita ruído.
+
+Como excluir (no navegador, com a conta institucional — não há como fazer
+isso por código/API neste chat):
+- No editor do projeto antigo → menu (⋮) → **Remover projeto**; ou pelo
+  Google Drive → localizar o arquivo do projeto Apps Script → tecla Delete.
+- Fica na **Lixeira do Drive** por ~30 dias antes de excluir em definitivo
+  — é a única janela de recuperação caso perceba falta de algo depois.
+
+⚠️ Isso só neutraliza acesso **futuro** ao código a partir de agora — não
+desfaz cópias que alguém já possa ter feito enquanto o projeto existiu
+(isso é irrecuperável por qualquer meio técnico). Continua valendo alinhar
+esse desligamento com a coordenação/DPO do hospital (item 1.2/7.3) antes
+de excluir, já que mexe com quem tem acesso administrativo a um sistema
+que processa dados de saúde.
 
 ---
 
