@@ -15,3 +15,4 @@ obfuscate.js
 .git/**
 **/*.md
 favicon.png
+relay-institucional/**

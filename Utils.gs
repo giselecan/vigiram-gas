@@ -52,6 +52,57 @@ function _camposRemetenteEmail_() {
   return alias ? { name: 'VigiRAM', from: alias } : { name: 'VigiRAM' };
 }
 
+/**
+ * Envia um e-mail de alerta do VigiRAM — ÚNICO ponto de envio usado por
+ * Notify.gs/Mirror.gs (nenhum deles chama MailApp.sendEmail() diretamente).
+ *
+ * Opção B do plano de migração (ver plano_migracao_conta_pessoal.md, Seção
+ * 2, e relay-institucional/Relay.gs): se RELAY_EMAIL_URL e
+ * RELAY_EMAIL_SECRET estiverem configurados nas Script Properties, tenta
+ * primeiro esse relay — um projeto Apps Script minúsculo e separado,
+ * publicado sob a conta institucional, que só recebe o pedido assinado por
+ * HMAC e dispara o e-mail rodando como institucional de verdade (sem
+ * alias, sem senha de app). Se o relay não estiver configurado, ou
+ * falhar/não responder, cai para o envio direto por MailApp.sendEmail()
+ * (mesma lógica de degradação graciosa já usada em getConfig_() —
+ * Config.gs), aplicando o alias cosmético opcional de
+ * _camposRemetenteEmail_() se houver.
+ *
+ * @param {{to:string, subject:string, htmlBody?:string, body?:string}} campos
+ */
+function _enviarEmail_(campos) {
+  const props = PropertiesService.getScriptProperties();
+  const relayUrl    = props.getProperty('RELAY_EMAIL_URL');
+  const relaySecret = props.getProperty('RELAY_EMAIL_SECRET');
+
+  if (relayUrl && relaySecret) {
+    try {
+      const corpo = JSON.stringify(campos);
+      const ts    = Math.floor(Date.now() / 1000);
+      const sig   = hmacHex_(ts + '\n' + corpo, relaySecret); // Security.gs
+
+      const url = relayUrl + (relayUrl.indexOf('?') === -1 ? '?' : '&') +
+        'ts=' + encodeURIComponent(ts) + '&sig=' + encodeURIComponent(sig);
+
+      const resposta = UrlFetchApp.fetch(url, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: corpo,
+        muteHttpExceptions: true
+      });
+
+      if (resposta.getResponseCode() === 200) return;
+      console.warn('_enviarEmail_: relay institucional retornou HTTP ' +
+        resposta.getResponseCode() + ' — caindo para envio direto. Corpo: ' +
+        resposta.getContentText());
+    } catch (e) {
+      console.warn('_enviarEmail_: relay institucional indisponível (' + e.message + ') — caindo para envio direto.');
+    }
+  }
+
+  MailApp.sendEmail(Object.assign({}, campos, _camposRemetenteEmail_()));
+}
+
 /** Retorna a aba pelo nome, lançando erro claro se não existir. */
 function getSheetOuErro_(nomeAba) {
   const aba = getSheet_(nomeAba);

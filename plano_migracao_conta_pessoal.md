@@ -188,18 +188,39 @@ ou acima do limite → só a Opção B resolve de verdade; a Opção A sozinha
 apenas maquia o problema e o sistema continuará falhando silenciosamente
 acima da cota.
 
-✅ **Decidido (revisado):** volume medido está bem abaixo de 100 e-mails/dia
-(risco de cota, item 1.1, não se aplica). Mesmo assim, optou-se por manter
-o **remetente visível institucional** nos e-mails de alerta — Opção A —,
-por preferência (não por cota). Implementado como Script Property opcional
-`EMAIL_REMETENTE_ALIAS` (ver `_camposRemetenteEmail_()` em `Utils.gs`,
-usada pelos 5 pontos de `MailApp.sendEmail()` em `Notify.gs`/`Mirror.gs`):
-sem a property, comportamento idêntico a antes (remetente = quem fez o
-deploy); com ela configurada — e o alias "Enviar como" também configurado
-em Gmail, conta que roda o script — os e-mails saem com a aparência
-institucional mesmo com o VigiRAM inteiro rodando na conta pessoal.
-⚠️ Continua valendo o aviso original: a cota consumida é sempre da conta
-que executa o script (pessoal); isso é só cosmético, não resolve cota.
+✅ **Decidido (revisado 2x):** volume medido está bem abaixo de 100
+e-mails/dia (risco de cota, item 1.1, não se aplica). Mesmo assim, optou-se
+por manter o **remetente visível institucional** nos e-mails de alerta —
+por preferência, não por cota.
+
+A primeira tentativa foi a **Opção A** (alias "Enviar como" em Gmail, via
+`EMAIL_REMETENTE_ALIAS` — ver `_camposRemetenteEmail_()` em `Utils.gs`).
+Na prática, essa opção esbarrou em dois bloqueios em cadeia na conta
+institucional: **Verificação em duas etapas desativada** (pré-requisito do
+próprio Google pra liberar "Senhas de app") e, mesmo se fosse ativada,
+**nenhum acesso ao Admin Console do Workspace** pra confirmar/liberar a
+política caso a organização bloqueie "Senhas de app" — ou seja, sem
+controle suficiente sobre a conta institucional pra garantir que essa rota
+funcione.
+
+**Decisão final: Opção B** (relay minúsculo e separado, publicado sob a
+conta institucional — `relay-institucional/Relay.gs`) é o mecanismo
+principal, porque não depende de NENHUMA configuração de segurança da
+conta institucional nem de acesso de administrador — só de conseguir criar
+um projeto Apps Script novo (qualquer usuário Workspace normal consegue,
+sem precisar ser admin). `_enviarEmail_()` (`Utils.gs`) tenta esse relay
+primeiro (`RELAY_EMAIL_URL`/`RELAY_EMAIL_SECRET`); se ele não estiver
+configurado ou estiver fora do ar, cai automaticamente para o envio direto
+pela conta pessoal — com o alias cosmético de `EMAIL_REMETENTE_ALIAS`
+(Opção A) como fallback de aparência, se algum dia o alias vier a ser
+configurado. Nenhuma das duas rotas depende da outra: dá pra usar só o
+relay, só o alias, as duas, ou nenhuma (comportamento original).
+
+⚠️ Diferença importante de Opção A: no relay, o e-mail sai **de fato** da
+conta institucional (roda `MailApp.sendEmail()` publicado como
+`USER_DEPLOYING` = a conta institucional) — por isso não consome a cota da
+conta pessoal, ao contrário do alias, cuja cota consumida é sempre da
+conta que efetivamente executa o script.
 
 ---
 
