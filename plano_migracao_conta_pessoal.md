@@ -365,6 +365,18 @@ com cada passo validado antes do próximo:
    agora com dados reais.
 9. Manter a implantação institucional **publicada, mas sem triggers**,
    por alguns dias como plano B (ver Fase 6).
+10. Na implantação institucional (antiga), definir a Script Property
+    `VIGIRAM_URL_MIGRACAO` com a URL `.../exec` da implantação nova
+    (pessoal). A partir daí, quem acessar o link antigo (favoritos,
+    formulário da assistência, e-mails antigos com o link salvo) vê uma
+    tela de transição — "VigiRAM mudou de endereço" — com redirecionamento
+    automático em alguns segundos e um botão manual, em vez do app
+    (`redirecionamento.html` / `Router.gs → paginaRedirecionamentoMigracao_`).
+    O robô ETL (`action=getTriggers`) continua respondendo normalmente
+    nessa mesma implantação enquanto a property estiver definida — só a
+    navegação de pessoas é redirecionada. **Não** definir essa property na
+    implantação nova (deixá-la em branco lá mantém o app funcionando
+    normalmente).
 
 ### Fase 6 — Estabilização e desligamento do acesso institucional
 1. Observar por 3–7 dias: e-mails chegando, ETL inserindo casos,
