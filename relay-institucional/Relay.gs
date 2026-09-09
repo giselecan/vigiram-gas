@@ -23,11 +23,17 @@
  * COMO IMPLANTAR (uma vez só)
  * ═══════════════════════════════════════════════════════════════════════
  *  1. script.google.com, logado na conta INSTITUCIONAL → Novo projeto.
- *  2. Cole o conteúdo deste arquivo nele (substitua o Code.gs padrão).
- *  3. No editor: selecione a função `gerarSegredoRelay_`, execute, copie o
+ *  2. Cole o conteúdo deste arquivo nele (substitua o Código.gs padrão).
+ *  3. No editor: selecione a função `gerarSegredoRelay`, execute, copie o
  *     valor do log.
- *  4. Selecione `definirSegredoRelay_`, cole o valor copiado como argumento
- *     (ex.: definirSegredoRelay_('valor-copiado')) e execute.
+ *  4. NÃO dá pra passar argumento direto pelo botão Executar. Cole no final
+ *     do arquivo uma função temporária só pra essa chamada:
+ *       function configurarSegredoAgora() {
+ *         definirSegredoRelay('cole-aqui-o-valor-copiado-no-passo-3');
+ *       }
+ *     Salve, selecione `configurarSegredoAgora` no menu de funções, execute,
+ *     confira no log "Segredo do relay definido.", e SÓ DEPOIS apague essa
+ *     função temporária do arquivo (não deixar o segredo salvo em texto).
  *  5. Implantar → Nova implantação → Tipo: App da Web.
  *       Executar como: Eu (a conta institucional)
  *       Quem tem acesso: Qualquer pessoa
@@ -54,20 +60,20 @@ const _RELAY_JANELA_SEG  = 300; // ±5 min, mesma janela anti-replay do ETL
 // VigiRAM (é exatamente por isso que é seguro apagar o projeto principal
 // sem afetar o envio de e-mail).
 // ─────────────────────────────────────────────────────────────────────────────
-function _bytesParaHexRelay_(bytes) {
+function bytesParaHexRelay(bytes) {
   return bytes.map(function (b) {
     return ('0' + (b & 0xFF).toString(16)).slice(-2);
   }).join('');
 }
 
-function _hmacHexRelay_(mensagem, segredo) {
+function hmacHexRelay(mensagem, segredo) {
   const raw = Utilities.computeHmacSha256Signature(
     String(mensagem), String(segredo), Utilities.Charset.UTF_8
   );
-  return _bytesParaHexRelay_(raw);
+  return bytesParaHexRelay(raw);
 }
 
-function _comparacaoSeguraRelay_(a, b) {
+function comparacaoSeguraRelay(a, b) {
   a = String(a); b = String(b);
   if (a.length !== b.length) return false;
   let r = 0;
@@ -78,19 +84,24 @@ function _comparacaoSeguraRelay_(a, b) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SEGREDO — mesmo padrão do ETL_SECRET (Security.gs) do projeto principal.
 // ─────────────────────────────────────────────────────────────────────────────
-function getSegredoRelay_() {
+function getSegredoRelay() {
   return PropertiesService.getScriptProperties().getProperty(_PROP_RELAY_SECRET) || '';
 }
 
 /** Rode UMA vez no editor pra ver o segredo sugerido (copie do log). */
-function gerarSegredoRelay_() {
+function gerarSegredoRelay() {
   const s = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
   Logger.log('RELAY_EMAIL_SECRET sugerido: %s', s);
   return s;
 }
 
-/** Rode UMA vez no editor, colando o valor gerado por gerarSegredoRelay_(). */
-function definirSegredoRelay_(segredo) {
+/**
+ * Grava o segredo. NÃO dá pra rodar direto pelo botão Executar (ele não
+ * aceita argumento) — crie uma função temporária que chama esta aqui com o
+ * valor colado, execute a temporária, confirme o log, e apague a
+ * temporária depois. Ver instruções no topo do arquivo.
+ */
+function definirSegredoRelay(segredo) {
   if (!segredo || String(segredo).length < 24) {
     throw new Error('Use um segredo com ao menos 24 caracteres aleatórios.');
   }
@@ -110,7 +121,7 @@ function definirSegredoRelay_(segredo) {
  */
 function doPost(e) {
   try {
-    const segredo = getSegredoRelay_();
+    const segredo = getSegredoRelay();
     if (!segredo) throw new Error('RELAY_EMAIL_SECRET não configurado neste projeto.');
 
     const ts  = String((e.parameter && e.parameter.ts)  || '');
@@ -124,8 +135,8 @@ function doPost(e) {
     }
 
     const corpo = (e.postData && e.postData.contents) ? e.postData.contents : '';
-    const esperado = _hmacHexRelay_(ts + '\n' + corpo, segredo);
-    if (!_comparacaoSeguraRelay_(esperado, sig)) throw new Error('Assinatura inválida.');
+    const esperado = hmacHexRelay(ts + '\n' + corpo, segredo);
+    if (!comparacaoSeguraRelay(esperado, sig)) throw new Error('Assinatura inválida.');
 
     const dados = JSON.parse(corpo);
     if (!dados.to || !dados.subject || (!dados.htmlBody && !dados.body)) {
