@@ -13,6 +13,29 @@ inteiramente como um **Google Apps Script Web App**, sem servidor próprio.
 
 ---
 
+## Três projetos Apps Script, três pastas
+
+Este repositório versiona o código-fonte de **três** projetos Apps Script
+diferentes, publicados sob **duas contas Google** distintas (ver
+[`plano_migracao_conta_pessoal.md`](./plano_migracao_conta_pessoal.md)) —
+cada um numa pasta própria, sem mistura:
+
+| Pasta | Conta que publica | O que é |
+|---|---|---|
+| [`pessoal/`](./pessoal) | Pessoal | O VigiRAM de verdade — todo o código de negócio (Kanban, casos, investigação, painel Admin, XML E2B etc.). É o único projeto com lógica clínica. |
+| [`institucional/relay-email/`](./institucional/relay-email) | Institucional | Projeto minúsculo e separado — só recebe um pedido assinado por HMAC e dispara `MailApp.sendEmail()` como institucional. Zero lógica de negócio. |
+| [`institucional/redirect-minimo/`](./institucional/redirect-minimo) | Institucional | Substitui o antigo projeto institucional "cheio": só mostra a tela de redirecionamento pra quem ainda usa o link antigo. Zero lógica de negócio. |
+
+Cada pasta é o conteúdo **completo** de um projeto Apps Script — cole a
+pasta inteira (ou o conteúdo dela) no editor do projeto correspondente. Não
+existe um único `clasp push` pra tudo: cada pasta é implantada
+separadamente, na conta certa. Instruções detalhadas de cada uma estão no
+comentário de topo do respectivo arquivo principal
+(`institucional/relay-email/Relay.gs`,
+`institucional/redirect-minimo/Redirect.gs`).
+
+---
+
 ## Sumário
 
 - [Visão geral](#visão-geral)
@@ -116,6 +139,9 @@ decidir comportamento (ver cabeçalho de `Mirror.gs`).
 
 ## Estrutura do repositório
 
+Todos os arquivos abaixo ficam dentro de [`pessoal/`](./pessoal) (ver
+seção anterior).
+
 | Arquivo | Responsabilidade |
 |---|---|
 | `Router.gs` | Pontos de entrada HTTP (`doGet`/`doPost`) — só roteamento. |
@@ -152,7 +178,7 @@ decidir comportamento (ver cabeçalho de `Mirror.gs`).
 
 Documentação complementar:
 
-- [`README-build-css.md`](./README-build-css.md) — como regerar o CSS pré-compilado.
+- [`pessoal/README-build-css.md`](./pessoal/README-build-css.md) — como regerar o CSS pré-compilado.
 - [`roadmap_melhoria_xml_e2b.md`](./roadmap_melhoria_xml_e2b.md) — roadmap detalhado da exportação E2B(R3)/VigiMed.
 - `auditoria_qa_datas_tipagem_2026-07-13.md` — auditoria de QA (tipagem/datas) do projeto.
 
@@ -166,18 +192,23 @@ Documentação complementar:
 
 ## Configuração e deploy
 
-Pré-requisitos: [clasp](https://github.com/google/clasp) instalado e autenticado, com acesso ao projeto Apps Script.
+Pré-requisitos: [clasp](https://github.com/google/clasp) instalado e autenticado, com acesso ao projeto Apps Script pessoal.
 
 ```bash
+cd pessoal
 clasp login          # uma vez por máquina
 clasp pull           # traz o estado atual do projeto Apps Script
 # ... editar código ...
-clasp push            # envia o repositório para o Apps Script
+clasp push            # envia pessoal/ para o Apps Script
 ```
 
-`.claspignore` mantém fora do push tudo que é só tooling de dev (Node,
-Tailwind, `.md`, `favicon.png` etc.) — o Apps Script recebe apenas os
-arquivos `.gs`/`.html`/`.json` de runtime.
+`clasp push`/`clasp pull` só fazem sentido dentro de `pessoal/` — é o
+único dos três projetos (ver seção "Três projetos Apps Script, três
+pastas") com histórico de uso via clasp; os dois projetos institucionais
+são pequenos o bastante pra colar direto no editor do navegador.
+`pessoal/.claspignore` mantém fora do push tudo que é só tooling de dev
+(Node, Tailwind, `.md`, `favicon.png` etc.) — o Apps Script recebe apenas
+os arquivos `.gs`/`.html`/`.json` de runtime.
 
 ### Script Properties necessárias (Apps Script → Configurações do projeto)
 
@@ -190,8 +221,8 @@ arquivos `.gs`/`.html`/`.json` de runtime.
 | `PLANILHA_ID` | Opcional — ID da planilha de auditoria/espelho (Mirror.gs, ver `getPlanilha_()` em `Utils.gs`). Só é necessária num projeto **standalone** (não vinculado a nenhuma planilha, ex.: criado via `clasp create`) — nesse caso a planilha precisa estar compartilhada como Editor com a conta que executa o script. Num projeto **container-bound** (vinculado a uma planilha), pode deixar em branco: cai no fallback `SpreadsheetApp.getActiveSpreadsheet()`. |
 | `VIGIRAM_OWNER_EMAIL` | Opcional — CSV de e-mails autorizados a rodar o sistema (ver `verificarAmbienteAutorizado_()` em `Security.gs`). Sem essa propriedade, usa a lista padrão no código. |
 | `VIGIRAM_AUTHORIZED_SCRIPT_ID` | Opcional — trava a execução a um único `scriptId` (ver `travarAmbienteAtual_()` em `Security.gs`). **Nunca copiar de outro projeto** — deve ser o scriptId do próprio projeto, definido rodando `travarAmbienteAtual_()` nele mesmo. |
-| `VIGIRAM_URL_MIGRACAO` | Opcional — usada só numa implantação **antiga** que deve parar de servir o app e mostrar uma tela de transição redirecionando para a implantação **nova** (ver `plano_migracao_conta_pessoal.md`, Fase 5/6, e `obterUrlMigracao_()`/`paginaRedirecionamentoMigracao_()` em `Router.gs`). Definir com a URL `.../exec` da implantação nova. `action=getTriggers` (robô ETL) continua funcionando normalmente mesmo com essa property definida. Deixar em branco/ausente em qualquer implantação que deva continuar servindo o app normalmente (inclusive a implantação nova). |
-| `RELAY_EMAIL_URL`, `RELAY_EMAIL_SECRET` | Opcionais — ver `_enviarEmail_()` em `Utils.gs` e `relay-institucional/Relay.gs` (Opção B, `plano_migracao_conta_pessoal.md` Seção 2). Quando ambas configuradas, os e-mails de alerta são enviados via o relay institucional (projeto Apps Script separado, publicado na conta institucional) — remetente genuinamente institucional, sem alias/senha de app. Sem elas (ou se o relay falhar), cai para envio direto. |
+| `VIGIRAM_URL_MIGRACAO` | Opcional — usada só numa implantação **antiga** que deve parar de servir o app e mostrar uma tela de transição redirecionando para a implantação **nova** (ver `plano_migracao_conta_pessoal.md`, Fase 5/6, e `obterUrlMigracao_()`/`paginaRedirecionamentoMigracao_()` em `Router.gs`). Definir com a URL `.../exec` da implantação nova. `action=getTriggers` (robô ETL) continua funcionando normalmente mesmo com essa property definida. Deixar em branco/ausente em qualquer implantação que deva continuar servindo o app normalmente (inclusive a implantação nova). Mesma property reaproveitada pelo pacote `institucional/redirect-minimo/`, que substitui o projeto institucional inteiro por só essa tela. |
+| `RELAY_EMAIL_URL`, `RELAY_EMAIL_SECRET` | Opcionais — ver `_enviarEmail_()` em `Utils.gs` e `institucional/relay-email/Relay.gs` (Opção B, `plano_migracao_conta_pessoal.md` Seção 2). Quando ambas configuradas, os e-mails de alerta são enviados via o relay institucional (projeto Apps Script separado, publicado na conta institucional) — remetente genuinamente institucional, sem alias/senha de app. Sem elas (ou se o relay falhar), cai para envio direto. |
 | `EMAIL_REMETENTE_ALIAS` | Opcional — ver `_camposRemetenteEmail_()` em `Utils.gs` e `plano_migracao_conta_pessoal.md`, Seção 2 (Opção A). Usada só como fallback cosmético quando o relay (`RELAY_EMAIL_URL`/`RELAY_EMAIL_SECRET`) não está configurado ou está fora do ar — só faz efeito se o alias também estiver configurado em Gmail → Contas e importação → "Enviar e-mail como", na conta que efetivamente roda o script. Sem nenhuma das duas, remetente = conta que fez o deploy (comportamento de sempre). |
 
 ### Dependências do manifesto (`appsscript.json`)
@@ -207,12 +238,13 @@ precisa rodar nada. Só é necessário regerar o build ao adicionar/alterar
 classes Tailwind:
 
 ```bash
+cd pessoal
 npm install
 npm run build:css     # gera tw-output.css a partir dos .html
 ```
 
 Detalhes completos, incluindo onde colar o resultado, em
-[`README-build-css.md`](./README-build-css.md).
+[`pessoal/README-build-css.md`](./pessoal/README-build-css.md).
 
 ## Segurança
 

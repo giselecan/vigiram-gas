@@ -204,7 +204,7 @@ controle suficiente sobre a conta institucional pra garantir que essa rota
 funcione.
 
 **Decisão final: Opção B** (relay minúsculo e separado, publicado sob a
-conta institucional — `relay-institucional/Relay.gs`) é o mecanismo
+conta institucional — `institucional/relay-email/Relay.gs`) é o mecanismo
 principal, porque não depende de NENHUMA configuração de segurança da
 conta institucional nem de acesso de administrador — só de conseguir criar
 um projeto Apps Script novo (qualquer usuário Workspace normal consegue,
@@ -451,6 +451,32 @@ desfaz cópias que alguém já possa ter feito enquanto o projeto existiu
 esse desligamento com a coordenação/DPO do hospital (item 1.2/7.3) antes
 de excluir, já que mexe com quem tem acesso administrativo a um sistema
 que processa dados de saúde.
+
+### Alternativa mais simples (adotada): esvaziar em vez de excluir
+
+✅ **Decisão final:** em vez de excluir o projeto Apps Script institucional
+de vez (item acima), a rota adotada é mais simples e igualmente segura pra
+proteção da IP: **substituir todo o conteúdo do projeto institucional só
+pela tela de redirecionamento**, sem nenhuma lógica de negócio — ver
+`institucional/redirect-minimo/` neste repositório (`Redirect.gs` +
+`redirecionamento.html` + instruções completas no comentário de topo do
+`Redirect.gs`).
+
+Vantagens sobre excluir o projeto:
+- **Link antigo continua funcionando pra sempre** (favoritos, e-mails
+  salvos com o link antigo) — não existe janela de 30 dias na Lixeira
+  depois da qual o link quebra de vez.
+- **Mesmo resultado de proteção de IP**: depois de colar esse pacote
+  mínimo, não sobra NENHUM `.gs`/`.html` de negócio no projeto
+  institucional (nada de `Cases.gs`, `Admin.gs`, senha, regra clínica) —
+  só as 2 linhas de `doGet()` que leem `VIGIRAM_URL_MIGRACAO` e servem o
+  redirecionamento.
+- **Reversível/sem risco de exclusão acidental** — ao contrário de excluir
+  o projeto, não depende de confiar na Lixeira do Drive.
+
+Reaproveita a mesma Script Property `VIGIRAM_URL_MIGRACAO` já configurada
+na Fase 5, passo 10 — nenhuma reconfiguração necessária além de colar os
+2 arquivos e publicar uma nova versão da implantação.
 
 ---
 
