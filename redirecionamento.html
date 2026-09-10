@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>VigiRAM mudou de endereço</title>
+  <title>VigiRAM</title>
   <meta name="robots" content="noindex, nofollow">
   <style>
     * { box-sizing: border-box; }
@@ -15,109 +15,43 @@
     }
     body {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 16px;
+      gap: 14px;
+      color: #f0fdfa;
     }
-    .card {
-      background: #ffffff;
-      border-radius: 16px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
-      max-width: 440px;
-      width: 100%;
-      overflow: hidden;
-      text-align: center;
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 3px solid rgba(255,255,255,0.25);
+      border-top-color: #f0fdfa;
+      animation: girar 0.8s linear infinite;
     }
-    .card-header {
-      background: #0f766e; /* teal-700 */
-      color: #fff;
-      padding: 28px 24px 22px;
-    }
-    .shield {
-      width: 44px;
-      height: 44px;
-      margin: 0 auto 10px;
-      display: block;
-    }
-    .card-header h1 {
+    @keyframes girar { to { transform: rotate(360deg); } }
+    p {
       margin: 0;
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-    }
-    .card-header p {
-      margin: 4px 0 0;
-      font-size: 13px;
-      color: #99f6e4; /* teal-200 */
-    }
-    .card-body {
-      padding: 28px 24px 30px;
-    }
-    .card-body p {
-      margin: 0 0 20px;
       font-size: 14px;
-      line-height: 1.6;
-      color: #374151; /* gray-700 */
+      letter-spacing: 0.01em;
     }
-    .btn {
-      display: inline-block;
-      width: 100%;
-      background: #0d9488; /* teal-600 */
-      color: #fff;
-      text-decoration: none;
-      font-weight: 700;
-      font-size: 14px;
-      padding: 12px 20px;
-      border-radius: 8px;
-      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
-    }
-    .aviso {
-      margin-top: 16px;
-      font-size: 12px;
-      color: #6b7280; /* gray-500 */
-    }
-    .aviso strong { color: #374151; }
+    a { color: inherit; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div class="card-header">
-      <svg class="shield" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <path d="M12 2L4 5v6.5C4 16.6 7.4 21 12 22c4.6-1 8-5.4 8-10.5V5l-8-3z"
-              fill="#5eead4" stroke="#134e4a" stroke-width="0.5"/>
-        <path d="M9 12l2 2 4-4" stroke="#134e4a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      <h1>VigiRAM mudou de endereço</h1>
-      <p>Farmacovigilância · HRN</p>
-    </div>
-    <div class="card-body">
-      <p>
-        Este link não é mais utilizado.<br>
-        O sistema foi transferido para um novo endereço e você será
-        redirecionado automaticamente em alguns segundos.
-      </p>
-      <a id="linkNovo" class="btn" href="<?= novaUrl ?>" target="_top" rel="noopener">
-        Ir para o novo endereço agora
-      </a>
-      <p class="aviso">
-        Se o redirecionamento automático não funcionar, clique no botão acima
-        e <strong>atualize seus favoritos/atalhos</strong> com o novo link.
-      </p>
-    </div>
-  </div>
+  <div class="spinner" aria-hidden="true"></div>
+  <p>Entrando no VigiRAM…</p>
+  <noscript><a href="<?= novaUrl ?>">Entrar no VigiRAM</a></noscript>
 
   <script>
     (function () {
       var novaUrl = <?!= JSON.stringify(novaUrl) ?>;
       if (!novaUrl) return;
-      setTimeout(function () {
-        try {
-          window.top.location.href = novaUrl;
-        } catch (e) {
-          // Se a navegação automática falhar (ex.: restrição do navegador),
-          // o botão manual acima (target="_top") continua funcionando.
-        }
-      }, 4000);
+      try {
+        window.top.location.replace(novaUrl);
+      } catch (e) {
+        window.top.location.href = novaUrl;
+      }
     })();
   </script>
 </body>
