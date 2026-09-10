@@ -16,3 +16,4 @@ obfuscate.js
 **/*.md
 favicon.png
 relay-institucional/**
+institucional-redirect-minimo/**
