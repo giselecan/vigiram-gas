@@ -15,5 +15,3 @@ obfuscate.js
 .git/**
 **/*.md
 favicon.png
-relay-institucional/**
-institucional-redirect-minimo/**

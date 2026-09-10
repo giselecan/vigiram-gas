@@ -204,7 +204,7 @@ controle suficiente sobre a conta institucional pra garantir que essa rota
 funcione.
 
 **Decisão final: Opção B** (relay minúsculo e separado, publicado sob a
-conta institucional — `relay-institucional/Relay.gs`) é o mecanismo
+conta institucional — `institucional/relay-email/Relay.gs`) é o mecanismo
 principal, porque não depende de NENHUMA configuração de segurança da
 conta institucional nem de acesso de administrador — só de conseguir criar
 um projeto Apps Script novo (qualquer usuário Workspace normal consegue,
@@ -458,7 +458,7 @@ que processa dados de saúde.
 de vez (item acima), a rota adotada é mais simples e igualmente segura pra
 proteção da IP: **substituir todo o conteúdo do projeto institucional só
 pela tela de redirecionamento**, sem nenhuma lógica de negócio — ver
-`institucional-redirect-minimo/` neste repositório (`Redirect.gs` +
+`institucional/redirect-minimo/` neste repositório (`Redirect.gs` +
 `redirecionamento.html` + instruções completas no comentário de topo do
 `Redirect.gs`).
 

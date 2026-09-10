@@ -57,7 +57,7 @@ function _camposRemetenteEmail_() {
  * Notify.gs/Mirror.gs (nenhum deles chama MailApp.sendEmail() diretamente).
  *
  * Opção B do plano de migração (ver plano_migracao_conta_pessoal.md, Seção
- * 2, e relay-institucional/Relay.gs): se RELAY_EMAIL_URL e
+ * 2, e institucional/relay-email/Relay.gs): se RELAY_EMAIL_URL e
  * RELAY_EMAIL_SECRET estiverem configurados nas Script Properties, tenta
  * primeiro esse relay — um projeto Apps Script minúsculo e separado,
  * publicado sob a conta institucional, que só recebe o pedido assinado por
