@@ -18,30 +18,28 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 14px;
-      color: #f0fdfa;
+      gap: 18px;
     }
-    .spinner {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      border: 3px solid rgba(255,255,255,0.25);
-      border-top-color: #f0fdfa;
-      animation: girar 0.8s linear infinite;
+    /* Navegadores bloqueiam redirecionamento automático de dentro do
+       iframe sandbox do Apps Script sem um clique real do usuário
+       (SecurityError: "no user activation"). O JS abaixo tenta o
+       automático primeiro; o botão abaixo é o caminho garantido — um
+       clique real sempre é permitido. */
+    .btn {
+      display: inline-block;
+      background: #0d9488; /* teal-600 */
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 14px 32px;
+      border-radius: 8px;
+      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2);
     }
-    @keyframes girar { to { transform: rotate(360deg); } }
-    p {
-      margin: 0;
-      font-size: 14px;
-      letter-spacing: 0.01em;
-    }
-    a { color: inherit; }
   </style>
 </head>
 <body>
-  <div class="spinner" aria-hidden="true"></div>
-  <p>Entrando no VigiRAM…</p>
-  <noscript><a href="<?= novaUrl ?>">Entrar no VigiRAM</a></noscript>
+  <a class="btn" id="link" href="<?= novaUrl ?>" target="_top" rel="noopener">Entrar</a>
 
   <script>
     (function () {
@@ -50,7 +48,8 @@
       try {
         window.top.location.replace(novaUrl);
       } catch (e) {
-        window.top.location.href = novaUrl;
+        // Bloqueado pelo navegador (sem gesto do usuário) — o botão
+        // acima (id="link") continua funcionando a um clique.
       }
     })();
   </script>
