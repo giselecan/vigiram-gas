@@ -36,11 +36,23 @@
  * ═══════════════════════════════════════════════════════════════════════
  */
 
+// Mesmo favicon do projeto pessoal (ver Favicon.gs lá) — hospedado como
+// raw do GitHub, funciona igual em qualquer projeto Apps Script que
+// aponte pra essa URL, independente de qual conta publica.
+const FAVICON_URL = 'https://raw.githubusercontent.com/giselecan/vigiram-gas/main/pessoal/Design_sem_nome__5_-removebg-preview.png';
+
 function doGet() {
   const novaUrl = PropertiesService.getScriptProperties().getProperty('VIGIRAM_URL_MIGRACAO') || '';
   const template = HtmlService.createTemplateFromFile('redirecionamento');
   template.novaUrl = novaUrl;
-  return template.evaluate()
+  const html = template.evaluate()
     .setTitle('VigiRAM')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+
+  try {
+    return html.setFaviconUrl(FAVICON_URL);
+  } catch (e) {
+    console.warn('doGet: favicon ignorado — ' + e.message);
+    return html; // degrada sem ícone custom, mas a página carrega
+  }
 }

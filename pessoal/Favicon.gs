@@ -24,7 +24,7 @@
 // /uc?id=, lh3...), que não são hotlink oficial e podem devolver uma página
 // de aviso em vez da imagem quando o pedido não parece navegação normal
 // (é exatamente o caso do favicon).
-const FAVICON_URL = 'https://raw.githubusercontent.com/giselecan/vigiram-gas/main/Design_sem_nome__5_-removebg-preview.png';
+const FAVICON_URL = 'https://raw.githubusercontent.com/giselecan/vigiram-gas/main/pessoal/Design_sem_nome__5_-removebg-preview.png';
 
 /**
  * Aplica o favicon num HtmlOutput servido pelo doGet, de forma SEGURA:
