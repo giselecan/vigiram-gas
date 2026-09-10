@@ -66,7 +66,7 @@ function getSegredoETL_() {
 // ou zerar a allowlist de pastas. O "_" as remove do google.script.run mas elas
 // continuam executáveis manualmente pelo editor do Apps Script (que é o único
 // uso pretendido). Ao rodar, selecione a função no editor e clique em Executar.
-function verSegredoETL_() {
+function verSegredoETL() {
   const s = getSegredoETL_();
   Logger.log(s ? ('OK, length=' + s.length) : 'VAZIO — ETL_SECRET não está salvo');
   return s;
@@ -74,9 +74,12 @@ function verSegredoETL_() {
 
 /**
  * Define o segredo do ETL. Rode UMA vez no editor e guarde o MESMO valor no
- * PowerShell. Ex.: definirSegredoETL_('cole-aqui-um-valor-aleatorio-longo')
+ * PowerShell. O botão Executar não aceita argumento direto — crie uma
+ * função temporária que chama esta aqui com o valor colado (ex.:
+ * function configurarSegredoETLAgora() { definirSegredoETL('valor-copiado'); }),
+ * rode a temporária, confirme (sem erro = sucesso) e apague a temporária.
  */
-function definirSegredoETL_(segredo) {
+function definirSegredoETL(segredo) {
   if (!segredo || String(segredo).length < 24) {
     throw new Error('Use um segredo com ao menos 24 caracteres aleatórios.');
   }
@@ -85,7 +88,7 @@ function definirSegredoETL_(segredo) {
 }
 
 /** Gera um segredo aleatório forte (copie para o PowerShell). */
-function gerarSegredoETL_() {
+function gerarSegredoETL() {
   const s = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
   Logger.log('ETL_SECRET sugerido: %s', s);
   return s;
@@ -148,11 +151,13 @@ function validarFolderPermitido_(folderId) {
 // código-fonte (e, por consequência, no backup .md exportado). Segredo em
 // código = segredo comprometido: rotacione IMEDIATAMENTE.
 // Procedimento de rotação:
-//   1. No editor: rode gerarSegredoETL_() e copie o valor do log.
-//   2. No editor: rode definirSegredoETL_('<valor copiado>') digitando na
-//      janela de execução — NUNCA salve o valor em arquivo .gs.
+//   1. No editor: rode gerarSegredoETL() e copie o valor do log.
+//   2. No editor: crie uma função temporária que chama
+//      definirSegredoETL('<valor copiado>') e rode ela — o botão Executar
+//      não aceita argumento direto. NUNCA salve o valor em arquivo .gs
+//      além dessa função temporária, que deve ser apagada em seguida.
 //   3. Atualize o mesmo valor no Pipeline_v3.ps1 (lado PowerShell).
-//   4. Confirme com verSegredoETL_() (loga apenas o tamanho, nunca o valor).
+//   4. Confirme com verSegredoETL() (loga apenas o tamanho, nunca o valor).
 
 const _PROP_ENV_EMAIL     = 'VIGIRAM_OWNER_EMAIL';
 const _PROP_ENV_SCRIPT_ID = 'VIGIRAM_AUTHORIZED_SCRIPT_ID';

@@ -262,8 +262,8 @@ conta que efetivamente executa o script.
 4. Nas Script Properties do **novo** projeto, cadastrar os mesmos valores
    `FIRESTORE_*` levantados na Fase 0, item 3 — aponta para o **mesmo**
    banco Firestore (nenhuma duplicação/migração de dados de caso).
-5. `ETL_SECRET`: gerar um **novo** segredo com `gerarSegredoETL_()` +
-   `definirSegredoETL_()` no novo projeto (não reaproveitar o segredo
+5. `ETL_SECRET`: gerar um **novo** segredo com `gerarSegredoETL()` +
+   `definirSegredoETL()` no novo projeto (não reaproveitar o segredo
    institucional — é um bom momento de rotação, já que o segredo antigo
    nunca deve ter saído do ambiente antigo).
 6. Ajustar `VIGIRAM_OWNER_EMAIL` (se necessário) para conter só
