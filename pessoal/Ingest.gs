@@ -54,7 +54,21 @@ function handleUploadRaw(e) {
   validarFolderPermitido_(folderId); // Security.gs — lança se não autorizado
 
   const fileContent = Utilities.base64Decode(e.postData.contents);
-  const folder = DriveApp.getFolderById(folderId);
+  let folder;
+  try {
+    folder = DriveApp.getFolderById(folderId);
+  } catch (erro) {
+    // DriveApp.getFolderById lança um erro genérico do Google ("Nenhum item
+    // com o ID fornecido foi encontrado...") tanto para ID inexistente quanto
+    // para falta de permissão — a causa mais comum aqui é a conta que roda o
+    // script não ter acesso de Editor à pasta (ex.: durante a migração de
+    // conta, ver plano_migracao_conta_pessoal.md, Seção "Drive/ETL_FOLDER_IDS").
+    throw new Error(
+      `Pasta do Drive (folderId=${folderId}) inacessível para a conta que executa o script. ` +
+      'Verifique se o ID está correto e se a pasta está compartilhada como Editor com essa conta ' +
+      '(confira também a Script Property ETL_FOLDER_IDS). Erro original: ' + erro.message
+    );
+  }
   const blob = Utilities.newBlob(fileContent, MimeType.CSV, fileName);
   folder.createFile(blob);
 
