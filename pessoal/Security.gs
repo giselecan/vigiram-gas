@@ -141,8 +141,12 @@ function validarFolderPermitido_(folderId) {
     return true;
   }
   const permitidos = csv.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-  if (permitidos.indexOf(String(folderId).trim()) === -1) {
-    throw new Error('folderId não autorizado.');
+  const idRecebido = String(folderId).trim();
+  if (permitidos.indexOf(idRecebido) === -1) {
+    // Inclui o ID recebido (não a allowlist inteira) no erro — suficiente
+    // para comparar com ETL_FOLDER_IDS sem expor os outros IDs permitidos
+    // em todo log de rejeição.
+    throw new Error(`folderId não autorizado: "${idRecebido}" não está em ETL_FOLDER_IDS.`);
   }
   return true;
 }
