@@ -7,7 +7,8 @@
     "build:css": "tailwindcss -c tailwind.config.js -i tw-input.css -o tw-output.css --minify",
     "build:icons": "node build-icons.js",
     "obfuscate": "node obfuscate.js",
-    "obfuscate:restore": "node obfuscate.js --restore"
+    "obfuscate:restore": "node obfuscate.js --restore",
+    "hash:inpi": "node scripts/gerar-hash-inpi.js"
   },
   "devDependencies": {
     "@fortawesome/fontawesome-free": "^6.5.0",
